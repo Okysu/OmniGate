@@ -199,6 +199,9 @@ billing: {
 - 随附示例 `community.billing-examples`：`weighted_tokens`（输出 token × 4 + 输入 token，输入含缓存）、`per_image`（图片张数）。
 - 测试用例：`{ "meter": "weighted_tokens", "usage": {...}, "billingCtx": {...}, "expect": { "output": "325" } }`，输出为十进制字符串。
 
+> **Hook 时限**：`transformRequest` / `signRequest` 每个 Hook 基础 50 ms，按请求大小放宽——每 64 KiB 再加 20 ms，单个 Hook 最多 2 s。
+> 这样合法的大请求（如长上下文、图片 base64）不会因为宿主繁忙而超时、被计为插件违规。
+
 ## 6. 宿主 API（全局 `og`）
 
 | API | 说明 | 所需权限 |

@@ -243,3 +243,19 @@ func TestHooksAcceptLargeBodies(t *testing.T) {
 		t.Fatalf("large body through hooks: %v (output %d bytes)", err, len(res.Output))
 	}
 }
+
+func TestHookBudgetScalesWithBodySize(t *testing.T) {
+	base := 50 * time.Millisecond
+	for n, want := range map[int]time.Duration{
+		0:         base,
+		1:         base + 20*time.Millisecond,
+		64 << 10:  base + 20*time.Millisecond,
+		1 << 20:   base + 320*time.Millisecond,
+		32 << 20:  2 * time.Second, // capped
+		200 << 20: 2 * time.Second,
+	} {
+		if got := engine.HookBudget(base, n); got != want {
+			t.Errorf("HookBudget(%d) = %v, want %v", n, got, want)
+		}
+	}
+}

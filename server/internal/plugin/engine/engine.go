@@ -299,11 +299,17 @@ func (p *Program) Call(ctx context.Context, env *Env, path []string, timeout tim
 // to req in one runtime. Secret handles in returned header values are replaced
 // with plaintext before returning.
 func (p *Program) RunHooks(ctx context.Context, env *Env, hooks []string, req any, timeoutEach time.Duration) (*Result, error) {
-	return p.run(ctx, env, timeoutEach*time.Duration(max(len(hooks), 1)), func(ent *vmEntry, cs *callState) (json.RawMessage, error) {
-		cur, err := json.Marshal(req)
-		if err != nil {
-			return nil, err
-		}
+	in, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	// Each hook copies the whole request in and out of the runtime, so its
+	// budget grows with the body size: a large (legitimate) request must not
+	// time out — and count as a plugin violation — just because the host is
+	// busy (security audit: users could otherwise get plugins auto-disabled).
+	each := HookBudget(timeoutEach, len(in))
+	return p.run(ctx, env, each*time.Duration(max(len(hooks), 1)), func(ent *vmEntry, cs *callState) (json.RawMessage, error) {
+		cur := in
 		// Hooks return the whole request, so the output budget scales with the
 		// input (the data plane accepts up to 32 MiB bodies) instead of the
 		// capability output limit.
@@ -318,6 +324,14 @@ func (p *Program) RunHooks(ctx context.Context, env *Env, hooks []string, req an
 		return cs.substituteHeaders(cur)
 	})
 }
+
+// HookBudget is the time one hook may take for an input of n bytes: base plus
+// 20ms per started 64 KiB, at most hookBudgetMax.
+func HookBudget(base time.Duration, n int) time.Duration {
+	return min(base+time.Duration((n+64<<10-1)/(64<<10))*20*time.Millisecond, max(base, hookBudgetMax))
+}
+
+const hookBudgetMax = 2 * time.Second
 
 // acquireWait bounds how long a call waits for a free execution slot; the
 // call's own timeout only starts once it has a runtime.
