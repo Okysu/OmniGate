@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildSchedule,
+  describeDayRange,
   describeDays,
+  discountLabel,
   describePeriod,
   emptyRow,
   everyDay,
@@ -14,6 +16,7 @@ import {
   SCHEDULE_PRESETS,
   scheduleFormFrom,
   scheduleNote,
+  schedulePeriodRows,
   timelineByDay,
   toggleDay,
   validateSchedule,
@@ -152,5 +155,38 @@ describe('current period note', () => {
     expect(n?.text).toBe('分时价格：每天 00:30–08:30 ×0.5（Asia/Shanghai）')
     expect(scheduleNote({ schedule: [] })).toBeNull()
     expect(scheduleNote(null)).toBeNull()
+  })
+})
+
+describe('schedule popover rows', () => {
+  it('merges consecutive weekdays, Monday first', () => {
+    expect(describeDayRange([])).toBe('每天')
+    expect(describeDayRange([0, 1, 2, 3, 4, 5, 6])).toBe('每天')
+    expect(describeDayRange([1, 2, 3, 4, 5])).toBe('周一至周五')
+    expect(describeDayRange([0, 6])).toBe('周六、周日')
+    expect(describeDayRange([1, 2, 3])).toBe('周一至周三')
+    expect(describeDayRange([1, 2])).toBe('周一、周二')
+    expect(describeDayRange([3])).toBe('周三')
+    expect(describeDayRange([0, 1, 3, 4, 5])).toBe('周一、周三至周五、周日')
+    expect(describeDayRange([5, 6, 0])).toBe('周五至周日')
+  })
+  it('renders multipliers as discount labels', () => {
+    expect(discountLabel('0.5')).toEqual({ label: '5 折', tone: 'discount' })
+    expect(discountLabel('0.85')).toEqual({ label: '8.5 折', tone: 'discount' })
+    expect(discountLabel('0.80')).toEqual({ label: '8 折', tone: 'discount' })
+    expect(discountLabel('0.05')).toEqual({ label: '0.5 折', tone: 'discount' })
+    expect(discountLabel('0')).toEqual({ label: '免费', tone: 'free' })
+    expect(discountLabel('1')).toEqual({ label: '原价', tone: 'list' })
+    expect(discountLabel('1.50')).toEqual({ label: '×1.5', tone: 'markup' })
+    expect(discountLabel('abc').tone).toBe('list')
+  })
+  it('builds one row per period', () => {
+    expect(schedulePeriodRows([
+      { days: [1, 2, 3, 4, 5], start: '00:00', end: '09:00', multiplier: '0.5' },
+      { days: [5], start: '22:00', end: '02:00', multiplier: '1.2' },
+    ])).toEqual([
+      { days: '周一至周五', time: '00:00–09:00', multiplier: '×0.5', discount: '5 折', tone: 'discount' },
+      { days: '周五', time: '22:00–次日 02:00', multiplier: '×1.2', discount: '×1.2', tone: 'markup' },
+    ])
   })
 })

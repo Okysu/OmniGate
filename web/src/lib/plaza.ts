@@ -5,6 +5,7 @@ import type { CurrencyInfo } from './money'
 import type { ChannelTier, ModelCapabilities, ModelCapability, MyPlazaModel, PlazaCurrency, PlazaModel, PlazaPrice, Price, PriceSchedulePeriod } from './types'
 import { inferBillingMode } from './billingMode'
 import { amountSign, fromNano, isValidAmount, toNano } from './money'
+import { normalizePlazaTiers, resolveTiers } from './priceTiers'
 
 // ---------------------------------------------------------------------------
 // Normalisation (defensive against nulls from the Go backend)
@@ -90,6 +91,10 @@ function normalizePrice(p: Loose<PlazaPrice> | null | undefined): PlazaPrice | n
   }
   if (typeof p.currentMultiplier === 'string' && isValidAmount(p.currentMultiplier))
     out.currentMultiplier = p.currentMultiplier
+  // phase10 §1: resolved context-length tiers (absent on older backends).
+  const tiers = normalizePlazaTiers(p.tiers)
+  if (tiers.length)
+    out.tiers = tiers
   return out
 }
 
@@ -460,7 +465,7 @@ export function freeBillingLabel(m: MyPlazaModel): string {
 // ---------------------------------------------------------------------------
 
 /** Plaza price from the admin sell price of `/api/models` (cache prices of 0 still shown). */
-export function plazaPriceFromSell(p: Pick<Price, 'inputPerM' | 'outputPerM' | 'cacheReadPerM' | 'cacheWritePerM' | 'perImage' | 'imageInputPerM' | AudioPriceKey> & { perRequest?: string | null } | null | undefined): PlazaPrice | null {
+export function plazaPriceFromSell(p: Pick<Price, 'inputPerM' | 'outputPerM' | 'cacheReadPerM' | 'cacheWritePerM' | 'perImage' | 'imageInputPerM' | AudioPriceKey> & { perRequest?: string | null, tiers?: Price['tiers'] } | null | undefined): PlazaPrice | null {
   if (!p)
     return null
   const out: PlazaPrice = { inputPerM: p.inputPerM, outputPerM: p.outputPerM, cacheReadPerM: p.cacheReadPerM ?? null, cacheWritePerM: p.cacheWritePerM ?? null }
@@ -472,6 +477,10 @@ export function plazaPriceFromSell(p: Pick<Price, 'inputPerM' | 'outputPerM' | '
   if (typeof p.imageInputPerM === 'string')
     out.imageInputPerM = p.imageInputPerM
   copyAudioPrices(p, out)
+  // Stored tiers inherit unset fields from the base version (the plaza sends them resolved).
+  const tiers = resolveTiers(p, p.tiers)
+  if (tiers.length)
+    out.tiers = tiers
   return out
 }
 

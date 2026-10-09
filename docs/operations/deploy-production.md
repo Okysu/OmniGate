@@ -575,6 +575,7 @@ docker compose logs --since 1h omnigate | grep '"level":"ERROR"'
 | 上传图片 / 音频报 413 | 代理请求体上限：nginx `client_max_body_size 64m`，Caddy `request_body max_size 64MiB`；超过 64 MiB 是 OmniGate 本身的上限 |
 | `/readyz` 返回 `database_unavailable`，或日志 `ping database: … password authentication failed` | 检查 `OMNIGATE_DATABASE_URL`（密码编码、主机名、`sslmode`）、网络与 `pg_hba.conf` |
 | SQLite 日志 `attempt to write a readonly database` / `unable to open database file` | 文件属主不是 65532：按 9.2 的命令 `chown 65532:65532`；用宿主机目录做绑定挂载时先 `sudo chown -R 65532:65532 <目录>` |
+| 启动即退出，日志 `OMNIGATE_DATA_DIR "/data": journal: open /data/settlement-journal.jsonl: permission denied` | 平台挂到 `/data` 的卷属主是 root，而镜像以 uid 65532 运行。任选其一：不挂 `/data` 卷（使用外部 PostgreSQL 时 `/data` 只放结算补偿日志）；或设置 `OMNIGATE_DATA_DIR=/tmp/omnigate`；或把卷的属主改为 `65532:65532` |
 | `database schema is newer than this OmniGate binary` | 用旧版本镜像连接了新版本的数据库，见第 10 步回滚 |
 | 启动报 `Pool overlaps with other one on this address space` | `172.30.88.0/24` 与本机其他网络冲突，见 4.7 |
 | 渠道测试返回 `409 secret_unavailable` | 主密钥与加密时的不一致（换了或丢了主密钥），恢复正确的 `OMNIGATE_MASTER_KEY`，或在渠道中重新填写上游 Key |

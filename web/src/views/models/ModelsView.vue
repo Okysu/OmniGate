@@ -27,6 +27,8 @@ import ModelInfoTab from './ModelInfoTab.vue'
 import ScheduleBadge from '@/components/ScheduleBadge.vue'
 import SuggestInput from '@/components/SuggestInput.vue'
 import { hasSchedule } from '@/lib/priceSchedule'
+import { hasTiers, resolveTiers } from '@/lib/priceTiers'
+import TierBadge from '@/components/pricing/TierBadge.vue'
 import BillingModeBadge from '@/components/pricing/BillingModeBadge.vue'
 import PriceSummaryLine from '@/components/pricing/PriceSummaryLine.vue'
 import { priceSummary, priceSummaryTitle } from '@/lib/billingMode'
@@ -274,6 +276,7 @@ const modelNames = computed(() =>
                       <span class="inline-flex items-center gap-1.5">
                         {{ m.model }}
                         <ScheduleBadge v-if="m.price && hasSchedule(m.price)" :schedule="m.price.schedule" :timezone="m.price.scheduleTimezone" class="font-sans" />
+                        <TierBadge v-if="m.price && hasTiers(m.price)" :base="m.price" :tiers="resolveTiers(m.price, m.price.tiers)" :money="money" />
                       </span>
                     </TableCell>
                     <TableCell class="text-right tabular-nums">
@@ -393,6 +396,7 @@ const modelNames = computed(() =>
                       <span class="inline-flex items-center gap-1.5">
                         {{ p.model }}
                         <ScheduleBadge v-if="hasSchedule(p)" :schedule="p.schedule" :timezone="p.scheduleTimezone" class="font-sans" />
+                        <TierBadge v-if="hasTiers(p)" :base="p" :tiers="resolveTiers(p, p.tiers)" :money="money" />
                       </span>
                     </TableCell>
                     <TableCell class="text-xs">

@@ -28,6 +28,8 @@ import { keysApi, logsApi, modelsApi } from '@/lib/endpoints'
 import { formatAudioSeconds, isAudioInbound } from '@/lib/audio'
 import { formatDateTime, formatMs, formatNumber } from '@/lib/format'
 import { logMultiplier } from '@/lib/groups'
+import PriceTierLogBadge from '@/components/pricing/PriceTierLogBadge.vue'
+import { tierLabel } from '@/lib/priceTiers'
 import { ERROR_CLASS_HINTS, INBOUND_LABELS } from '@/lib/labels'
 import { isAbortError, queryInt, queryStr } from '@/lib/query'
 import { useAuthStore } from '@/stores/auth'
@@ -440,6 +442,7 @@ const colCount = computed(() => 12 + (seeAll.value ? 2 : 0))
                     不计费
                   </TableCell>
                   <TableCell v-else-if="l.subscriptionId" class="text-right whitespace-nowrap tabular-nums" title="由套餐订阅覆盖，不扣钱包；按售价折算的金额计入套餐额度">
+                    <PriceTierLogBadge v-if="l.priceTier" :above="l.priceTier" class="mr-1" />
                     <Tooltip v-if="logMultiplier(l)">
                       <TooltipTrigger as-child>
                         <Badge variant="outline" class="mr-1 h-4 cursor-help border-violet-500/50 px-1 text-[10px] text-violet-700 tabular-nums dark:text-violet-400" tabindex="0" data-testid="price-multiplier" @click.stop>
@@ -454,6 +457,7 @@ const colCount = computed(() => 12 + (seeAll.value ? 2 : 0))
                     <span class="text-muted-foreground">套餐计费 {{ money(l.quotaCharge) }}</span>
                   </TableCell>
                   <TableCell v-else class="text-right whitespace-nowrap tabular-nums">
+                    <PriceTierLogBadge v-if="l.priceTier" :above="l.priceTier" class="mr-1" />
                     <Tooltip v-if="logMultiplier(l)">
                       <TooltipTrigger as-child>
                         <Badge variant="outline" class="mr-1 h-4 cursor-help border-violet-500/50 px-1 text-[10px] text-violet-700 tabular-nums dark:text-violet-400" tabindex="0" data-testid="price-multiplier" @click.stop>
@@ -550,6 +554,14 @@ const colCount = computed(() => 12 + (seeAll.value ? 2 : 0))
                         <dd v-else class="tabular-nums">
                           钱包扣费 <span>{{ money(l.charge) }}</span>
                         </dd>
+                        <template v-if="!freeTier(l) && l.priceTier">
+                          <dt class="text-muted-foreground">
+                            计价档位
+                          </dt>
+                          <dd data-testid="price-tier-detail">
+                            {{ tierLabel(l.priceTier) }}：输入 + 缓存 token 超过阈值，整次请求按该档单价计费
+                          </dd>
+                        </template>
                         <template v-if="!freeTier(l) && logMultiplier(l)">
                           <dt class="text-muted-foreground">
                             价格倍率

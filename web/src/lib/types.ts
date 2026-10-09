@@ -452,6 +452,35 @@ export interface PriceSchedulePeriod {
   multiplier: string
 }
 
+/**
+ * phase10 §1: one context-length tier of a price version, as stored. Applies when the
+ * request's prompt tokens (input + cache read + cache write) exceed `aboveInputTokens`;
+ * the highest matching tier prices every token component of the whole request. `null`
+ * = inherit the base version's field verbatim.
+ */
+export interface PriceTier {
+  aboveInputTokens: number
+  inputPerM: string
+  outputPerM: string
+  cacheReadPerM: string | null
+  cacheWritePerM: string | null
+  imageInputPerM: string | null
+  audioInputPerM: string | null
+  audioOutputPerM: string | null
+}
+
+/** phase10 §1: a tier in `POST /api/admin/prices` (optional fields omitted = inherit). */
+export interface PriceTierInput {
+  aboveInputTokens: number
+  inputPerM: string
+  outputPerM: string
+  cacheReadPerM?: string
+  cacheWritePerM?: string
+  imageInputPerM?: string
+  audioInputPerM?: string
+  audioOutputPerM?: string
+}
+
 export interface Price {
   id: string
   kind: PriceKind
@@ -480,6 +509,8 @@ export interface Price {
   /** phase8 §3: time-of-day multipliers; absent / null = none. */
   schedule?: PriceSchedulePeriod[] | null
   scheduleTimezone?: string
+  /** phase10 §1: context-length tiers (ascending); absent / null = none. */
+  tiers?: PriceTier[] | null
   effectiveAt: string
   createdAt: string
   createdBy: string | null
@@ -506,6 +537,8 @@ export interface PriceInput {
   /** Omitted when no periods are set (older backends reject unknown fields). */
   schedule?: PriceSchedulePeriod[]
   scheduleTimezone?: string
+  /** phase10 §1: omitted when no tiers are set (older backends reject unknown fields). */
+  tiers?: PriceTierInput[]
   effectiveAt?: string
 }
 
@@ -649,6 +682,8 @@ export interface RequestLog {
   quotaCharge: string
   /** phase8 §1.1: effective group × time-of-day multiplier (decimal string); absent on older backends. */
   priceMultiplier?: string | null
+  /** phase10 §1: `aboveInputTokens` of the sell-price tier applied; null = base prices / not priced / older rows. */
+  priceTier?: number | null
   /** NOT in the contract: shown in the tooltip when the backend splits the multiplier. */
   groupMultiplier?: string | null
   scheduleMultiplier?: string | null
@@ -1579,6 +1614,24 @@ export interface PlazaPrice {
   scheduleTimezone?: string
   /** Multiplier in effect right now ("1" outside every period). */
   currentMultiplier?: string
+  /** phase10 §1: context-length tiers, resolved (inheritance applied) and × the group multiplier. */
+  tiers?: PlazaPriceTier[] | null
+}
+
+/**
+ * phase10 §1: a resolved plaza tier. `cacheReadPerM` / `cacheWritePerM` null = 0;
+ * `imageInputPerM` / `audioInputPerM` null = this tier's `inputPerM`, `audioOutputPerM`
+ * null = this tier's `outputPerM`.
+ */
+export interface PlazaPriceTier {
+  aboveInputTokens: number
+  inputPerM: string
+  outputPerM: string
+  cacheReadPerM: string | null
+  cacheWritePerM: string | null
+  imageInputPerM: string | null
+  audioInputPerM: string | null
+  audioOutputPerM: string | null
 }
 
 export interface PlazaModel {

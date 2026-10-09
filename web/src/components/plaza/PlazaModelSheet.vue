@@ -30,6 +30,9 @@ import {
   sourceEntries,
 } from '@/lib/plaza'
 import { modelSnippets } from '@/lib/snippets'
+import type { TierPriceKey } from '@/lib/priceTiers'
+import { formatTokenThreshold, priceForPrompt } from '@/lib/priceTiers'
+import TierNote from './TierNote.vue'
 import { isNonUnitMultiplier, multiplierLabel } from '@/lib/groups'
 import { useAuthStore } from '@/stores/auth'
 import MyModelBadges from './MyModelBadges.vue'
@@ -78,6 +81,8 @@ interface PriceRow {
   unit?: string
   /** Shown when `value` is null. */
   fallback: string
+  /** Token price that context-length tiers override (phase10 §1). */
+  tierKey?: TierPriceKey
 }
 
 const ROW_HINTS: Record<PriceFieldKey, string> = {
@@ -112,10 +117,10 @@ const priceRows = computed<PriceRow[]>(() => {
     return []
   const b = base.value
   return [
-    { key: 'input', label: '输入', hint: '提示词（不含缓存命中）', value: p.inputPerM, base: b?.inputPerM ?? null, fallback: '—' },
-    { key: 'output', label: '输出', hint: '生成内容（含推理）', value: p.outputPerM, base: b?.outputPerM ?? null, fallback: '—' },
-    { key: 'cacheRead', label: '缓存读', hint: '命中提示词缓存的部分', value: p.cacheReadPerM, base: b?.cacheReadPerM ?? null, fallback: '—' },
-    { key: 'cacheWrite', label: '缓存写', hint: '写入提示词缓存的部分', value: p.cacheWritePerM, base: b?.cacheWritePerM ?? null, fallback: '—' },
+    { key: 'input', label: '输入', hint: '提示词（不含缓存命中）', value: p.inputPerM, base: b?.inputPerM ?? null, fallback: '—', tierKey: 'inputPerM' },
+    { key: 'output', label: '输出', hint: '生成内容（含推理）', value: p.outputPerM, base: b?.outputPerM ?? null, fallback: '—', tierKey: 'outputPerM' },
+    { key: 'cacheRead', label: '缓存读', hint: '命中提示词缓存的部分', value: p.cacheReadPerM, base: b?.cacheReadPerM ?? null, fallback: '—', tierKey: 'cacheReadPerM' },
+    { key: 'cacheWrite', label: '缓存写', hint: '写入提示词缓存的部分', value: p.cacheWritePerM, base: b?.cacheWritePerM ?? null, fallback: '—', tierKey: 'cacheWritePerM' },
   ]
 })
 /** phase7 §1.1 image prices; only when the backend sends them. */
@@ -125,7 +130,7 @@ const imagePriceRows = computed<PriceRow[]>(() => {
     return []
   return [
     { key: 'perImage', label: '每张图片', hint: '按输出图片张数计', value: isChargedAmount(p.perImage) ? p.perImage : null, base: baseOf('perImage'), unit: '张', fallback: '—' },
-    { key: 'imageInput', label: '图片输入', hint: '每 1M 图片输入 token', value: p.imageInputPerM ?? null, base: baseOf('imageInputPerM'), fallback: '按输入价' },
+    { key: 'imageInput', label: '图片输入', hint: '每 1M 图片输入 token', value: p.imageInputPerM ?? null, base: baseOf('imageInputPerM'), fallback: '按输入价', tierKey: 'imageInputPerM' },
   ]
 })
 
@@ -135,8 +140,8 @@ const audioPriceRows = computed<PriceRow[]>(() => {
   if (!p || !tokenLayout.value || !hasAudioPrice(p))
     return []
   return [
-    { key: 'audioInput', label: '音频输入', hint: '每 1M 音频输入 token', value: p.audioInputPerM ?? null, base: baseOf('audioInputPerM'), fallback: '按输入价' },
-    { key: 'audioOutput', label: '音频输出', hint: '每 1M 音频输出 token', value: p.audioOutputPerM ?? null, base: baseOf('audioOutputPerM'), fallback: '按输出价' },
+    { key: 'audioInput', label: '音频输入', hint: '每 1M 音频输入 token', value: p.audioInputPerM ?? null, base: baseOf('audioInputPerM'), fallback: '按输入价', tierKey: 'audioInputPerM' },
+    { key: 'audioOutput', label: '音频输出', hint: '每 1M 音频输出 token', value: p.audioOutputPerM ?? null, base: baseOf('audioOutputPerM'), fallback: '按输出价', tierKey: 'audioOutputPerM' },
     { key: 'perMinute', label: '每分钟音频', hint: '转写 / 翻译按输入音频时长，按秒计', value: isChargedAmount(p.perMinute) ? p.perMinute : null, base: baseOf('perMinute'), unit: '分钟', fallback: '—' },
     { key: 'perMCharacters', label: '每 1M 字符', hint: '语音合成按输入文本字符数', value: isChargedAmount(p.perMCharacters) ? p.perMCharacters : null, base: baseOf('perMCharacters'), unit: '1M 字符', fallback: '—' },
   ]
@@ -151,6 +156,23 @@ const perRequestRows = computed<PriceRow[]>(() => {
 })
 
 const allPriceRows = computed(() => [...priceRows.value, ...imagePriceRows.value, ...audioPriceRows.value, ...perRequestRows.value, ...modeRows.value])
+
+/** phase10 §1: context-length tiers (token layout only) — one price column per tier. */
+const tiers = computed(() => (tokenLayout.value ? m.value?.price?.tiers ?? [] : []))
+const tierColumns = computed(() => {
+  const t = tiers.value
+  if (!t.length)
+    return []
+  return [`≤${formatTokenThreshold(t[0]!.aboveInputTokens)}`, ...t.map(x => `>${formatTokenThreshold(x.aboveInputTokens)}`)]
+})
+/** Value (and struck list price) of a tiered row in tier column `j` (0 = base). */
+function tierCell(r: PriceRow, j: number): { value: string | null, base: string | null } {
+  if (j === 0 || !r.tierKey)
+    return { value: r.value, base: r.base }
+  const t = tiers.value[j - 1]
+  const b = base.value?.tiers?.[j - 1]
+  return { value: t?.[r.tierKey] ?? null, base: b?.[r.tierKey] ?? null }
+}
 const priceUnitCaption = computed(() => {
   if (!tokenLayout.value)
     return priceCaption(summary.value)
@@ -167,9 +189,16 @@ const PRESETS = [
 ]
 const inN = computed(() => parseTokenInput(inputTokens.value))
 const outN = computed(() => parseTokenInput(outputTokens.value))
-const estimate = computed(() => estimateCost(m.value?.price ?? null, inN.value, outN.value))
-const inputPart = computed(() => estimateCost(m.value?.price ?? null, inN.value, 0))
-const outputPart = computed(() => estimateCost(m.value?.price ?? null, 0, outN.value))
+/** The calculator's input tokens pick the context-length tier (phase10 §1). */
+const priced = computed(() => {
+  const p = m.value?.price
+  return p ? priceForPrompt(p, inN.value ?? 0) : null
+})
+const calcPrice = computed(() => priced.value?.price ?? null)
+const calcTier = computed(() => priced.value?.tier ?? null)
+const estimate = computed(() => estimateCost(calcPrice.value, inN.value, outN.value))
+const inputPart = computed(() => estimateCost(calcPrice.value, inN.value, 0))
+const outputPart = computed(() => estimateCost(calcPrice.value, 0, outN.value))
 /** 按次 / 按张: requests × (perRequest + images per request × perImage). */
 const callCalc = computed(() => summary.value?.mode === 'request' || summary.value?.mode === 'image')
 const requestCount = ref('100')
@@ -186,6 +215,14 @@ const showCalculator = computed(() => tokenLayout.value || callCalc.value)
 const tokenPerRequest = computed(() => {
   const p = m.value?.price
   return tokenLayout.value && p && isChargedAmount(p.perRequest) ? p.perRequest : null
+})
+/** With tiers: one preset just past the first threshold, to show the long-context price. */
+const presets = computed(() => {
+  const t = m.value?.price?.tiers?.[0]
+  if (!tokenLayout.value || !t)
+    return PRESETS
+  const input = Math.ceil((t.aboveInputTokens * 1.1) / 1000) * 1000
+  return [...PRESETS, { label: `长上下文 ${formatTokenThreshold(input)} / 2 万`, input, output: 20000 }]
 })
 function applyPreset(p: { input: number, output: number }) {
   inputTokens.value = String(p.input)
@@ -357,15 +394,34 @@ const sampleCode = computed(() => (snippets.value ? snippets.value[sample.value]
             <p v-if="!m.price" class="bg-muted/40 text-muted-foreground rounded-lg border p-3 text-sm">
               <span class="text-foreground font-medium">未定价</span>：平台未设置售价，调用不计费。
             </p>
-            <div v-else class="overflow-hidden rounded-lg border" data-testid="sheet-price-table" :data-mode="summary?.mode">
+            <div v-else class="overflow-hidden rounded-lg border" data-testid="sheet-price-table" :data-mode="summary?.mode" :data-tiers="tiers.length">
               <table class="w-full text-sm">
+                <thead v-if="tierColumns.length" class="bg-muted/40 text-muted-foreground text-xs">
+                  <tr class="border-b">
+                    <th scope="col" class="px-3 py-1.5 text-left font-normal">
+                      输入 + 缓存 token
+                    </th>
+                    <th v-for="(c, j) in tierColumns" :key="c" scope="col" class="px-3 py-1.5 text-right font-medium whitespace-nowrap" :class="j > 0 ? 'text-indigo-700 dark:text-indigo-300' : ''" data-testid="tier-column">
+                      {{ c }}
+                    </th>
+                  </tr>
+                </thead>
                 <tbody>
                   <tr v-for="r in allPriceRows" :key="r.key" class="border-b last:border-0" :data-price="r.key">
                     <th scope="row" class="px-3 py-2 text-left font-normal">
                       {{ r.label }}
                       <span class="text-muted-foreground ml-1 hidden text-xs sm:inline">{{ r.hint }}</span>
                     </th>
-                    <td class="px-3 py-2 text-right font-medium whitespace-nowrap tabular-nums" :title="r.value == null ? '未设置' : undefined">
+                    <template v-if="tierColumns.length && r.tierKey">
+                      <td v-for="(c, j) in tierColumns" :key="c" class="px-3 py-2 text-right font-medium whitespace-nowrap tabular-nums" :data-tier-col="j">
+                        <span v-if="tierCell(r, j).value == null" class="text-muted-foreground font-normal">{{ r.fallback }}</span>
+                        <template v-else>
+                          <s v-if="tierCell(r, j).base != null && tierCell(r, j).base !== tierCell(r, j).value" class="text-muted-foreground mr-1.5 text-xs font-normal" title="分组倍率前的原价" data-testid="base-price">{{ money(tierCell(r, j).base) }}</s>
+                          {{ money(tierCell(r, j).value) }}
+                        </template>
+                      </td>
+                    </template>
+                    <td v-else class="px-3 py-2 text-right font-medium whitespace-nowrap tabular-nums" :colspan="tierColumns.length || undefined" :title="r.value == null ? '未设置' : undefined">
                       <span v-if="r.value == null" class="text-muted-foreground font-normal">{{ r.fallback }}</span>
                       <template v-else>
                         <s v-if="r.base != null && r.base !== r.value" class="text-muted-foreground mr-1.5 text-xs font-normal" title="分组倍率前的原价" data-testid="base-price">{{ money(r.base) }}</s>
@@ -376,10 +432,14 @@ const sampleCode = computed(() => (snippets.value ? snippets.value[sample.value]
                 </tbody>
               </table>
             </div>
+            <p v-if="tierColumns.length" class="text-muted-foreground text-xs" data-testid="sheet-tier-line">
+              阶梯价格：按每次请求的输入 + 缓存 token 总数选档，超过阈值时整次请求的全部 token 按该档单价计费。
+            </p>
             <p v-if="groupLine" class="text-muted-foreground text-xs" data-testid="sheet-group-line">
               {{ groupLine }}
             </p>
             <ScheduleNote :price="m.price" />
+            <TierNote v-if="!tierColumns.length" :price="m.price" :money="money" />
             <div v-if="m.plans.length" class="flex flex-wrap items-center gap-1.5 text-xs">
               <span class="text-muted-foreground">覆盖该模型的套餐</span>
               <Badge v-for="p in m.plans" :key="p.id" variant="outline" class="border-violet-500/40 font-normal text-violet-700 dark:text-violet-300">
@@ -430,7 +490,7 @@ const sampleCode = computed(() => (snippets.value ? snippets.value[sample.value]
               </div>
               <div class="flex flex-wrap gap-1.5">
                 <button
-                  v-for="p in PRESETS"
+                  v-for="p in presets"
                   :key="p.label"
                   type="button"
                   class="hover:bg-muted focus-visible:ring-ring/50 rounded-md border px-2 py-0.5 text-xs outline-none focus-visible:ring-3"
@@ -442,6 +502,9 @@ const sampleCode = computed(() => (snippets.value ? snippets.value[sample.value]
               <div class="bg-muted/40 flex flex-wrap items-end justify-between gap-3 rounded-lg border p-3" aria-live="polite">
                 <div class="text-muted-foreground space-y-0.5 text-xs tabular-nums">
                   <p>输入 {{ inputPart === null ? '—' : money(inputPart) }} + 输出 {{ outputPart === null ? '—' : money(outputPart) }}</p>
+                  <p v-if="calcTier" class="text-indigo-700 dark:text-indigo-300" data-testid="calc-tier">
+                    输入超过 {{ formatTokenThreshold(calcTier.aboveInputTokens) }}，按长上下文档单价：输入 {{ money(calcTier.inputPerM) }} · 输出 {{ money(calcTier.outputPerM) }} / 1M
+                  </p>
                   <p>按输入、输出价格估算，不含缓存折扣与套餐抵扣{{ tokenPerRequest ? `，每次请求另收 ${money(tokenPerRequest)}` : '' }}。</p>
                 </div>
                 <p class="text-right">

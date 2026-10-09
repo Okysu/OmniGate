@@ -310,6 +310,73 @@ export function describePeriod(p: PriceSchedulePeriod): string {
   return `${describeDays(p.days)} ${p.start}–${cross ? '次日 ' : ''}${p.end} ×${canonicalMultiplier(p.multiplier)}`
 }
 
+/**
+ * Days of a period for the schedule popover, Monday first, consecutive runs merged:
+ * "每天", "周一至周五", "周六、周日", "周一至周三、周六".
+ */
+export function describeDayRange(days: readonly number[]): string {
+  const d = normDays(days)
+  if (d.length === 0 || d.length === 7)
+    return '每天'
+  // Monday-first positions (Mon = 0 … Sun = 6).
+  const pos = d.map(x => (x + 6) % 7).sort((a, b) => a - b)
+  const name = (p: number) => DAY_NAMES[(p + 1) % 7]!
+  const runs: string[] = []
+  let i = 0
+  while (i < pos.length) {
+    let j = i
+    while (j + 1 < pos.length && pos[j + 1] === pos[j]! + 1)
+      j++
+    if (j - i >= 2)
+      runs.push(`${name(pos[i]!)}至${name(pos[j]!)}`)
+    else
+      runs.push(...pos.slice(i, j + 1).map(name))
+    i = j + 1
+  }
+  return runs.join('、')
+}
+
+export type DiscountTone = 'free' | 'discount' | 'list' | 'markup'
+
+/**
+ * A multiplier as a price label: 0 → "免费", 0.5 → "5 折", 0.85 → "8.5 折", 1 → "原价",
+ * 1.5 → "×1.5". Invalid input → "×<input>".
+ */
+export function discountLabel(multiplier: string): { label: string, tone: DiscountTone } {
+  const m = multiplier.trim()
+  if (!isValidAmount(m))
+    return { label: `×${m}`, tone: 'list' }
+  const n = toNano(m)
+  if (n === 0n)
+    return { label: '免费', tone: 'free' }
+  if (n === 1_000_000_000n)
+    return { label: '原价', tone: 'list' }
+  if (n > 1_000_000_000n)
+    return { label: `×${fromNano(n)}`, tone: 'markup' }
+  return { label: `${fromNano(n * 10n)} 折`, tone: 'discount' }
+}
+
+export interface SchedulePeriodRow {
+  days: string
+  /** "00:00–09:00" or "22:00–次日 02:00". */
+  time: string
+  /** "×0.5" (canonical). */
+  multiplier: string
+  discount: string
+  tone: DiscountTone
+}
+
+/** One row per period for the schedule popover. */
+export function schedulePeriodRows(periods: readonly PriceSchedulePeriod[]): SchedulePeriodRow[] {
+  return periods.map((p) => {
+    const s = parseTime(p.start)
+    const e = parseTime(p.end)
+    const cross = s !== null && e !== null && s > e
+    const d = discountLabel(p.multiplier)
+    return { days: describeDayRange(p.days), time: `${p.start}–${cross ? '次日 ' : ''}${p.end}`, multiplier: `×${canonicalMultiplier(p.multiplier)}`, discount: d.label, tone: d.tone }
+  })
+}
+
 export function hasSchedule<T extends { schedule?: PriceSchedulePeriod[] | null }>(p: T | null | undefined): p is T & { schedule: PriceSchedulePeriod[] } {
   return !!p?.schedule && p.schedule.length > 0
 }

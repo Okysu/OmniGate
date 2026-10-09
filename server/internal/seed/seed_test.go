@@ -411,3 +411,65 @@ func TestExportRoundTrip(t *testing.T) {
 		t.Fatalf("unselected section present: %s", raw)
 	}
 }
+
+// TestPriceTiersCatalog: context-length tiers (phase10-api.md §1) apply,
+// compare (idempotency), diff, validate and export round-trip.
+func TestPriceTiersCatalog(t *testing.T) {
+	f := newFixture(t)
+	const tiered = `{"currency": "USD", "prices": [
+    {"kind": "sell", "model": "long", "inputPerM": "10", "outputPerM": "50", "cacheReadPerM": "1", "cacheWritePerM": "12.5",
+     "tiers": [{"aboveInputTokens": 272000, "inputPerM": "20", "outputPerM": "75", "cacheReadPerM": "2", "cacheWritePerM": null}]},
+    {"kind": "sell", "model": "flat", "inputPerM": "1", "outputPerM": "2", "tiers": null}
+  ]}`
+	rep := f.apply(parse(t, tiered), false)
+	wantActions(t, rep, map[string]Action{"price:sell long": ActionCreate, "price:sell flat": ActionCreate})
+	if d := rep.Changes[0].Details[0]; !strings.Contains(d, `tiers [{"aboveInputTokens":272000,"inputPerM":"20","outputPerM":"75","cacheReadPerM":"2","cacheWritePerM":null`) {
+		t.Fatalf("create details = %q", d)
+	}
+	// Identical tiers: unchanged.
+	wantActions(t, f.apply(parse(t, tiered), false), map[string]Action{"price:sell long": ActionUnchanged, "price:sell flat": ActionUnchanged})
+	// An inherited field set explicitly to the base value is still a change.
+	changed := strings.Replace(tiered, `"cacheWritePerM": null}]`, `"cacheWritePerM": "12.5"}]`, 1)
+	rep = f.apply(parse(t, changed), true)
+	wantActions(t, rep, map[string]Action{"price:sell long": ActionNewVersion, "price:sell flat": ActionUnchanged})
+	if d := rep.Changes[0].Details[0]; !strings.HasPrefix(d, "tiers [") || !strings.Contains(d, "→") {
+		t.Fatalf("diff = %q", d)
+	}
+	// Dropping the tiers is a new version too.
+	noTiers := strings.Replace(tiered, `"tiers": [{"aboveInputTokens": 272000, "inputPerM": "20", "outputPerM": "75", "cacheReadPerM": "2", "cacheWritePerM": null}]`, `"tiers": []`, 1)
+	wantActions(t, f.apply(parse(t, noTiers), true), map[string]Action{"price:sell long": ActionNewVersion, "price:sell flat": ActionUnchanged})
+
+	// Export: tiers as written (null = inherited), and the export re-applies as a no-op.
+	c, err := Export(f.ctx, f.svc, ExportOptions{Prices: true}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := c.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `"aboveInputTokens": 272000`) || !strings.Contains(buf.String(), `"cacheWritePerM": null`) ||
+		!strings.Contains(buf.String(), `"tiers": null`) {
+		t.Fatalf("export json:\n%s", buf.String())
+	}
+	if rep := f.apply(parse(t, buf.String()), false); rep.Pending() != 0 {
+		t.Fatalf("re-applying the export changes: %v", actions(rep))
+	}
+
+	// Invalid tiers are reported with their path; nothing is written.
+	before := f.count(`SELECT count(*) FROM prices`)
+	_, err = Apply(f.ctx, f.svc, parse(t, `{"prices": [{"kind": "sell", "model": "x", "inputPerM": "1",
+    "tiers": [{"aboveInputTokens": 1000, "inputPerM": "1", "outputPerM": ""}, {"aboveInputTokens": 1000, "inputPerM": "1", "outputPerM": "1"}]}]}`), false)
+	for _, path := range []string{"prices[0].tiers[0].outputPerM", "prices[0].tiers[1].aboveInputTokens"} {
+		if err == nil || !strings.Contains(err.Error(), path+": ") {
+			t.Errorf("missing %s in %v", path, err)
+		}
+	}
+	if _, err := Parse(strings.NewReader(`{"prices": [{"model": "m", "tiers": [{"aboveInputTokens": "272K"}]}]}`)); err == nil ||
+		!strings.Contains(err.Error(), "prices[0]: 字段 tiers.aboveInputTokens 类型错误") {
+		t.Errorf("type error = %v", err)
+	}
+	if f.count(`SELECT count(*) FROM prices`) != before {
+		t.Fatal("invalid catalog wrote rows")
+	}
+}

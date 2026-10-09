@@ -49,7 +49,10 @@ type PriceEntry struct {
 	PerMCharacters   string                 `json:"perMCharacters"`
 	Schedule         []pricing.ScheduleSlot `json:"schedule"`
 	ScheduleTimezone string                 `json:"scheduleTimezone"`
-	ChannelName      *string                `json:"channelName"`
+	// Tiers are the context-length tiers (phase10-api.md §1; absent / null =
+	// none); tier prices left null inherit the base fields.
+	Tiers       []pricing.TierInput `json:"tiers"`
+	ChannelName *string             `json:"channelName"`
 }
 
 // ModelInfoEntry is the display information of a model

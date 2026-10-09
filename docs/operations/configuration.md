@@ -1586,3 +1586,31 @@ curl -sS https://gateway.example.com/api/admin/prices \
 北京时间 03:00 开始的请求按 1.2 / 4.8（每百万输入 / 输出 token）计费；“VIP”组（倍率 0.8）的用户在同一时间按 0.96 / 3.84 计费，
 请求日志的 `priceMultiplier` 为 `"0.4"`；09:00 开始的请求按原价（VIP 为 1.92 / 7.68，`priceMultiplier` 为 `"0.8"`）。
 如果上游的低谷时段只在工作日，把 `days` 设为 `[1,2,3,4,5]`。
+
+### 17.5 按上下文长度的阶梯价格
+
+价格版本（售价与成本价）可以带最多 5 档 `tiers`（`docs/contracts/phase10-api.md` §1）。请求的**提示 token 数**（输入 + 缓存读取 + 缓存写入）
+**大于**某档的 `aboveInputTokens` 时，这次请求的**全部** token（输入、输出、缓存、图片 / 音频 token）都按该档计价；命中多档时取门槛最高的一档，
+等于门槛仍按较低一档。`perRequest`、`perImage`、`perMinute`、`perMCharacters` 不分档；分时倍率与用户组倍率照常相乘。
+
+| 字段 | 说明 |
+|---|---|
+| `aboveInputTokens` | 门槛，1–1 000 000 000 的整数，各档严格递增 |
+| `inputPerM` / `outputPerM` | 本档单价，必填 |
+| `cacheReadPerM` / `cacheWritePerM` / `imageInputPerM` / `audioInputPerM` / `audioOutputPerM` | 可选；省略或 `null` 沿用基础价格的同名字段 |
+
+- 预扣按估算的提示 token 数选档，结算按上游报告的实际用量选档；套餐的 `charge` 计量同样按选中的档。
+- 请求日志的 `priceTier` 记录售价命中的档（门槛），控制台显示为“长上下文档 >272K”。
+- 模型广场的 `price.tiers` 已展开继承并乘用户组倍率。
+
+**示例：OpenAI 长上下文价格**（超过 272K 输入 token 时输入 / 缓存翻倍、输出 ×1.5）：
+
+```bash
+curl -sS https://gateway.example.com/api/admin/prices \
+  -H 'Cookie: og_session=<会话>' -H 'X-Requested-With: XMLHttpRequest' -H 'Content-Type: application/json' \
+  -d '{"kind":"sell","model":"gpt-6-astra","inputPerM":"10","outputPerM":"50","cacheReadPerM":"1","cacheWritePerM":"12.5",
+       "tiers":[{"aboveInputTokens":272000,"inputPerM":"20","outputPerM":"75","cacheReadPerM":"2","cacheWritePerM":"25"}]}'
+```
+
+300 000 输入 token、1 000 输出 token 的请求按 300 000 × 20 / 1M + 1 000 × 75 / 1M = 6.075 计费；272 000 输入 token 的请求按基础价
+272 000 × 10 / 1M + 1 000 × 50 / 1M = 2.77 计费。

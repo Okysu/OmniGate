@@ -17,6 +17,7 @@
       "perMCharacters": "0",
       "schedule": null,
       "scheduleTimezone": "Asia/Shanghai",
+      "tiers": null,
       "channelName": null
     },
     {
@@ -35,6 +36,7 @@
       "perMCharacters": "0",
       "schedule": null,
       "scheduleTimezone": "Asia/Shanghai",
+      "tiers": null,
       "channelName": null
     },
     {
@@ -53,6 +55,7 @@
       "perMCharacters": "0",
       "schedule": null,
       "scheduleTimezone": "Asia/Shanghai",
+      "tiers": null,
       "channelName": null
     },
     {
@@ -71,6 +74,18 @@
       "perMCharacters": "0",
       "schedule": null,
       "scheduleTimezone": "Asia/Shanghai",
+      "tiers": [
+        {
+          "aboveInputTokens": 272000,
+          "inputPerM": "20",
+          "outputPerM": "75",
+          "cacheReadPerM": "2",
+          "cacheWritePerM": "25",
+          "imageInputPerM": null,
+          "audioInputPerM": null,
+          "audioOutputPerM": null
+        }
+      ],
       "channelName": null
     },
     {
@@ -89,6 +104,7 @@
       "perMCharacters": "0",
       "schedule": null,
       "scheduleTimezone": "Asia/Shanghai",
+      "tiers": null,
       "channelName": null
     },
     {
@@ -107,6 +123,7 @@
       "perMCharacters": "0",
       "schedule": null,
       "scheduleTimezone": "Asia/Shanghai",
+      "tiers": null,
       "channelName": null
     },
     {
@@ -125,6 +142,18 @@
       "perMCharacters": "0",
       "schedule": null,
       "scheduleTimezone": "Asia/Shanghai",
+      "tiers": [
+        {
+          "aboveInputTokens": 272000,
+          "inputPerM": "4",
+          "outputPerM": "15",
+          "cacheReadPerM": "0.2",
+          "cacheWritePerM": "5",
+          "imageInputPerM": null,
+          "audioInputPerM": null,
+          "audioOutputPerM": null
+        }
+      ],
       "channelName": null
     },
     {
@@ -143,6 +172,7 @@
       "perMCharacters": "0",
       "schedule": null,
       "scheduleTimezone": "Asia/Shanghai",
+      "tiers": null,
       "channelName": null
     }
   ],

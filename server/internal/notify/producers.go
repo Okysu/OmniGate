@@ -201,7 +201,11 @@ func (s *Service) SellPriceChanged(_ context.Context, prev, next *pricing.Price)
 			if p == nil {
 				return "未定价"
 			}
-			return fmt.Sprintf("输入 %s / 输出 %s（每百万 tokens）", p.InputPerM, p.OutputPerM)
+			out := fmt.Sprintf("输入 %s / 输出 %s（每百万 tokens）", p.InputPerM, p.OutputPerM)
+			for _, t := range p.Tiers {
+				out += fmt.Sprintf("，上下文超过 %s token 时输入 %s / 输出 %s", pricing.FormatTokens(t.AboveInputTokens), t.InputPerM, t.OutputPerM)
+			}
+			return out
 		}
 		when := "已生效"
 		if next.EffectiveAt.After(s.now().Add(time.Minute)) {

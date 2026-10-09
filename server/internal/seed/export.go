@@ -84,7 +84,7 @@ func exportPrices(ctx context.Context, svc Services, cost bool, warn io.Writer) 
 			CacheReadPerM: p.CacheReadPM.String(), CacheWritePerM: p.CacheWritePM.String(), PerRequest: p.PerRequest.String(),
 			PerImage: p.PerImage.String(), ImageInputPerM: optString(p.ImageInputPM), AudioInputPerM: optString(p.AudioInputPM),
 			AudioOutputPerM: optString(p.AudioOutputPM), PerMinute: p.PerMinute.String(), PerMCharacters: p.PerMCharacters.String(),
-			Schedule: p.Schedule, ScheduleTimezone: p.ScheduleTimezone}
+			Schedule: p.Schedule, ScheduleTimezone: p.ScheduleTimezone, Tiers: pricing.TierInputs(p.Tiers)}
 		if p.Kind == pricing.KindCost {
 			if !cost {
 				continue

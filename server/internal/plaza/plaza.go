@@ -172,6 +172,24 @@ type Price struct {
 	Schedule          []pricing.ScheduleSlot `json:"schedule"`
 	ScheduleTimezone  string                 `json:"scheduleTimezone"`
 	CurrentMultiplier string                 `json:"currentMultiplier"`
+	// Tiers are the context-length tiers with inheritance resolved
+	// (phase10-api.md §1.3); null = none.
+	Tiers []PriceTier `json:"tiers"`
+}
+
+// PriceTier is a context-length tier of a plaza price: the effective unit
+// prices of requests whose prompt tokens exceed AboveInputTokens. Like the
+// base fields, cacheReadPerM / cacheWritePerM are null when 0 and the image /
+// audio token prices null when billed at this tier's input / output price.
+type PriceTier struct {
+	AboveInputTokens int64   `json:"aboveInputTokens"`
+	InputPerM        string  `json:"inputPerM"`
+	OutputPerM       string  `json:"outputPerM"`
+	CacheReadPerM    *string `json:"cacheReadPerM"`
+	CacheWritePerM   *string `json:"cacheWritePerM"`
+	ImageInputPerM   *string `json:"imageInputPerM"`
+	AudioInputPerM   *string `json:"audioInputPerM"`
+	AudioOutputPerM  *string `json:"audioOutputPerM"`
 }
 
 // priceView renders p with every unit price multiplied by m.
@@ -197,6 +215,14 @@ func priceView(p *pricing.Price, m pricing.Multiplier, now time.Time) *Price {
 	out.ImageInputPerM = optional(p.ImageInputPM)
 	out.AudioInputPerM, out.AudioOutputPerM = optional(p.AudioInputPM), optional(p.AudioOutputPM)
 	out.PerMinute, out.PerMCharacters = amountPtr(f(p.PerMinute)), amountPtr(f(p.PerMCharacters))
+	for i := range p.Tiers {
+		t := p.WithTier(&p.Tiers[i])
+		out.Tiers = append(out.Tiers, PriceTier{AboveInputTokens: p.Tiers[i].AboveInputTokens,
+			InputPerM: f(t.InputPerM), OutputPerM: f(t.OutputPerM),
+			CacheReadPerM: amountPtr(f(t.CacheReadPM)), CacheWritePerM: amountPtr(f(t.CacheWritePM)),
+			ImageInputPerM: optional(t.ImageInputPM), AudioInputPerM: optional(t.AudioInputPM),
+			AudioOutputPerM: optional(t.AudioOutputPM)})
+	}
 	return out
 }
 

@@ -781,6 +781,7 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 // available balance is > 0, independent of the estimate. The hold is the
 // sell-price cost of the estimated input plus max_tokens when the request sets
 // it (clamped to protocol.MaxTokensLimit; no output is assumed otherwise),
+// at the context-length tier of the estimated prompt tokens (phase10-api.md §1),
 // capped at the available balance and the remaining spend limit. A request
 // that cannot be priced is rejected. Request state changes only when the
 // model is admitted.
@@ -1270,6 +1271,9 @@ func (g *Gateway) finish(st *reqState, gerr *protocol.GatewayError) {
 			}
 			m := pricing.Product(sell.ScheduleMultiplier(st.start), group)
 			e.PriceMultiplier = &m
+			// The context-length tier selected by the actual usage
+			// (phase10-api.md §1).
+			e.PriceTier = sell.AppliedTier(e.Usage)
 		}
 		if e.UpstreamModel != nil {
 			if cost, err := g.prices.Lookup(ctx, pricing.KindCost, *e.UpstreamModel, e.ChannelID, st.start); err == nil && cost != nil {

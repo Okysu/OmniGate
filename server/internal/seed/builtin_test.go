@@ -21,10 +21,22 @@ func TestBuiltinCatalog(t *testing.T) {
 	if c.Currency != "USD" || len(c.Prices) != 8 || len(c.ModelInfo) != 8 || len(c.Plans) != 6 {
 		t.Fatalf("builtin catalog: currency %q, %d prices, %d model info, %d plans", c.Currency, len(c.Prices), len(c.ModelInfo), len(c.Plans))
 	}
+	tiered := 0
 	for _, p := range c.Prices {
 		if !strings.HasPrefix(p.Model, "gpt-") || p.Kind != "sell" || p.ChannelName != nil {
 			t.Errorf("unexpected price entry %+v", p)
 		}
+		// Long-context tiers (phase10-api.md §1): above 272K prompt tokens
+		// every token price doubles, output × 1.5.
+		if len(p.Tiers) > 0 {
+			tiered++
+			if tr := p.Tiers[0]; len(p.Tiers) != 1 || tr.AboveInputTokens != 272_000 || tr.CacheReadPerM == nil || tr.CacheWritePerM == nil {
+				t.Errorf("unexpected tiers of %s: %+v", p.Model, p.Tiers)
+			}
+		}
+	}
+	if tiered != 2 {
+		t.Errorf("%d tiered builtin prices, want 2 (gpt-6-astra, gpt-6.1-sol)", tiered)
 	}
 	if Hash(Builtin()) != Hash(builtinCatalog) || len(Hash(nil)) != 64 {
 		t.Fatal("hash")

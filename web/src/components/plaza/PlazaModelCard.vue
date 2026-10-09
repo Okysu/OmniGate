@@ -7,11 +7,13 @@ import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { priceCaption as unitCaption, priceSummary } from '@/lib/billingMode'
 import { isNonUnitMultiplier } from '@/lib/groups'
+import { formatMoney } from '@/lib/money'
 import { displayNameOf, formatTokenCount, isMyPlazaModel, PROTOCOL_DESCRIPTIONS, PROTOCOL_LABELS, sortProtocols } from '@/lib/plaza'
 import CapabilityIcons from './CapabilityIcons.vue'
 import MyModelBadges from './MyModelBadges.vue'
 import PlazaPrice from './PlazaPrice.vue'
 import ScheduleNote from './ScheduleNote.vue'
+import TierNote from './TierNote.vue'
 import VendorMark from './VendorMark.vue'
 
 /**
@@ -52,6 +54,7 @@ const priceCaption = computed(() => {
   return m.sources.platform > 0 ? `回退到平台渠道时的价格 · ${unit}` : null
 })
 /** phase8 §1.1: list price struck through when the group multiplier changes the price. */
+const money = (v: string) => formatMoney(v, props.currency)
 const basePrice = computed(() => (mine.value && isNonUnitMultiplier(mine.value.priceMultiplier) ? mine.value.basePrice ?? null : null))
 </script>
 
@@ -115,6 +118,7 @@ const basePrice = computed(() => (mine.value && isNonUnitMultiplier(mine.value.p
         </p>
         <PlazaPrice :price="model.price" :currency="currency" :base-price="basePrice" />
         <ScheduleNote :price="model.price" />
+        <TierNote :price="model.price" :money="money" />
       </template>
       <p v-else class="text-muted-foreground text-[11px]">
         仅由自有 / 共享渠道提供，不经过平台渠道，不计费
@@ -146,6 +150,7 @@ const basePrice = computed(() => (mine.value && isNonUnitMultiplier(mine.value.p
         </h3>
         <div v-if="priceCaption" class="flex shrink-0 items-center gap-1">
           <ScheduleNote :price="model.price" variant="badge" />
+          <TierNote :price="model.price" :money="money" variant="badge" />
           <PlazaPrice :price="model.price" :currency="currency" variant="compact" :base-price="basePrice" />
         </div>
         <span v-else class="shrink-0 text-xs text-emerald-700 dark:text-emerald-400">不计费</span>

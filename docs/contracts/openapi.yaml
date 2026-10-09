@@ -9377,6 +9377,14 @@ components:
         scheduleTimezone:
           type: string
           description: "`schedule` 使用的 IANA 时区（默认 `Asia/Shanghai`）"
+        tiers:
+          description: 按上下文长度的阶梯价格（Round 10，`docs/contracts/phase10-api.md` §1），按 `aboveInputTokens` 升序；null = 无。档内为 null 的单价沿用本版本的基础单价
+          oneOf:
+            - type: array
+              maxItems: 5
+              items:
+                $ref: "#/components/schemas/PriceTier"
+            - type: "null"
         effectiveAt:
           type: string
           format: date-time
@@ -9413,6 +9421,64 @@ components:
           type: string
           description: 十进制 0–10，最多 9 位小数（保存时规范化，如 `"0.50"` → `"0.5"`）
           example: "0.5"
+
+    PriceTier:
+      type: object
+      additionalProperties: false
+      description: |
+        价格版本的一档上下文阶梯（Round 10，`docs/contracts/phase10-api.md` §1）。请求的提示 token 数（输入 + 缓存读取 + 缓存写入）
+        **大于** `aboveInputTokens` 时，整次请求的全部 token 单价改用该档（命中多档时取门槛最高的一档；等于门槛仍按下一档 / 基础价）。
+        `perRequest`、`perImage`、`perMinute`、`perMCharacters` 不分档。分时倍率与用户组倍率照常相乘。
+        可选单价为 null（创建时省略、null 或空字符串）表示沿用基础价格的同名字段（基础价格的 `imageInputPerM` 等也为 null 时按本档 `inputPerM` / `outputPerM` 计）。
+      required: [aboveInputTokens, inputPerM, outputPerM, cacheReadPerM, cacheWritePerM, imageInputPerM, audioInputPerM, audioOutputPerM]
+      properties:
+        aboveInputTokens:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1000000000
+          description: 门槛（提示 token 数），各档严格递增
+          example: 272000
+        inputPerM:
+          $ref: "#/components/schemas/Money"
+        outputPerM:
+          $ref: "#/components/schemas/Money"
+        cacheReadPerM:
+          type: [string, "null"]
+        cacheWritePerM:
+          type: [string, "null"]
+        imageInputPerM:
+          type: [string, "null"]
+        audioInputPerM:
+          type: [string, "null"]
+        audioOutputPerM:
+          type: [string, "null"]
+
+    PlazaPriceTier:
+      type: object
+      description: |
+        模型广场价格的一档阶梯（Round 10），已展开继承并乘用户组倍率（与 `PlazaPrice` 的基础单价相同的约定）：
+        `cacheReadPerM` / `cacheWritePerM` 为 0 时为 null；`imageInputPerM`、`audioInputPerM` / `audioOutputPerM` 为 null 时按本档 `inputPerM` / `outputPerM` 计。
+      required: [aboveInputTokens, inputPerM, outputPerM, cacheReadPerM, cacheWritePerM, imageInputPerM, audioInputPerM, audioOutputPerM]
+      properties:
+        aboveInputTokens:
+          type: integer
+          format: int64
+          example: 272000
+        inputPerM:
+          $ref: "#/components/schemas/Money"
+        outputPerM:
+          $ref: "#/components/schemas/Money"
+        cacheReadPerM:
+          type: [string, "null"]
+        cacheWritePerM:
+          type: [string, "null"]
+        imageInputPerM:
+          type: [string, "null"]
+        audioInputPerM:
+          type: [string, "null"]
+        audioOutputPerM:
+          type: [string, "null"]
 
     PriceCreateRequest:
       type: object
@@ -9481,6 +9547,17 @@ components:
           type: [string, "null"]
           description: IANA 时区；省略、null 或空 = `Asia/Shanghai`。非法 → `422 details.scheduleTimezone`
           example: Asia/Shanghai
+        tiers:
+          description: |
+            阶梯价格（Round 10，见 `PriceTier`）；省略、null 或空数组 = 无。最多 5 档；`aboveInputTokens` 为 1–1 000 000 000 的整数且严格递增，
+            `inputPerM` / `outputPerM` 必填，其余单价省略、null 或空字符串 = 沿用基础价格。校验失败 → `422 details.tiers`（档数）或
+            `details["tiers[i].<字段>"]`；档内未知字段 → `422`（请求体不合法）
+          oneOf:
+            - type: array
+              maxItems: 5
+              items:
+                $ref: "#/components/schemas/PriceTier"
+            - type: "null"
         effectiveAt:
           type: string
           format: date-time
@@ -9711,6 +9788,13 @@ components:
             本次生效的售价倍率 = 用户组倍率 × 售价版本的分时倍率（Round 6，十进制字符串，如 `"0.4"`）；`charge` / `quotaCharge` 已乘过它。
             只有成功且有售价的 platform 档请求才有值；own / shared、失败、未定价的请求与升级前的日志为 null。
           example: "0.4"
+        priceTier:
+          type: [integer, "null"]
+          format: int64
+          description: |
+            售价命中的上下文阶梯的 `aboveInputTokens`（Round 10，`phase10-api.md` §1），按实际用量（输入 + 缓存读取 + 缓存写入）选择；
+            null = 基础价格、未定价或升级前的日志。套餐覆盖的请求同样记录（`quotaCharge` 按该档计）
+          example: 272000
         audioSeconds:
           type: integer
           format: int64
@@ -11579,6 +11663,13 @@ components:
         currentMultiplier:
           type: string
           description: 此刻生效的分时倍率（未命中任何时段为 `"1"`）
+        tiers:
+          description: 按上下文长度的阶梯价格（Round 10），按门槛升序；null = 无
+          oneOf:
+            - type: array
+              items:
+                $ref: "#/components/schemas/PlazaPriceTier"
+            - type: "null"
 
     PlazaModel:
       type: object

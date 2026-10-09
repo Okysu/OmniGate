@@ -8,7 +8,7 @@
 
 | 部分 | 内容 |
 |---|---|
-| `prices` | 8 个 GPT 模型的售价：`gpt-5.6-luna/sol/terra`、`gpt-6-astra/luna/sol`、`gpt-6.1-sol`（按百万 tokens），`gpt-image-2`（按张，$0.05） |
+| `prices` | 8 个 GPT 模型的售价：`gpt-5.6-luna/sol/terra`、`gpt-6-astra/luna/sol`、`gpt-6.1-sol`（按百万 tokens；`gpt-6-astra` 与 `gpt-6.1-sol` 带超过 272K 输入 token 的长上下文阶梯价），`gpt-image-2`（按张，$0.05） |
 | `modelInfo` | 上述 8 个模型的资料（上下文长度、能力标签等） |
 | `plans` | 6 个套餐 Go → Elite（见文末「套餐介绍」） |
 
@@ -124,6 +124,7 @@ docker compose exec -T omnigate omnigate seed - < catalog.json
   "imageInputPerM": null, "audioInputPerM": null, "audioOutputPerM": null,
   "perMinute": "0", "perMCharacters": "0",
   "schedule": null, "scheduleTimezone": "Asia/Shanghai",
+  "tiers": null,
   "channelName": null }
 ```
 
@@ -137,6 +138,7 @@ docker compose exec -T omnigate omnigate seed - < catalog.json
 | `perMinute` / `perMCharacters` | 每分钟输入音频（按秒折算）/ 每百万语音合成字符；省略为 0 |
 | `schedule` | 分时倍率时段，与后台相同：`[{"days": [1,2,3,4,5], "start": "00:00", "end": "08:00", "multiplier": "0.5"}]`；`null` 为不分时 |
 | `scheduleTimezone` | 分时时区（IANA 名称），省略为 `Asia/Shanghai` |
+| `tiers` | 按上下文长度的阶梯价格（最多 5 档），与后台相同：`[{"aboveInputTokens": 272000, "inputPerM": "20", "outputPerM": "75", "cacheReadPerM": "2", "cacheWritePerM": null}]`；提示 token 数（输入 + 缓存）超过门槛时整次请求按该档计价，档内 `null` 或省略的单价沿用基础价格；`null` 或省略为不分档（见 `docs/contracts/phase10-api.md` §1） |
 | `channelName` | **仅 cost 价格**：渠道名称（导入时按名称查找渠道，因为两个环境的渠道 ID 不同）；sell 价格必须为 `null` |
 
 ### `modelInfo[]`（与 `PUT /api/admin/model-info/{model}` 相同）

@@ -151,6 +151,9 @@ type logView struct {
 	// PriceMultiplier is the effective multiplier (group × schedule) of a
 	// priced platform request (phase8-api.md §1.1); null otherwise.
 	PriceMultiplier *string `json:"priceMultiplier"`
+	// PriceTier is the aboveInputTokens of the context-length tier the sell
+	// price applied (phase10-api.md §1); null = base prices or not priced.
+	PriceTier *int64 `json:"priceTier"`
 	// AudioSeconds is the billed duration of the input audio (audio
 	// endpoints; 0 otherwise). UsageEstimated mirrors usage.estimated: the
 	// usage was estimated — for audio requests, the upstream reported no
@@ -178,7 +181,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		l.fallback_path, l.ttft_ms, l.duration_ms, l.input_tokens, l.output_tokens, l.cache_read_tokens, l.cache_write_tokens,
 		l.reasoning_tokens, l.usage_estimated, l.cost_nano, l.charge_nano, l.subscription_id, l.quota_charge_nano,
 		COALESCE(l.served_model, l.model), l.channel_tier, l.image_count, l.image_input_tokens, l.price_multiplier,
-		l.audio_seconds, l.audio_input_tokens, l.audio_output_tokens, l.input_characters
+		l.audio_seconds, l.audio_input_tokens, l.audio_output_tokens, l.input_characters, l.price_tier
 		FROM request_logs l LEFT JOIN users u ON u.id = l.user_id`+f.sql()+
 		` ORDER BY l.started_at DESC LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
@@ -199,7 +202,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 			&ttft, &dur, &v.Usage.Input, &v.Usage.Output, &v.Usage.CacheRead, &v.Usage.CacheWrite, &v.Usage.Reasoning,
 			&v.Usage.Estimated, &cost, &charge, &v.SubscriptionID, &quota, &v.ServedModel, &v.ChannelTier, &v.ImageCount,
 			&v.Usage.ImageInputTokens, &v.PriceMultiplier, &v.AudioSeconds, &v.Usage.AudioInputTokens, &v.Usage.AudioOutputTokens,
-			&v.Usage.InputCharacters); err != nil {
+			&v.Usage.InputCharacters, &v.PriceTier); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}

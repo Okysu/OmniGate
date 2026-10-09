@@ -303,7 +303,7 @@ func (s Services) planPrices(ctx context.Context, entries []PriceEntry, now time
 			CacheReadPerM: e.CacheReadPerM, CacheWritePerM: e.CacheWritePerM, PerRequest: e.PerRequest,
 			PerImage: &e.PerImage, ImageInputPerM: e.ImageInputPerM, AudioInputPerM: e.AudioInputPerM,
 			AudioOutputPerM: e.AudioOutputPerM, PerMinute: &e.PerMinute, PerMCharacters: &e.PerMCharacters,
-			Schedule: e.Schedule, ScheduleTimezone: &e.ScheduleTimezone}
+			Schedule: e.Schedule, ScheduleTimezone: &e.ScheduleTimezone, Tiers: e.Tiers}
 		check := in
 		if kind == pricing.KindCost && chID == nil {
 			check.ChannelID = &uuid.Nil // reported as channelName above
@@ -368,12 +368,17 @@ func priceFields(p *pricing.Price) []field {
 		b, _ := json.Marshal(p.Schedule)
 		sched = string(b) + " @ " + p.ScheduleTimezone
 	}
+	tiers := "null"
+	if len(p.Tiers) > 0 {
+		b, _ := json.Marshal(pricing.TierInputs(p.Tiers))
+		tiers = string(b)
+	}
 	return []field{{"inputPerM", p.InputPerM.String()}, {"outputPerM", p.OutputPerM.String()},
 		{"cacheReadPerM", p.CacheReadPM.String()}, {"cacheWritePerM", p.CacheWritePM.String()},
 		{"perRequest", p.PerRequest.String()}, {"perImage", p.PerImage.String()},
 		{"imageInputPerM", optAmount(p.ImageInputPM)}, {"audioInputPerM", optAmount(p.AudioInputPM)},
 		{"audioOutputPerM", optAmount(p.AudioOutputPM)}, {"perMinute", p.PerMinute.String()},
-		{"perMCharacters", p.PerMCharacters.String()}, {"schedule", sched}}
+		{"perMCharacters", p.PerMCharacters.String()}, {"schedule", sched}, {"tiers", tiers}}
 }
 
 // priceSummary lists the non-zero fields of a new price.

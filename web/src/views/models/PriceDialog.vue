@@ -31,6 +31,9 @@ import { buildSchedule, emptyScheduleForm, normalizeScheduleErrorKeys, scheduleF
 import type { ScheduleForm } from '@/lib/priceSchedule'
 import PriceAmountField from './PriceAmountField.vue'
 import PriceScheduleEditor from './PriceScheduleEditor.vue'
+import PriceTierEditor from './PriceTierEditor.vue'
+import type { TierRow } from '@/lib/priceTiers'
+import { buildTiers, normalizeTierErrorKeys, tierRowsFrom, tiersAllowed, validateTiers } from '@/lib/priceTiers'
 import { fromLocalInput, toLocalInput } from '@/lib/timeRange'
 
 export interface PricePrefill {
@@ -131,6 +134,12 @@ const schedule = ref<ScheduleForm>(emptyScheduleForm())
 const serverScheduleErrors = ref<Record<string, string>>({})
 const scheduleErrors = computed(() => ({ ...validateSchedule(schedule.value), ...serverScheduleErrors.value }))
 watch(schedule, () => (serverScheduleErrors.value = {}), { deep: true })
+/** phase10 §1: context-length tiers (Token / 自定义组合 only; kept while switching modes). */
+const tiers = ref<TierRow[]>([])
+const serverTierErrors = ref<Record<string, string>>({})
+const showTiers = computed(() => tiersAllowed(mode.value))
+const tierErrors = computed(() => (showTiers.value ? { ...validateTiers(tiers.value, mode.value), ...serverTierErrors.value } : {}))
+watch([tiers, mode], () => (serverTierErrors.value = {}), { deep: true })
 
 watch(open, (v) => {
   if (!v)
@@ -148,8 +157,10 @@ watch(open, (v) => {
   mode.value = inferBillingMode(p?.from)
   form.effectiveAt = ''
   schedule.value = p?.from ? scheduleFormFrom(p.from) : emptyScheduleForm()
+  tiers.value = tierRowsFrom(p?.from)
   errors.value = {}
   serverScheduleErrors.value = {}
+  serverTierErrors.value = {}
   formError.value = null
 })
 
@@ -192,8 +203,11 @@ function validate(): Record<string, string> {
 async function submit() {
   formError.value = null
   errors.value = validate()
-  if (Object.keys(errors.value).length || Object.keys(scheduleErrors.value).length) {
-    formError.value = Object.keys(scheduleErrors.value).length && !Object.keys(errors.value).length ? '请修正分时价格中标记的时段' : '请修正标记的字段'
+  const nErr = Object.keys(errors.value).length
+  if (nErr || Object.keys(scheduleErrors.value).length || Object.keys(tierErrors.value).length) {
+    formError.value = nErr
+      ? '请修正标记的字段'
+      : Object.keys(tierErrors.value).length ? '请修正阶梯价格中标记的档位' : '请修正分时价格中标记的时段'
     return
   }
   // Fields of other modes are sent as "not set" (required amounts "0", optional ones omitted).
@@ -209,6 +223,9 @@ async function submit() {
     body.schedule = buildSchedule(schedule.value.rows)
     body.scheduleTimezone = schedule.value.timezone
   }
+  // phase10 §1: only sent when tiers exist in a mode that offers them.
+  if (showTiers.value && tiers.value.length)
+    body.tiers = buildTiers(tiers.value, mode.value)
   const eff = fromLocalInput(form.effectiveAt)
   if (eff)
     body.effectiveAt = eff
@@ -221,13 +238,19 @@ async function submit() {
   }
   catch (err) {
     if (isApiError(err) && err.status === 422) {
-      const all = normalizeScheduleErrorKeys(fieldErrors(err))
+      const all = normalizeTierErrorKeys(normalizeScheduleErrorKeys(fieldErrors(err)))
       const sched: Record<string, string> = {}
+      const tier: Record<string, string> = {}
       const rest: Record<string, string> = {}
-      for (const [k, v] of Object.entries(all))
-        (k === 'schedule' || k.startsWith('schedule.') || k === 'scheduleTimezone' ? sched : rest)[k] = v
+      for (const [k, v] of Object.entries(all)) {
+        if (k === 'tiers' || k.startsWith('tiers.'))
+          tier[k] = v
+        else
+          (k === 'schedule' || k.startsWith('schedule.') || k === 'scheduleTimezone' ? sched : rest)[k] = v
+      }
       errors.value = rest
       serverScheduleErrors.value = sched
+      serverTierErrors.value = tier
       formError.value = err.message
     }
     else {
@@ -413,6 +436,11 @@ function setKind(v: unknown) {
           <span class="text-muted-foreground">计费预览</span>
           <span v-if="preview" class="font-medium tabular-nums">{{ preview }}</span>
           <span v-else class="text-muted-foreground">填写大于 0 的单价后显示</span>
+        </p>
+
+        <PriceTierEditor v-if="showTiers" v-model="tiers" :mode="mode" :base="amounts" :symbol="symbol" :money="money" :errors="tierErrors" />
+        <p v-else-if="tiers.length" class="text-muted-foreground rounded-lg border border-dashed px-3 py-2 text-xs" data-testid="tier-hidden-note">
+          阶梯价格只适用于按 Token / 自定义组合计费，当前计费方式下不会提交（切换回去可继续编辑）。
         </p>
 
         <PriceScheduleEditor v-model="schedule" :errors="scheduleErrors" />

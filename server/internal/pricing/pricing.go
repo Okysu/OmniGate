@@ -53,9 +53,12 @@ type Price struct {
 	// in ScheduleTimezone (phase8-api.md §3).
 	Schedule         []ScheduleSlot `json:"schedule"`
 	ScheduleTimezone string         `json:"scheduleTimezone"`
-	EffectiveAt      time.Time      `json:"effectiveAt"`
-	CreatedAt        time.Time      `json:"createdAt"`
-	CreatedBy        *uuid.UUID     `json:"createdBy"`
+	// Tiers are the context-length tiers, ascending by threshold (nil = none;
+	// phase10-api.md §1).
+	Tiers       []Tier     `json:"-"`
+	EffectiveAt time.Time  `json:"effectiveAt"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	CreatedBy   *uuid.UUID `json:"createdBy"`
 }
 
 // priceJSON renders amounts as decimal strings.
@@ -72,6 +75,8 @@ type priceJSON struct {
 	AudioOutputPerM *string `json:"audioOutputPerM"`
 	PerMinute       string  `json:"perMinute"`
 	PerMCharacters  string  `json:"perMCharacters"`
+	// Tiers: null = none; tier fields null = inherited from the base prices.
+	Tiers []TierInput `json:"tiers"`
 }
 
 func optionalString(a *money.Amount) *string {
@@ -90,7 +95,7 @@ func (p *Price) JSON() any {
 		CacheReadPerM: p.CacheReadPM.String(), CacheWritePerM: p.CacheWritePM.String(), PerRequest: p.PerRequest.String(),
 		PerImage: p.PerImage.String(), ImageInputPerM: optionalString(p.ImageInputPM),
 		AudioInputPerM: optionalString(p.AudioInputPM), AudioOutputPerM: optionalString(p.AudioOutputPM),
-		PerMinute: p.PerMinute.String(), PerMCharacters: p.PerMCharacters.String()}
+		PerMinute: p.PerMinute.String(), PerMCharacters: p.PerMCharacters.String(), Tiers: TierInputs(p.Tiers)}
 	return out
 }
 
@@ -129,7 +134,9 @@ func (p *Price) ImageInputPrice() money.Amount {
 // audioOutputPerM + cache reads/writes + images × perImage + audio seconds ×
 // perMinute / 60 + characters × perMCharacters / 1M, where text input =
 // Input − ImageInput − AudioInput and text output = Output − AudioOutput
-// (phase7-api.md §1.1, §4.8; phase9-api.md §1.1);
+// (phase7-api.md §1.1, §4.8; phase9-api.md §1.1), with the unit prices of the
+// context-length tier selected by the request's prompt tokens (input + cache
+// read + cache write, phase10-api.md §1) when the version has tiers;
 // amount = base × the version's schedule multiplier at `at` × group
 // (phase8-api.md §1.1, §3), rounded once. group is the user group's price
 // multiplier for sell prices and One for cost prices: a group never changes
@@ -143,7 +150,7 @@ func (p *Price) Compute(u protocol.Usage, at time.Time, group Multiplier) (money
 	if p == nil {
 		return 0, nil
 	}
-	base, err := p.base(u)
+	base, err := p.WithTier(p.TierFor(PromptTokens(u))).base(u)
 	if err != nil {
 		return 0, err
 	}
@@ -210,7 +217,7 @@ func SamePrice(a, b *Price) bool {
 		a.CacheWritePM == b.CacheWritePM && a.PerRequest == b.PerRequest && a.PerImage == b.PerImage &&
 		sameOptional(a.ImageInputPM, b.ImageInputPM) && sameOptional(a.AudioInputPM, b.AudioInputPM) &&
 		sameOptional(a.AudioOutputPM, b.AudioOutputPM) && a.PerMinute == b.PerMinute && a.PerMCharacters == b.PerMCharacters &&
-		sameSchedule(a, b)
+		sameSchedule(a, b) && sameTiers(a.Tiers, b.Tiers)
 }
 
 func sameSchedule(a, b *Price) bool {
@@ -233,17 +240,18 @@ func NewService(pool *db.DB, rec *audit.Recorder) *Service {
 	return &Service{pool: pool, audit: rec}
 }
 
-const priceCols = `id, kind, model, channel_id, input_per_m, output_per_m, cache_read_per_m, cache_write_per_m, per_request, effective_at, created_at, created_by, per_image, image_input_per_m, schedule, schedule_timezone, audio_input_per_m, audio_output_per_m, per_minute, per_m_characters`
+const priceCols = `id, kind, model, channel_id, input_per_m, output_per_m, cache_read_per_m, cache_write_per_m, per_request, effective_at, created_at, created_by, per_image, image_input_per_m, schedule, schedule_timezone, audio_input_per_m, audio_output_per_m, per_minute, per_m_characters, tiers`
 
 func scanPrice(row db.Row) (*Price, error) {
 	var p Price
 	var imageIn, audioIn, audioOut *int64
-	var sched []byte
+	var sched, tiers []byte
 	err := row.Scan(&p.ID, &p.Kind, &p.Model, &p.ChannelID, &p.InputPerM, &p.OutputPerM, &p.CacheReadPM, &p.CacheWritePM,
 		&p.PerRequest, &p.EffectiveAt, &p.CreatedAt, &p.CreatedBy, &p.PerImage, &imageIn, &sched, &p.ScheduleTimezone,
-		&audioIn, &audioOut, &p.PerMinute, &p.PerMCharacters)
+		&audioIn, &audioOut, &p.PerMinute, &p.PerMCharacters, &tiers)
 	p.ImageInputPM, p.AudioInputPM, p.AudioOutputPM = optionalAmount(imageIn), optionalAmount(audioIn), optionalAmount(audioOut)
 	p.Schedule = decodeSchedule(sched)
+	p.Tiers = decodeTiers(tiers)
 	return &p, err
 }
 
@@ -343,6 +351,8 @@ type CreateInput struct {
 	// Asia/Shanghai (phase8-api.md §3).
 	Schedule         []ScheduleSlot `json:"schedule"`
 	ScheduleTimezone *string        `json:"scheduleTimezone"`
+	// Tiers: omitted / null / [] = none (phase10-api.md §1).
+	Tiers []TierInput `json:"tiers"`
 }
 
 func parseAmount(s, field string, details map[string]any) money.Amount {
@@ -419,6 +429,7 @@ func prepare(in CreateInput, now time.Time) (*Price, error) {
 	} else {
 		pr.Schedule = sched
 	}
+	pr.Tiers = compileTiers(in.Tiers, details)
 	if len(details) > 0 {
 		return nil, apperr.Validation("价格参数校验失败", details)
 	}
@@ -451,10 +462,10 @@ func (s *Service) Create(ctx context.Context, p *authz.Principal, in CreateInput
 			b, _ := json.Marshal(pr.Schedule)
 			sched = b
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO prices (`+priceCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+		if _, err := tx.Exec(ctx, `INSERT INTO prices (`+priceCols+`) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
 			pr.ID, pr.Kind, pr.Model, pr.ChannelID, pr.InputPerM, pr.OutputPerM, pr.CacheReadPM, pr.CacheWritePM, pr.PerRequest,
 			pr.EffectiveAt, pr.CreatedAt, pr.CreatedBy, pr.PerImage, nullableNano(pr.ImageInputPM), sched, pr.ScheduleTimezone,
-			nullableNano(pr.AudioInputPM), nullableNano(pr.AudioOutputPM), pr.PerMinute, pr.PerMCharacters); err != nil {
+			nullableNano(pr.AudioInputPM), nullableNano(pr.AudioOutputPM), pr.PerMinute, pr.PerMCharacters, encodeTiers(pr.Tiers)); err != nil {
 			if db.IsForeignKeyViolation(err) {
 				return apperr.Validation("价格参数校验失败", map[string]any{"channelId": "渠道不存在"})
 			}
@@ -464,7 +475,8 @@ func (s *Service) Create(ctx context.Context, p *authz.Principal, in CreateInput
 		return s.audit.Record(ctx, tx, audit.Entry{ActorID: &p.UserID, ActorName: &p.Name, Action: "price.create", ResourceType: "price",
 			ResourceID: &rid, IPPrefix: ipPrefix, RequestID: requestID,
 			Metadata: map[string]any{"kind": pr.Kind, "model": pr.Model, "inputPerM": pr.InputPerM.String(), "outputPerM": pr.OutputPerM.String(),
-				"perImage": pr.PerImage.String(), "perMinute": pr.PerMinute.String(), "perMCharacters": pr.PerMCharacters.String(), "effectiveAt": pr.EffectiveAt, "schedule": pr.Schedule, "scheduleTimezone": pr.ScheduleTimezone}})
+				"perImage": pr.PerImage.String(), "perMinute": pr.PerMinute.String(), "perMCharacters": pr.PerMCharacters.String(), "effectiveAt": pr.EffectiveAt, "schedule": pr.Schedule, "scheduleTimezone": pr.ScheduleTimezone,
+				"tiers": TierInputs(pr.Tiers)}})
 	})
 	if err != nil {
 		return nil, err
