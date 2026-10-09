@@ -1,0 +1,10 @@
+{
+  "name": "Base URL 不是 DeepSeek 官方 API（返回网页）",
+  "capability": "balance.get",
+  "baseUrl": "https://api.deepseek.com/v1",
+  "secrets": { "apiKey": "sk-test" },
+  "fetch": [
+    { "match": { "url": "https://api.deepseek.com/user/balance" }, "response": { "status": 200, "headers": { "Content-Type": "text/html" }, "body": "<html>gateway</html>" } }
+  ],
+  "expect": { "error": "不是 DeepSeek 官方 API" }
+}

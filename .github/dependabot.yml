@@ -1,0 +1,43 @@
+# Dependabot：每周检查依赖更新（周一，上海时间），小版本与补丁合并成一个 PR，减少噪音。
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /server
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Shanghai
+    groups:
+      go-minor-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  # web/ 使用 pnpm（pnpm-lock.yaml），Dependabot 的 npm 生态同样支持。
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Shanghai
+    groups:
+      web-minor-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Shanghai
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Dockerfile 的基础镜像固定了 tag + digest，Dependabot 会一起更新。
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Shanghai

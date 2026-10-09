@@ -1,0 +1,75 @@
+# OmniGate — Docker Compose（仓库根目录：源码构建试用 + 本地开发依赖）
+#
+# 生产部署请使用 deploy/docker-compose.yml（发布的镜像 ghcr.io/okysu/omnigate；可选 postgres / caddy profile），
+# 步骤见 docs/operations/deploy-production.md。只支持单实例部署。
+#
+# 从源码构建并试用（网关 + PostgreSQL）：
+#   ./scripts/init-env.sh      # 生成 .env（随机主密钥与数据库密码）
+#   编辑 .env 填写 GitHub OAuth App 与 OMNIGATE_BOOTSTRAP_ADMINS
+#   docker compose up -d --build
+#
+# 本地开发只启动依赖（后端与前端在宿主机运行，见 README）：
+#   docker compose --profile dev up -d postgres mock-oidc
+#
+# 当前版本不使用 Redis，已移除 redis 服务。早先由本文件创建的 redis 容器与 redisdata 卷可以手动删除：
+#   docker compose --profile dev up -d --remove-orphans postgres mock-oidc   或   docker rm -f ai-gateway-redis-1
+#   docker volume rm ai-gateway_redisdata
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: omnigate
+      POSTGRES_USER: omnigate
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-omnigate-dev}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omnigate -d omnigate"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  omnigate:
+    build:
+      context: .
+      args:
+        VERSION: ${OMNIGATE_VERSION:-dev}
+    image: omnigate:${OMNIGATE_VERSION:-dev}
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OMNIGATE_DATABASE_URL: postgres://omnigate:${POSTGRES_PASSWORD:-omnigate-dev}@postgres:5432/omnigate?sslmode=disable
+      OMNIGATE_HTTP_ADDR: ":8080"
+      OMNIGATE_METRICS_ADDR: ":9090"
+    ports:
+      - "${OMNIGATE_PORT:-8080}:8080"
+    volumes:
+      - omnigate-data:/data
+    # 指标端口仅在 compose 内网暴露，由 Prometheus 抓取，不对公网开放。
+    expose:
+      - "9090"
+    stop_grace_period: 40s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # 仅用于本地开发：标准 OIDC 模拟身份提供方，可输入任意用户名登录。
+  # 签发者为 http://localhost:9000/default（浏览器与宿主机后端访问同一地址）。
+  mock-oidc:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    profiles: ["dev"]
+    environment:
+      SERVER_PORT: "9000"
+      JSON_CONFIG: '{"interactiveLogin":true}'
+    ports:
+      - "127.0.0.1:9000:9000"
+
+volumes:
+  pgdata:
+  omnigate-data:

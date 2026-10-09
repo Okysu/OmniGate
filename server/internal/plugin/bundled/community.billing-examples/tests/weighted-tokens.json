@@ -1,0 +1,7 @@
+{
+  "name": "加权 token：输出 × 4 + 输入（含缓存）",
+  "meter": "weighted_tokens",
+  "usage": { "input": 100, "output": 50, "cacheRead": 20, "cacheWrite": 5 },
+  "billingCtx": { "model": "gpt-4o", "servedModel": "gpt-4o", "inbound": "openai.chat" },
+  "expect": { "output": "325" }
+}

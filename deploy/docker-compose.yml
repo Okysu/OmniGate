@@ -1,0 +1,135 @@
+# OmniGate 生产部署（all in one）：一个镜像（前端 + 后端 + 内置 GPT 价格与套餐目录），只支持单实例。
+#
+# 默认只启动 omnigate 一个服务，数据库由 omnigate.env 中的 OMNIGATE_DATABASE_URL 决定：
+#   postgres://…                 外部 PostgreSQL（云数据库 / 已有实例）
+#   sqlite:///data/omnigate.db   单文件 SQLite，存放在 omnigate-data 卷里，不需要任何数据库服务
+# 可选的捆绑服务用 profile 开启（也可以在 deploy/.env 中写 COMPOSE_PROFILES=postgres,caddy）：
+#   --profile postgres   顺带运行一个 PostgreSQL（omnigate.env 的连接串主机写 postgres，见 omnigate.env.example）
+#   --profile caddy      容器版 Caddy：自动申请 / 续期 HTTPS 证书（gate.example.com），占用宿主机 80/443
+#
+#   cp omnigate.env.example omnigate.env && chmod 600 omnigate.env   # 填写变量
+#   docker compose pull && docker compose up -d                      # 在本目录执行；
+#   docker compose --profile caddy up -d                             # 同时运行 Caddy
+#
+# 镜像：默认 ghcr.io/okysu/omnigate:latest（GitHub Actions 发布，见 docs/operations/deploy-production.md）。
+#   固定版本：deploy/.env 中 OMNIGATE_TAG=0.1.0；本地构建：make docker IMAGE=omnigate:local，再设 OMNIGATE_IMAGE=omnigate:local。
+# 首次启动会按 OMNIGATE_SEED_ON_START=builtin 导入内置目录（每个数据库只导入一次，见 deploy/seed/README.md）。
+#
+# 旧命令 `-f docker-compose.yml -f docker-compose.caddy.yml`（或 .postgres.yml）仍然可用，等同于对应的 profile。
+
+name: omnigate
+
+services:
+  omnigate:
+    image: ${OMNIGATE_IMAGE:-ghcr.io/okysu/omnigate:${OMNIGATE_TAG:-latest}}
+    restart: unless-stopped
+    env_file:
+      - path: omnigate.env
+        required: true
+    environment:
+      # Go 运行时的软内存上限（不是 OmniGate 变量），略低于下方的容器内存上限，避免被 OOM killer 直接杀掉。
+      GOMEMLIMIT: ${OMNIGATE_GOMEMLIMIT:-800MiB}
+    ports:
+      # 只给本机的反向代理用。不要改成 0.0.0.0：直连会绕过 TLS，且来源地址会变成下面的网关地址（受信任代理）。
+      - "127.0.0.1:${OMNIGATE_PORT:-8080}:8080"
+    volumes:
+      # SQLite 数据库（omnigate.db 及 -wal/-shm）、结算日志（OMNIGATE_DATA_DIR=/data）、备份目录 /data/backups。
+      # 使用 PostgreSQL 时同样需要（结算日志）。
+      - omnigate-data:/data
+    networks:
+      - omnigate
+    # 数据库在宿主机本机时，连接串的主机写 host.docker.internal。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      # 只有开启 postgres profile 时才等待它就绪；未开启时忽略（required: false，需要 Compose ≥ 2.20）。
+      postgres:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/omnigate", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    # 收到 SIGTERM 后最多等 30 秒让进行中的请求（含流式响应）结束，再留 10 秒收尾；docker run 对应 --stop-timeout 40。
+    stop_grace_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: ${OMNIGATE_MEM_LIMIT:-1g}
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # 可选（--profile postgres）：由 Compose 顺带运行 PostgreSQL。已有外部数据库时不需要。
+  # 密码写在 deploy/.env 的 POSTGRES_PASSWORD（只用字母数字），omnigate.env 中：
+  #   OMNIGATE_DATABASE_URL=postgres://omnigate:<同一个密码>@postgres:5432/omnigate?sslmode=disable
+  # 不发布端口，只有 omnigate 通过内部网络访问。备份用 pg_dump（见部署文档）。
+  postgres:
+    image: postgres:17-alpine
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: omnigate
+      POSTGRES_USER: omnigate
+      # 为空时 postgres 镜像拒绝初始化并给出提示；只在数据卷首次初始化时生效。
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - omnigate
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omnigate -d omnigate"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # 给 PostgreSQL 足够时间做关闭检查点。
+    stop_grace_period: 60s
+    logging: *logging
+
+  # 可选（--profile caddy）：容器版 Caddy 反向代理，自动申请 / 续期 Let's Encrypt 证书，不必在宿主机安装 Caddy 或 nginx。
+  # 前提：域名（默认 gate.example.com，deploy/.env 中 OMNIGATE_DOMAIN 可改）的 DNS 指向本机，宿主机 80、443 空闲且对公网开放。
+  # omnigate.env 中 OMNIGATE_TRUSTED_PROXIES 需包含 172.30.88.10（本容器的固定地址，即网段前缀 .10）。
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["caddy"]
+    restart: unless-stopped
+    ports:
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+      - "${CADDY_HTTPS_PORT:-443}:443/udp"   # HTTP/3
+    environment:
+      # Caddyfile 中的站点地址与上游：容器网络中直接访问 omnigate 服务。
+      OMNIGATE_DOMAIN: ${OMNIGATE_DOMAIN:-gate.example.com}
+      OMNIGATE_UPSTREAM: omnigate:8080
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data        # 证书与 ACME 账号，务必持久化（否则每次重建都重新申请，可能触发限速）
+      - caddy-config:/config
+    networks:
+      omnigate:
+        ipv4_address: ${OMNIGATE_SUBNET_PREFIX:-172.30.88}.10
+    depends_on:
+      omnigate:
+        condition: service_healthy
+    logging: *logging
+
+networks:
+  # 固定网段：宿主机上的反向代理经 127.0.0.1 端口映射访问时，OmniGate 看到的来源地址固定是网关 172.30.88.1，
+  # 因此 OMNIGATE_TRUSTED_PROXIES 可以精确写成 172.30.88.1，而不是整个 172.16.0.0/12。
+  # 与本机已有网络冲突（Pool overlaps）时，在 deploy/.env 中改 OMNIGATE_SUBNET_PREFIX（如 172.30.99），
+  # 并同步修改 omnigate.env 的 OMNIGATE_TRUSTED_PROXIES。
+  omnigate:
+    ipam:
+      config:
+        - subnet: ${OMNIGATE_SUBNET_PREFIX:-172.30.88}.0/24
+          gateway: ${OMNIGATE_SUBNET_PREFIX:-172.30.88}.1
+
+volumes:
+  omnigate-data:
+  pgdata:
+  caddy-data:
+  caddy-config:

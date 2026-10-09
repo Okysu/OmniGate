@@ -1,0 +1,139 @@
+# OmniGate CI：静态检查、PostgreSQL / SQLite 两套集成测试（-race）、覆盖率、前端检查与构建。
+#
+# 本文件是可复用工作流：由 release.yml（"Build and Publish"）在每次 push / PR 时先调用，
+# 全部通过后才构建、推送镜像，因此不会发布未通过测试的镜像。也可以在 Actions 页面手动运行。
+
+name: CI
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # go.mod 的 toolchain 行（go1.26.9，修复了标准库已知漏洞）高于 setup-go 安装的版本时自动下载该版本。
+  GOTOOLCHAIN: auto
+
+jobs:
+  lint:
+    name: Go lint & vulncheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      # go.mod 的 toolchain 行是最低安全版本；确认实际使用的 Go 不低于它。
+      - name: toolchain
+        run: |
+          want=$(awk '$1 == "toolchain" {print $2}' go.mod)
+          got=$(go env GOVERSION)
+          echo "go.mod toolchain: $want, using: $got"
+          test "$(printf '%s\n%s\n' "${want#go}" "${got#go}" | sort -V | head -n1)" = "${want#go}"
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - run: go vet ./...
+      - run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+      # 标准库与依赖的已知漏洞（只报告实际可达的调用路径）；有漏洞时失败。
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+
+  test-postgres:
+    name: Go test (PostgreSQL, race, coverage)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: omnigate
+          POSTGRES_PASSWORD: test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U omnigate"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: go test -race (with PostgreSQL integration tests)
+        env:
+          OMNIGATE_TEST_DATABASE_URL: postgres://omnigate:test@localhost:5432/postgres?sslmode=disable
+        run: |
+          set -o pipefail
+          go test -race -count=1 -timeout 20m -coverprofile=coverage.out ./... 2>&1 | tee test_output.txt
+      - name: Coverage summary
+        if: always()
+        run: ../.github/scripts/coverage-report.sh coverage.out
+      - name: HTML coverage report
+        if: always()
+        run: if [ -f coverage.out ]; then go tool cover -html=coverage.out -o coverage.html; fi
+      - name: Upload coverage artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: |
+            server/coverage.out
+            server/coverage.html
+            server/test_output.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  test-sqlite:
+    name: Go test (SQLite, race)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: go test -race (with SQLite integration tests)
+        env:
+          OMNIGATE_TEST_DATABASE_URL: sqlite
+        run: go test -race -count=1 -timeout 20m ./...
+
+  web:
+    name: Web lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.21.0   # 与 Dockerfile 的 NODE_IMAGE 保持一致
+      # pnpm 版本取自 web/package.json 的 packageManager 字段（corepack），与 Dockerfile 相同。
+      - name: Enable pnpm (corepack)
+        id: pnpm
+        run: |
+          corepack enable
+          pnpm --version
+          echo "store=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.pnpm.outputs.store }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build

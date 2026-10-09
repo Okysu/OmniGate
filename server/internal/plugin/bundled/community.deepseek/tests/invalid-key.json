@@ -1,0 +1,9 @@
+{
+  "name": "API Key 无效",
+  "capability": "balance.get",
+  "secrets": { "apiKey": "sk-bad" },
+  "fetch": [
+    { "match": { "url": "https://api.deepseek.com/user/balance" }, "response": { "status": 401, "json": { "error": { "message": "Authentication Fails" } } } }
+  ],
+  "expect": { "error": "401" }
+}

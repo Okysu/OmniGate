@@ -1,0 +1,25 @@
+# 构建上下文只需要 server/、web/ 源码与 scripts/precompress.mjs。
+# 不要把密钥、本地 .env、构建产物或依赖目录带进镜像。
+.git
+.github
+.dev
+.idea
+.vscode
+**/.DS_Store
+**/.env
+**/.env.*
+**/*.local
+**/*.pem
+**/*.key
+bin
+docs
+deploy
+**/node_modules
+web/dist
+web/coverage
+server/coverage.out
+# 本地 make build 复制进来的前端产物；镜像构建会从 web 阶段重新复制。
+server/internal/webui/dist/*
+!server/internal/webui/dist/.gitkeep
+docker-compose*.yml
+Dockerfile

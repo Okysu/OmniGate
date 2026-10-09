@@ -1,0 +1,32 @@
+.env
+*.local
+/bin/
+# 在 server/ 下直接 go build 得到的二进制
+/server/omnigate
+node_modules/
+web/dist/
+server/internal/webui/dist/*
+!server/internal/webui/dist/.gitkeep
+coverage.out
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+/.dev/
+/deploy/.env
+/deploy/omnigate.env
+/deploy/*.local
+/deploy/backups/
+
+# 本地 SQLite 数据库（OMNIGATE_DATABASE_URL=sqlite://…）
+*.db
+*.db-wal
+*.db-shm
+
+# 内部开发过程文档（AI 开发轮次汇报、上线前评估与审计结果），不对外发布
+/docs/iterations/
+/docs/operations/production-readiness.md
+/docs/internal/
+
+# 本地数据目录（OMNIGATE_DATA_DIR 开发默认值：结算 journal）
+.data/

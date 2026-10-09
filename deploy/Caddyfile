@@ -1,0 +1,42 @@
+# Caddy 反向代理：gate.example.com，自动申请并续期 Let's Encrypt 证书，HTTP 自动跳转 HTTPS。
+#
+# 容器运行 Caddy（推荐）：docker compose --profile caddy up -d（deploy/docker-compose.yml 的 caddy 服务，
+#   它设置 OMNIGATE_UPSTREAM=omnigate:8080，域名取 deploy/.env 的 OMNIGATE_DOMAIN，默认 gate.example.com）；
+#   omnigate.env：OMNIGATE_TRUSTED_PROXIES=172.30.88.10
+# 宿主机安装 Caddy（https://caddyserver.com/docs/install）：
+#   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
+#   上游为 127.0.0.1:8080（deploy/docker-compose.yml 映射的端口）；
+#   omnigate.env：OMNIGATE_TRUSTED_PROXIES=172.30.88.1
+#
+# 前提：DNS A 记录 gate.example.com → 本机公网 IP；80、443 端口对公网开放。
+
+{
+	# 证书到期提醒邮箱（可选，建议填写）
+	# email admin@example.com
+}
+
+{$OMNIGATE_DOMAIN:gate.example.com} {
+	# 请求体上限与 OmniGate 一致：图片编辑、语音转写最大 64 MiB（其余 /v1 接口 32 MiB 由 OmniGate 自己返回 413）。
+	request_body {
+		max_size 64MiB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# 不要在这里启用 encode（gzip/zstd）：压缩会缓冲 SSE 流式响应；静态资源 OmniGate 已预压缩。
+
+	# Caddy 默认会丢弃客户端自带的 X-Forwarded-For，重新设置 X-Forwarded-For / X-Forwarded-Proto / X-Forwarded-Host，
+	# 并原样保留 Host 与 Origin（CSRF 校验依赖 Origin）。
+	reverse_proxy {$OMNIGATE_UPSTREAM:127.0.0.1:8080} {
+		# 立即转发每个流式事件（SSE / 语音合成），不缓冲。
+		flush_interval -1
+		transport http {
+			# 等待上游响应头最长 600 秒（渠道超时上限），流式响应两次事件之间最长 5 分钟；留足余量。
+			read_timeout 15m
+			write_timeout 15m
+		}
+	}
+}

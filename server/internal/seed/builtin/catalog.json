@@ -1,0 +1,595 @@
+{
+  "currency": "USD",
+  "prices": [
+    {
+      "kind": "sell",
+      "model": "gpt-5.6-luna",
+      "inputPerM": "0.2",
+      "outputPerM": "1.2",
+      "cacheReadPerM": "0.02",
+      "cacheWritePerM": "0.25",
+      "perRequest": "0",
+      "perImage": "0",
+      "imageInputPerM": null,
+      "audioInputPerM": null,
+      "audioOutputPerM": null,
+      "perMinute": "0",
+      "perMCharacters": "0",
+      "schedule": null,
+      "scheduleTimezone": "Asia/Shanghai",
+      "channelName": null
+    },
+    {
+      "kind": "sell",
+      "model": "gpt-5.6-sol",
+      "inputPerM": "4",
+      "outputPerM": "20",
+      "cacheReadPerM": "0.4",
+      "cacheWritePerM": "5",
+      "perRequest": "0",
+      "perImage": "0",
+      "imageInputPerM": null,
+      "audioInputPerM": null,
+      "audioOutputPerM": null,
+      "perMinute": "0",
+      "perMCharacters": "0",
+      "schedule": null,
+      "scheduleTimezone": "Asia/Shanghai",
+      "channelName": null
+    },
+    {
+      "kind": "sell",
+      "model": "gpt-5.6-terra",
+      "inputPerM": "2",
+      "outputPerM": "12",
+      "cacheReadPerM": "0.2",
+      "cacheWritePerM": "2.5",
+      "perRequest": "0",
+      "perImage": "0",
+      "imageInputPerM": null,
+      "audioInputPerM": null,
+      "audioOutputPerM": null,
+      "perMinute": "0",
+      "perMCharacters": "0",
+      "schedule": null,
+      "scheduleTimezone": "Asia/Shanghai",
+      "channelName": null
+    },
+    {
+      "kind": "sell",
+      "model": "gpt-6-astra",
+      "inputPerM": "10",
+      "outputPerM": "50",
+      "cacheReadPerM": "1",
+      "cacheWritePerM": "12.5",
+      "perRequest": "0",
+      "perImage": "0",
+      "imageInputPerM": null,
+      "audioInputPerM": null,
+      "audioOutputPerM": null,
+      "perMinute": "0",
+      "perMCharacters": "0",
+      "schedule": null,
+      "scheduleTimezone": "Asia/Shanghai",
+      "channelName": null
+    },
+    {
+      "kind": "sell",
+      "model": "gpt-6-luna",
+      "inputPerM": "0.1",
+      "outputPerM": "0.5",
+      "cacheReadPerM": "0.01",
+      "cacheWritePerM": "0.125",
+      "perRequest": "0",
+      "perImage": "0",
+      "imageInputPerM": null,
+      "audioInputPerM": null,
+      "audioOutputPerM": null,
+      "perMinute": "0",
+      "perMCharacters": "0",
+      "schedule": null,
+      "scheduleTimezone": "Asia/Shanghai",
+      "channelName": null
+    },
+    {
+      "kind": "sell",
+      "model": "gpt-6-sol",
+      "inputPerM": "2",
+      "outputPerM": "10",
+      "cacheReadPerM": "0.2",
+      "cacheWritePerM": "2.5",
+      "perRequest": "0",
+      "perImage": "0",
+      "imageInputPerM": null,
+      "audioInputPerM": null,
+      "audioOutputPerM": null,
+      "perMinute": "0",
+      "perMCharacters": "0",
+      "schedule": null,
+      "scheduleTimezone": "Asia/Shanghai",
+      "channelName": null
+    },
+    {
+      "kind": "sell",
+      "model": "gpt-6.1-sol",
+      "inputPerM": "2",
+      "outputPerM": "10",
+      "cacheReadPerM": "0.1",
+      "cacheWritePerM": "2.5",
+      "perRequest": "0",
+      "perImage": "0",
+      "imageInputPerM": null,
+      "audioInputPerM": null,
+      "audioOutputPerM": null,
+      "perMinute": "0",
+      "perMCharacters": "0",
+      "schedule": null,
+      "scheduleTimezone": "Asia/Shanghai",
+      "channelName": null
+    },
+    {
+      "kind": "sell",
+      "model": "gpt-image-2",
+      "inputPerM": "0",
+      "outputPerM": "0",
+      "cacheReadPerM": "0",
+      "cacheWritePerM": "0",
+      "perRequest": "0",
+      "perImage": "0.05",
+      "imageInputPerM": null,
+      "audioInputPerM": null,
+      "audioOutputPerM": null,
+      "perMinute": "0",
+      "perMCharacters": "0",
+      "schedule": null,
+      "scheduleTimezone": "Asia/Shanghai",
+      "channelName": null
+    }
+  ],
+  "modelInfo": [
+    {
+      "model": "gpt-5.6-luna",
+      "displayName": "",
+      "description": "",
+      "vendor": "OpenAI",
+      "tags": [],
+      "contextWindow": 1000000,
+      "maxOutput": 128000,
+      "capabilities": {
+        "vision": true,
+        "tools": true,
+        "reasoning": true,
+        "embedding": false,
+        "imageGeneration": false,
+        "audioInput": false,
+        "audioOutput": false
+      },
+      "hidden": false,
+      "sortOrder": 0
+    },
+    {
+      "model": "gpt-5.6-sol",
+      "displayName": "",
+      "description": "",
+      "vendor": "OpenAI",
+      "tags": [],
+      "contextWindow": 1000000,
+      "maxOutput": 128000,
+      "capabilities": {
+        "vision": true,
+        "tools": true,
+        "reasoning": true,
+        "embedding": false,
+        "imageGeneration": false,
+        "audioInput": false,
+        "audioOutput": false
+      },
+      "hidden": false,
+      "sortOrder": 0
+    },
+    {
+      "model": "gpt-5.6-terra",
+      "displayName": "",
+      "description": "",
+      "vendor": "OpenAI",
+      "tags": [],
+      "contextWindow": 1000000,
+      "maxOutput": 128000,
+      "capabilities": {
+        "vision": true,
+        "tools": true,
+        "reasoning": true,
+        "embedding": false,
+        "imageGeneration": false,
+        "audioInput": false,
+        "audioOutput": false
+      },
+      "hidden": false,
+      "sortOrder": 0
+    },
+    {
+      "model": "gpt-6-astra",
+      "displayName": "",
+      "description": "",
+      "vendor": "OpenAI",
+      "tags": [],
+      "contextWindow": 1000000,
+      "maxOutput": 128000,
+      "capabilities": {
+        "vision": true,
+        "tools": true,
+        "reasoning": true,
+        "embedding": false,
+        "imageGeneration": false,
+        "audioInput": false,
+        "audioOutput": false
+      },
+      "hidden": false,
+      "sortOrder": 0
+    },
+    {
+      "model": "gpt-6-luna",
+      "displayName": "",
+      "description": "",
+      "vendor": "OpenAI",
+      "tags": [],
+      "contextWindow": 1000000,
+      "maxOutput": 128000,
+      "capabilities": {
+        "vision": true,
+        "tools": true,
+        "reasoning": true,
+        "embedding": false,
+        "imageGeneration": false,
+        "audioInput": false,
+        "audioOutput": false
+      },
+      "hidden": false,
+      "sortOrder": 0
+    },
+    {
+      "model": "gpt-6-sol",
+      "displayName": "",
+      "description": "",
+      "vendor": "OpenAI",
+      "tags": [],
+      "contextWindow": 1000000,
+      "maxOutput": 128000,
+      "capabilities": {
+        "vision": true,
+        "tools": true,
+        "reasoning": true,
+        "embedding": false,
+        "imageGeneration": false,
+        "audioInput": false,
+        "audioOutput": false
+      },
+      "hidden": false,
+      "sortOrder": 0
+    },
+    {
+      "model": "gpt-6.1-sol",
+      "displayName": "",
+      "description": "",
+      "vendor": "OpenAI",
+      "tags": [],
+      "contextWindow": 1000000,
+      "maxOutput": 128000,
+      "capabilities": {
+        "vision": true,
+        "tools": true,
+        "reasoning": true,
+        "embedding": false,
+        "imageGeneration": false,
+        "audioInput": false,
+        "audioOutput": false
+      },
+      "hidden": false,
+      "sortOrder": 0
+    },
+    {
+      "model": "gpt-image-2",
+      "displayName": "",
+      "description": "",
+      "vendor": "OpenAI",
+      "tags": [],
+      "contextWindow": null,
+      "maxOutput": null,
+      "capabilities": {
+        "vision": false,
+        "tools": false,
+        "reasoning": false,
+        "embedding": false,
+        "imageGeneration": true,
+        "audioInput": false,
+        "audioOutput": false
+      },
+      "hidden": false,
+      "sortOrder": 0
+    }
+  ],
+  "plans": [
+    {
+      "name": "Go 启航者",
+      "description": "轻量体验、偶尔调用：适合初次体验 AI 编程与对话，或每天只零星调用几次的用户。月度总额度 $24，为售价的 8 倍。\n① 三重限额并行生效：5 小时滚动、7 天滚动、月度（按购买日起算的 30 天）同时管控，任意一项触达上限即限流——滚动窗口随较早用量过期逐步恢复，月度额度在下一个订阅月开始时重置。\n② Token 按官方原价计费：模型消耗按官方原生定价计算，平台不加收额外费用。\n③ 月度额度当月有效：未使用额度不结转至下月。",
+      "listPrice": "3",
+      "duration": "30d",
+      "models": [],
+      "stackable": false,
+      "status": "active",
+      "rules": [
+        {
+          "id": "5h",
+          "label": "5 小时滚动限额",
+          "meter": "charge",
+          "window": {
+            "kind": "rolling",
+            "duration": "5h"
+          },
+          "limit": "6",
+          "models": [],
+          "modelWeights": {}
+        },
+        {
+          "id": "weekly",
+          "label": "每周滚动限额",
+          "meter": "charge",
+          "window": {
+            "kind": "rolling",
+            "duration": "7d"
+          },
+          "limit": "12",
+          "models": [],
+          "modelWeights": {}
+        },
+        {
+          "id": "monthly",
+          "label": "月度总额度",
+          "meter": "charge",
+          "window": {
+            "kind": "period",
+            "every": "30d"
+          },
+          "limit": "24",
+          "models": [],
+          "modelWeights": {}
+        }
+      ]
+    },
+    {
+      "name": "Plus 进阶者",
+      "description": "个人日常开发与写作：适合每天用 AI 辅助编码、写文档和日常问答的个人用户。月度总额度 $80，为售价的 8 倍。\n① 三重限额并行生效：5 小时滚动、7 天滚动、月度（按购买日起算的 30 天）同时管控，任意一项触达上限即限流——滚动窗口随较早用量过期逐步恢复，月度额度在下一个订阅月开始时重置。\n② Token 按官方原价计费：模型消耗按官方原生定价计算，平台不加收额外费用。\n③ 月度额度当月有效：未使用额度不结转至下月。",
+      "listPrice": "10",
+      "duration": "30d",
+      "models": [],
+      "stackable": false,
+      "status": "active",
+      "rules": [
+        {
+          "id": "5h",
+          "label": "5 小时滚动限额",
+          "meter": "charge",
+          "window": {
+            "kind": "rolling",
+            "duration": "5h"
+          },
+          "limit": "20",
+          "models": [],
+          "modelWeights": {}
+        },
+        {
+          "id": "weekly",
+          "label": "每周滚动限额",
+          "meter": "charge",
+          "window": {
+            "kind": "rolling",
+            "duration": "7d"
+          },
+          "limit": "40",
+          "models": [],
+          "modelWeights": {}
+        },
+        {
+          "id": "monthly",
+          "label": "月度总额度",
+          "meter": "charge",
+          "window": {
+            "kind": "period",
+            "every": "30d"
+          },
+          "limit": "80",
+          "models": [],
+          "modelWeights": {}
+        }
+      ]
+    },
+    {
+      "name": "Pro 专业者",
+      "description": "高频使用的专业开发者：适合把 AI 作为主力工具、工作日全天高频调用的开发者。月度总额度 $120，为售价的 8 倍。\n① 三重限额并行生效：5 小时滚动、7 天滚动、月度（按购买日起算的 30 天）同时管控，任意一项触达上限即限流——滚动窗口随较早用量过期逐步恢复，月度额度在下一个订阅月开始时重置。\n② Token 按官方原价计费：模型消耗按官方原生定价计算，平台不加收额外费用。\n③ 月度额度当月有效：未使用额度不结转至下月。",
+      "listPrice": "15",
+      "duration": "30d",
+      "models": [],
+      "stackable": false,
+      "status": "active",
+      "rules": [
+        {
+          "id": "5h",
+          "label": "5 小时滚动限额",
+          "meter": "charge",
+          "window": {
+            "kind": "rolling",
+            "duration": "5h"
+          },
+          "limit": "30",
+          "models": [],
+          "modelWeights": {}
+        },
+        {
+          "id": "weekly",
+          "label": "每周滚动限额",
+          "meter": "charge",
+          "window": {
+            "kind": "rolling",
+            "duration": "7d"
+          },
+          "limit": "60",
+          "models": [],
+          "modelWeights": {}
+        },
+        {
+          "id": "monthly",
+          "label": "月度总额度",
+          "meter": "charge",
+          "window": {
+            "kind": "period",
+            "every": "30d"
+          },
+          "limit": "120",
+          "models": [],
+          "modelWeights": {}
+        }
+      ]
+    },
+    {
+      "name": "Max 高能者",
+      "description": "重度使用、长时间编码会话：适合长时间运行 Claude Code 等编程智能体的重度用户。月度总额度 $160，为售价的 8 倍。\n① 三重限额并行生效：5 小时滚动、7 天滚动、月度（按购买日起算的 30 天）同时管控，任意一项触达上限即限流——滚动窗口随较早用量过期逐步恢复，月度额度在下一个订阅月开始时重置。\n② Token 按官方原价计费：模型消耗按官方原生定价计算，平台不加收额外费用。\n③ 月度额度当月有效：未使用额度不结转至下月。",
+      "listPrice": "20",
+      "duration": "30d",
+      "models": [],
+      "stackable": false,
+      "status": "active",
+      "rules": [
+        {
+          "id": "5h",
+          "label": "5 小时滚动限额",
+          "meter": "charge",
+          "window": {
+            "kind": "rolling",
+            "duration": "5h"
+          },
+          "limit": "40",
+          "models": [],
+          "modelWeights": {}
+        },
+        {
+          "id": "weekly",
+          "label": "每周滚动限额",
+          "meter": "charge",
+          "window": {
+            "kind": "rolling",
+            "duration": "7d"
+          },
+          "limit": "80",
+          "models": [],
+          "modelWeights": {}
+        },
+        {
+          "id": "monthly",
+          "label": "月度总额度",
+          "meter": "charge",
+          "window": {
+            "kind": "period",
+            "every": "30d"
+          },
+          "limit": "160",
+          "models": [],
+          "modelWeights": {}
+        }
+      ]
+    },
+    {
+      "name": "Ultra 卓越者",
+      "description": "小团队或多项目并行：适合小团队协作或多个项目同时推进、用量持续较高的场景。月度总额度 $240，为售价的 8 倍。\n① 三重限额并行生效：5 小时滚动、7 天滚动、月度（按购买日起算的 30 天）同时管控，任意一项触达上限即限流——滚动窗口随较早用量过期逐步恢复，月度额度在下一个订阅月开始时重置。\n② Token 按官方原价计费：模型消耗按官方原生定价计算，平台不加收额外费用。\n③ 月度额度当月有效：未使用额度不结转至下月。",
+      "listPrice": "30",
+      "duration": "30d",
+      "models": [],
+      "stackable": false,
+      "status": "active",
+      "rules": [
+        {
+          "id": "5h",
+          "label": "5 小时滚动限额",
+          "meter": "charge",
+          "window": {
+            "kind": "rolling",
+            "duration": "5h"
+          },
+          "limit": "60",
+          "models": [],
+          "modelWeights": {}
+        },
+        {
+          "id": "weekly",
+          "label": "每周滚动限额",
+          "meter": "charge",
+          "window": {
+            "kind": "rolling",
+            "duration": "7d"
+          },
+          "limit": "120",
+          "models": [],
+          "modelWeights": {}
+        },
+        {
+          "id": "monthly",
+          "label": "月度总额度",
+          "meter": "charge",
+          "window": {
+            "kind": "period",
+            "every": "30d"
+          },
+          "limit": "240",
+          "models": [],
+          "modelWeights": {}
+        }
+      ]
+    },
+    {
+      "name": "Elite 精英者",
+      "description": "高强度、大规模调用：适合批量任务、自动化流程等高强度、大规模的调用需求。月度总额度 $400，为售价的 8 倍。\n① 三重限额并行生效：5 小时滚动、7 天滚动、月度（按购买日起算的 30 天）同时管控，任意一项触达上限即限流——滚动窗口随较早用量过期逐步恢复，月度额度在下一个订阅月开始时重置。\n② Token 按官方原价计费：模型消耗按官方原生定价计算，平台不加收额外费用。\n③ 月度额度当月有效：未使用额度不结转至下月。",
+      "listPrice": "50",
+      "duration": "30d",
+      "models": [],
+      "stackable": false,
+      "status": "active",
+      "rules": [
+        {
+          "id": "5h",
+          "label": "5 小时滚动限额",
+          "meter": "charge",
+          "window": {
+            "kind": "rolling",
+            "duration": "5h"
+          },
+          "limit": "100",
+          "models": [],
+          "modelWeights": {}
+        },
+        {
+          "id": "weekly",
+          "label": "每周滚动限额",
+          "meter": "charge",
+          "window": {
+            "kind": "rolling",
+            "duration": "7d"
+          },
+          "limit": "200",
+          "models": [],
+          "modelWeights": {}
+        },
+        {
+          "id": "monthly",
+          "label": "月度总额度",
+          "meter": "charge",
+          "window": {
+            "kind": "period",
+            "every": "30d"
+          },
+          "limit": "400",
+          "models": [],
+          "modelWeights": {}
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+{
+  "id": "community.deepseek",
+  "name": "DeepSeek",
+  "version": "1.0.3",
+  "sdk": 1,
+  "description": "DeepSeek 官方 API：OpenAI 兼容协议，附带余额查询、模型发现与健康检查。",
+  "author": "OmniGate",
+  "homepage": "https://api-docs.deepseek.com/",
+  "extends": "openai.chat",
+  "entry": "src/index.ts",
+  "defaults": {
+    "baseUrl": "https://api.deepseek.com/v1",
+    "models": [
+      { "model": "deepseek-chat", "upstreamModel": "deepseek-chat" },
+      { "model": "deepseek-reasoner", "upstreamModel": "deepseek-reasoner" }
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "currency": { "type": "string", "title": "余额币种", "description": "账户有多个币种余额时显示哪一个", "enum": ["CNY", "USD"], "default": "CNY" }
+    }
+  },
+  "permissions": {
+    "network": ["api.deepseek.com", "$baseUrl"],
+    "secrets": ["apiKey"],
+    "schedule": ["balance.get"]
+  },
+  "capabilities": {
+    "balance.get": { "output": "balance", "userTriggerable": true, "schedule": { "minInterval": "10m" }, "timeout": "10s", "label": "余额" },
+    "models.list": { "output": "models", "userTriggerable": true, "timeout": "10s", "label": "模型列表" },
+    "health.check": { "output": "health", "userTriggerable": true, "timeout": "10s", "label": "健康检查" },
+    "usage.query": { "output": "usage", "userTriggerable": true, "label": "用量" }
+  },
+  "hooks": [],
+  "uiContributions": [
+    {
+      "slot": "channel.detail.overview",
+      "title": "DeepSeek 账户余额",
+      "component": {
+        "type": "statGroup",
+        "items": [
+          { "type": "stat", "label": "总余额", "bind": "balance.get:/total", "format": "money", "currencyBind": "balance.get:/currency" },
+          { "type": "stat", "label": "赠送余额", "bind": "balance.get:/granted", "format": "money", "currencyBind": "balance.get:/currency" },
+          { "type": "stat", "label": "充值余额", "bind": "balance.get:/toppedUp", "format": "money", "currencyBind": "balance.get:/currency" },
+          { "type": "stat", "label": "可调用", "bind": "balance.get:/available", "format": "boolean" }
+        ]
+      },
+      "actions": [{ "label": "刷新余额", "capability": "balance.get" }]
+    },
+    {
+      "slot": "channel.list.badge",
+      "component": { "type": "badge", "bind": "balance.get:/total", "format": "money", "currencyBind": "balance.get:/currency" }
+    },
+    {
+      "slot": "channel.detail.capabilities",
+      "title": "上游模型",
+      "component": { "type": "table", "rowsBind": "models.list:/models", "columns": [{ "key": "id", "label": "模型 ID" }] },
+      "actions": [{ "label": "同步模型列表", "capability": "models.list" }, { "label": "健康检查", "capability": "health.check" }]
+    }
+  ]
+}

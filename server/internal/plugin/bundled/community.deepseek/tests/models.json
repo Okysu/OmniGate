@@ -1,0 +1,11 @@
+{
+  "name": "模型发现",
+  "capability": "models.list",
+  "secrets": { "apiKey": "sk-test" },
+  "fetch": [
+    { "match": { "url": "https://api.deepseek.com/v1/models" }, "response": { "status": 200, "headers": { "Content-Type": "application/json" }, "json": { "object": "list", "data": [
+      { "id": "deepseek-chat", "object": "model" }, { "id": "deepseek-reasoner", "object": "model" }
+    ] } } }
+  ],
+  "expect": { "output": { "models": [{ "id": "deepseek-chat" }, { "id": "deepseek-reasoner" }] } }
+}

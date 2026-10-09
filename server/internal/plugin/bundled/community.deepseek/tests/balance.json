@@ -1,0 +1,16 @@
+{
+  "name": "余额正常（多币种取配置的币种）",
+  "capability": "balance.get",
+  "config": { "currency": "USD" },
+  "secrets": { "apiKey": "sk-test" },
+  "fetch": [
+    {
+      "match": { "method": "GET", "url": "https://api.deepseek.com/user/balance" },
+      "response": { "status": 200, "headers": { "Content-Type": "application/json" }, "json": { "is_available": true, "balance_infos": [
+        { "currency": "CNY", "total_balance": "110.00", "granted_balance": "10.00", "topped_up_balance": "100.00" },
+        { "currency": "USD", "total_balance": "3.50", "granted_balance": "0.00", "topped_up_balance": "3.50" }
+      ] } }
+    }
+  ],
+  "expect": { "output": { "currency": "USD", "total": "3.50", "toppedUp": "3.50", "available": true } }
+}

@@ -1,0 +1,7 @@
+# 兼容旧命令：`docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d`
+# 等同于 `docker compose --profile caddy up -d`。Caddy 服务本身定义在 docker-compose.yml 中（profile: caddy）。
+# 新部署直接用 --profile caddy，或在 deploy/.env 中写 COMPOSE_PROFILES=caddy。
+
+services:
+  caddy:
+    profiles: !reset []

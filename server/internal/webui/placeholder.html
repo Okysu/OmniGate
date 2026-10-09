@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmniGate</title>
+</head>
+<body style="font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.6">
+<h1>OmniGate</h1>
+<p><strong>前端未构建</strong>：当前二进制没有嵌入管理后台页面。运行 <code>make build</code>（或构建 Docker 镜像）会先构建 <code>web/</code> 并嵌入前端。</p>
+<p>后端 API 已正常运行：<code>/v1</code>（模型网关）、<code>/api</code>（控制面）、<code>/healthz</code>、<code>/readyz</code>。</p>
+<p>本地开发请运行 <code>make dev-web</code> 并访问 <code>http://localhost:5173</code>；也可以用 <code>OMNIGATE_WEB_DIR</code> 指向一份已构建的前端目录。</p>
+</body>
+</html>

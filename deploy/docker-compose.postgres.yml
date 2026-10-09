@@ -1,0 +1,15 @@
+# 兼容旧命令：`docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d`
+# 开启 docker-compose.yml 中的 postgres 服务（等同于 --profile postgres），并按 deploy/.env 的 POSTGRES_PASSWORD
+# 自动设置 OMNIGATE_DATABASE_URL（覆盖 omnigate.env 中的值）。
+# 新部署推荐：--profile postgres，并在 omnigate.env 中自己写连接串（见 omnigate.env.example 方案 C）。
+
+services:
+  postgres:
+    profiles: !reset []
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?在 deploy/.env 中设置 POSTGRES_PASSWORD}
+
+  omnigate:
+    environment:
+      # environment 优先于 env_file。
+      OMNIGATE_DATABASE_URL: postgres://omnigate:${POSTGRES_PASSWORD}@postgres:5432/omnigate?sslmode=disable

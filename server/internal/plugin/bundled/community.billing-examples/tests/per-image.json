@@ -1,0 +1,7 @@
+{
+  "name": "图片张数",
+  "meter": "per_image",
+  "usage": { "input": 12, "output": 0, "images": 3 },
+  "billingCtx": { "model": "gpt-image-1", "servedModel": "gpt-image-1", "inbound": "openai.images.generations", "imageCount": 3 },
+  "expect": { "output": "3" }
+}

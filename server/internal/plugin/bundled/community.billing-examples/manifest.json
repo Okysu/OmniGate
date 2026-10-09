@@ -1,0 +1,21 @@
+{
+  "id": "community.billing-examples",
+  "name": "计费示例",
+  "version": "1.0.0",
+  "sdk": 1,
+  "description": "计费插件示例：weighted_tokens（输出 token × 4 + 输入 token）与 per_image（图片张数），可用作套餐规则的自定义计量。",
+  "author": "OmniGate",
+  "kind": ["billing"],
+  "entry": "src/index.ts",
+  "defaults": {},
+  "permissions": { "network": [], "secrets": [], "schedule": [] },
+  "capabilities": {},
+  "hooks": [],
+  "uiContributions": [],
+  "billing": {
+    "meters": {
+      "weighted_tokens": { "label": "加权 token（输出 ×4）", "unit": "token" },
+      "per_image": { "label": "图片张数", "unit": "张" }
+    }
+  }
+}
