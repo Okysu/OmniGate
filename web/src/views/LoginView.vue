@@ -2,7 +2,7 @@
 import type { AuthProvider } from '@/lib/types'
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { Ban, CircleAlert, KeyRound, Loader2, LogIn, Settings2 } from '@lucide/vue'
+import { Ban, CircleAlert, Gift, KeyRound, Loader2, LogIn, Settings2 } from '@lucide/vue'
 import AppLogo from '@/components/AppLogo.vue'
 import GithubIcon from '@/components/GithubIcon.vue'
 import ThemeToggle from '@/components/layout/ThemeToggle.vue'
@@ -12,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { errorMessage } from '@/lib/api'
 import { authApi } from '@/lib/endpoints'
 import { safeRedirect } from '@/lib/paths'
+import { loadInviteCode, normalizeInviteCode } from '@/lib/referral'
 import { siteNameOf } from '@/lib/site'
 import { disabledNotice } from '@/lib/userAdmin'
 import { useSystemStore } from '@/stores/system'
@@ -48,6 +49,9 @@ const loginError = computed<string | null>(() => {
 
 const redirect = computed(() => safeRedirect(route.query.redirect))
 
+/** phase15 §4.2: invite code from this URL or remembered from an earlier page (30 days). */
+const invite = computed(() => normalizeInviteCode(route.query.invite) ?? loadInviteCode())
+
 const registrationHint = computed(() => {
   switch (system.info?.registrationMode) {
     case 'open': return '首次登录将自动创建账号。'
@@ -75,7 +79,7 @@ async function loadProviders() {
 function login(p: AuthProvider) {
   pendingProvider.value = p.id
   // Full-page navigation: the backend redirects to the IdP and back.
-  window.location.assign(authApi.loginUrl(p.id, redirect.value))
+  window.location.assign(authApi.loginUrl(p.id, redirect.value, invite.value))
 }
 
 onMounted(() => {
@@ -182,9 +186,13 @@ onMounted(() => {
           </div>
         </CardContent>
 
-        <CardFooter v-if="registrationHint" class="justify-center">
-          <p class="text-muted-foreground text-center text-xs">
+        <CardFooter v-if="registrationHint || invite" class="flex-col justify-center gap-1">
+          <p v-if="registrationHint" class="text-muted-foreground text-center text-xs">
             {{ registrationHint }}
+          </p>
+          <p v-if="invite" class="text-muted-foreground inline-flex items-center gap-1 text-center text-xs" data-testid="invite-hint">
+            <Gift class="size-3.5" aria-hidden="true" />
+            通过邀请链接注册
           </p>
         </CardFooter>
       </Card>

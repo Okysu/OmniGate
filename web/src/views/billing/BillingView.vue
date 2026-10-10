@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { CatalogPlan, LedgerEntry, QuotaOverflow, Subscription, Wallet } from '@/lib/types'
+import type { LedgerEntry, QuotaOverflow, Subscription, Wallet } from '@/lib/types'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ChevronDown, Loader2, Package, ReceiptText, RefreshCw, Ticket } from '@lucide/vue'
+import { ChevronDown, Loader2, Package, ReceiptText, RefreshCw, ShoppingCart, Ticket } from '@lucide/vue'
 import { useIntervalFn, useNow } from '@vueuse/core'
 import { toast } from 'vue-sonner'
 import DataPagination from '@/components/DataPagination.vue'
@@ -24,7 +24,7 @@ import { formatDateTime } from '@/lib/format'
 import { LEDGER_KIND_LABELS, REF_TYPE_LABELS } from '@/lib/labels'
 import { amountSign } from '@/lib/money'
 import { isAbortError, queryInt } from '@/lib/query'
-import { formatDuration, isQuotaOverflow, modelsSummary, PLAN_ERROR_MESSAGES, QUOTA_OVERFLOW_OPTIONS, QUOTA_OVERFLOW_SHORT, rulesSummary, sortSubscriptions } from '@/lib/quota'
+import { isQuotaOverflow, PLAN_ERROR_MESSAGES, QUOTA_OVERFLOW_OPTIONS, QUOTA_OVERFLOW_SHORT, sortSubscriptions } from '@/lib/quota'
 import { normalizeRedeemCode, REDEEM_ERROR_MESSAGES } from '@/lib/redeem'
 import ResetCardsSection from './reset-cards/ResetCardsSection.vue'
 import UsageLimitsCard from './UsageLimitsCard.vue'
@@ -84,7 +84,7 @@ async function loadLedger() {
 watch(page, loadLedger, { immediate: true })
 onBeforeUnmount(() => controller?.abort())
 
-// ---------- subscriptions & catalog ----------
+// ---------- subscriptions ----------
 const now = useNow({ scheduler: cb => useIntervalFn(cb, 30_000) })
 const subscriptions = ref<Subscription[] | null>(null)
 const subsLoading = ref(false)
@@ -106,33 +106,6 @@ onMounted(loadSubscriptions)
 const activeSubs = computed(() => (subscriptions.value ?? []).filter(s => s.status === 'active'))
 const pastSubs = computed(() => (subscriptions.value ?? []).filter(s => s.status !== 'active'))
 const pastOpen = ref(false)
-
-const catalog = ref<CatalogPlan[] | null>(null)
-const catalogError = ref<unknown>(null)
-async function loadCatalog() {
-  catalogError.value = null
-  try {
-    catalog.value = (await billingApi.catalog()).items
-  }
-  catch (err) {
-    catalogError.value = err
-  }
-}
-onMounted(loadCatalog)
-/**
- * Plan descriptions (often several lines of rules) are shown in full; only very long
- * ones collapse to a few lines behind a 展开 / 收起 toggle.
- */
-const expandedPlans = ref(new Set<string>())
-function isLongDescription(d: string): boolean {
-  return d.length > 400 || d.split('\n').length > 10
-}
-function togglePlanDescription(id: string) {
-  const next = new Set(expandedPlans.value)
-  if (!next.delete(id))
-    next.add(id)
-  expandedPlans.value = next
-}
 
 // ---------- quota overflow preference ----------
 const overflow = ref<QuotaOverflow | null>(null)
@@ -183,7 +156,6 @@ function refresh() {
   void loadWallet()
   void loadLedger()
   void loadSubscriptions()
-  void loadCatalog()
   void loadPreferences()
 }
 
@@ -242,7 +214,7 @@ function amountClass(v: string): string {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="钱包与订阅" description="账户余额、套餐订阅与额度、重置卡、兑换码兑换与资金流水。金额以系统结算币种计。">
+    <PageHeader title="钱包与订阅" description="账户余额、套餐订阅与额度、重置卡、兑换码兑换与资金流水。购买套餐请前往「购买套餐」。金额以系统结算币种计。">
       <template #actions>
         <Button variant="outline" size="sm" :disabled="walletLoading || ledgerLoading || subsLoading" @click="refresh">
           <RefreshCw :class="walletLoading || ledgerLoading || subsLoading ? 'animate-spin' : ''" />
@@ -340,6 +312,12 @@ function amountClass(v: string): string {
             套餐覆盖的模型优先使用套餐额度，不扣钱包余额；额度用完后的处理方式由下方设置决定。
           </p>
         </div>
+        <Button size="sm" as-child data-testid="store-link">
+          <RouterLink to="/console/store">
+            <ShoppingCart />
+            购买 / 续费 / 升级套餐
+          </RouterLink>
+        </Button>
       </div>
       <div class="bg-card ring-foreground/10 space-y-3 rounded-xl p-4 ring-1" data-testid="overflow-setting">
         <div class="flex items-start justify-between gap-2">
@@ -385,13 +363,13 @@ function amountClass(v: string): string {
       </div>
       <template v-else>
         <div v-if="activeSubs.length" class="grid gap-4 lg:grid-cols-2">
-          <SubscriptionCard v-for="s in activeSubs" :key="s.id" :subscription="s" :now="now.getTime()" :overflow="overflow" />
+          <SubscriptionCard v-for="s in activeSubs" :key="s.id" :subscription="s" :now="now.getTime()" :overflow="overflow" store-link />
         </div>
         <EmptyState
           v-else
           :icon="Package"
           title="暂无有效订阅"
-          description="套餐可通过兑换码或由管理员开通；没有订阅时，请求按钱包余额计费。"
+          description="可在「购买套餐」中用余额购买，也可通过兑换码或由管理员开通；没有订阅时，请求按钱包余额计费。"
           class="rounded-xl border"
         />
         <Collapsible v-if="pastSubs.length" v-model:open="pastOpen">
@@ -480,64 +458,6 @@ function amountClass(v: string): string {
           :disabled="ledgerLoading"
           @update:page="(p) => router.replace({ query: { ...route.query, page: p > 1 ? String(p) : undefined } })"
         />
-      </CardContent>
-    </Card>
-
-    <Card>
-      <CardHeader>
-        <CardTitle class="text-base">
-          套餐目录
-        </CardTitle>
-        <CardDescription>当前可开通的套餐。套餐通过兑换码或由管理员开通，暂不支持在线购买。</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ErrorState v-if="catalogError" :error="catalogError" @retry="loadCatalog" />
-        <div v-else-if="catalog === null" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <Skeleton v-for="i in 3" :key="i" class="h-28 w-full" />
-        </div>
-        <p v-else-if="catalog.length === 0" class="text-muted-foreground text-sm">
-          暂无可开通的套餐。
-        </p>
-        <ul v-else class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <li v-for="p in catalog" :key="p.id" class="flex min-w-0 flex-col gap-2 rounded-lg border p-3">
-            <div class="flex items-start justify-between gap-2">
-              <p class="min-w-0 truncate font-medium" :title="p.name">
-                {{ p.name }}
-              </p>
-              <span class="shrink-0 text-sm font-medium tabular-nums">
-                {{ p.listPrice === null ? '未标价' : money(p.listPrice) }}
-              </span>
-            </div>
-            <div v-if="p.description" class="text-muted-foreground text-xs">
-              <p
-                :id="`plan-desc-${p.id}`"
-                class="break-words whitespace-pre-line"
-                :class="isLongDescription(p.description) && !expandedPlans.has(p.id) ? 'line-clamp-6' : ''"
-                data-testid="plan-description"
-              >
-                {{ p.description.trim() }}
-              </p>
-              <button
-                v-if="isLongDescription(p.description)"
-                type="button"
-                class="text-foreground mt-1 rounded-sm font-medium underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
-                :aria-expanded="expandedPlans.has(p.id)"
-                :aria-controls="`plan-desc-${p.id}`"
-                @click="togglePlanDescription(p.id)"
-              >
-                {{ expandedPlans.has(p.id) ? '收起' : '展开' }}
-              </button>
-            </div>
-            <p class="text-xs">
-              {{ rulesSummary(p.rules, money) }}
-            </p>
-            <div class="text-muted-foreground mt-auto flex flex-wrap gap-x-3 gap-y-1 text-xs">
-              <span>每份有效期 {{ formatDuration(p.duration) }}</span>
-              <span>{{ modelsSummary(p.models) }}</span>
-              <span>{{ p.stackable ? '可叠加' : '重复开通将续期' }}</span>
-            </div>
-          </li>
-        </ul>
       </CardContent>
     </Card>
   </div>

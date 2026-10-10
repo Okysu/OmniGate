@@ -24,6 +24,12 @@ import type {
   PluginTestCase,
   PluginTestResult,
   PluginVersion,
+  PurchaseInput,
+  PurchaseOptions,
+  PurchaseRecord,
+  PurchaseResult,
+  ReferralInfo,
+  ReferralRebate,
   AuthProvidersResponse,
   BatchStatus,
   BillingLimits,
@@ -106,8 +112,9 @@ export const systemApi = {
 export const authApi = {
   providers: () => api.get<AuthProvidersResponse>('/api/auth/providers'),
   /** Login is a full-page navigation (not fetch): the backend redirects to the IdP. */
-  loginUrl: (providerId: string, redirect: string) =>
-    `/api/auth/${enc(providerId)}/login?redirect=${enc(redirect)}`,
+  /** phase15 §4.2: `invite` binds a newly created account to the inviter (ignored for existing users). */
+  loginUrl: (providerId: string, redirect: string, invite?: string | null) =>
+    `/api/auth/${enc(providerId)}/login?redirect=${enc(redirect)}${invite ? `&invite=${enc(invite)}` : ''}`,
   logout: () => api.post<void>('/api/auth/logout', undefined, { skipAuthRedirect: true }),
 }
 
@@ -314,6 +321,18 @@ export const billingApi = {
   limits: (signal?: AbortSignal) => api.get<BillingLimits>('/api/billing/limits', { signal }),
   /** Active plans (catalog visible to every signed-in user; trimmed, no admin-only fields). */
   catalog: (signal?: AbortSignal) => api.get<Paginated<CatalogPlan>>('/api/plans', { signal }),
+  /** phase15 §3.1: plans for sale with server-computed prices, renewals and upgrades. */
+  purchaseOptions: (signal?: AbortSignal) => api.get<PurchaseOptions>('/api/billing/purchase/options', { signal }),
+  /** phase15 §3.2: buy / renew, or upgrade with `fromSubscriptionId`, paid from the wallet. */
+  purchase: (body: PurchaseInput) => api.post<PurchaseResult>('/api/billing/purchase', body),
+  /** phase15 §3.3: my purchase records, newest first. */
+  purchases: (params: { page: number, pageSize: number }, signal?: AbortSignal) =>
+    api.get<Paginated<PurchaseRecord>>('/api/billing/purchases', { query: { ...params }, signal }),
+  /** phase15 §4.4: my invite code / link, invitees and rebate total. */
+  referral: (signal?: AbortSignal) => api.get<ReferralInfo>('/api/billing/referral', { signal }),
+  /** phase15 §4.4: rebate records, newest first. */
+  referralRebates: (params: { page: number, pageSize: number }, signal?: AbortSignal) =>
+    api.get<Paginated<ReferralRebate>>('/api/billing/referral/rebates', { query: { ...params }, signal }),
 }
 
 export interface ListSubscriptionsParams {

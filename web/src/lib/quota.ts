@@ -430,6 +430,7 @@ export const SUBSCRIPTION_STATUS_LABELS: Record<string, string> = {
 export const SUBSCRIPTION_SOURCE_LABELS: Record<string, string> = {
   admin: '管理员开通',
   redeem: '兑换码',
+  purchase: '余额购买',
 }
 
 export const PLAN_STATUS_LABELS: Record<string, string> = {
@@ -441,4 +442,9 @@ export const PLAN_STATUS_LABELS: Record<string, string> = {
 export const PLAN_ERROR_MESSAGES: Record<string, string> = {
   plan_archived: '套餐已下架，不能再开通。',
   subscription_not_active: '订阅已不是有效状态（可能已过期或已被取消）。',
+  // phase15 §3.2: wallet purchases.
+  plan_not_for_sale: '该套餐暂不支持余额购买，可通过兑换码或联系管理员开通。',
+  not_an_upgrade: '无法升级：目标套餐不比当前套餐更贵，或你已持有目标套餐（请改为续费）。',
+  insufficient_balance: '钱包余额不足，请先使用兑换码充值。',
+  price_changed: '套餐价格已变化，请确认新价格后重试。',
 }

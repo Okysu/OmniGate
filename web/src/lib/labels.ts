@@ -76,6 +76,9 @@ export const REF_TYPE_LABELS: Record<string, string> = {
   request: '请求',
   redeem: '兑换码',
   admin: '管理员',
+  signup: '注册赠送',
+  purchase: '购买套餐',
+  referral: '邀请返利',
 }
 
 export const PRICE_KIND_LABELS: Record<PriceKind, string> = {

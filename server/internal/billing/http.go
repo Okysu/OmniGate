@@ -18,6 +18,8 @@ import (
 // Handler serves /api/billing/* (Routes) and /api/admin/billing/* (AdminRoutes).
 type Handler struct {
 	svc *Service
+	// PublicURL is the external base URL (invite links); set before use.
+	PublicURL string
 }
 
 func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
@@ -28,6 +30,7 @@ func (h *Handler) Routes(r chi.Router) {
 	own.Get("/billing/wallet", h.wallet)
 	own.Get("/billing/ledger", h.ledger)
 	own.Post("/billing/redeem", h.redeem)
+	h.purchaseRoutes(own)
 }
 
 // AdminRoutes registers the management endpoints; mount on the /api/admin router.

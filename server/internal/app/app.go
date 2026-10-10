@@ -221,7 +221,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *db.DB,
 		pricingH: pricing.NewHandler(prices, reg),
 		logsH:    requestlog.NewHandler(pool),
 		billing:  bill,
-		billingH: billing.NewHandler(bill),
+		billingH: billingHandler(bill, cfg.PublicURL.String()),
 		logs:     logs,
 		gw:       gw,
 		subsH:    subscription.NewHandler(subs),
@@ -245,6 +245,7 @@ func (a *App) Start(ctx context.Context) {
 		func() { a.billing.RunSweeper(ctx, time.Minute) },
 		func() { a.plugins.Engine().RunWatchdog(ctx) },
 		func() { a.channels.RunCapabilityScheduler(ctx, a.log) },
+		func() { a.channels.RunRecoveryProber(ctx, a.log) },
 		func() { a.subs.RunSweeper(ctx, time.Hour) },
 		func() { a.adminH.RunAutoEnable(ctx, time.Minute) },
 		func() { a.r6.notify.Run(ctx) },
@@ -526,4 +527,11 @@ func ensureCurrency(ctx context.Context, pool *db.DB, code string, log *slog.Log
 			"stored", stored.Code, "env", want.Code)
 	}
 	return stored, nil
+}
+
+// billingHandler serves /api/billing/*; publicURL builds invite links.
+func billingHandler(bill *billing.Service, publicURL string) *billing.Handler {
+	h := billing.NewHandler(bill)
+	h.PublicURL = publicURL
+	return h
 }

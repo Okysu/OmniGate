@@ -19,6 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useCurrency } from '@/composables/useCurrency'
 import { errorMessage, isVersionConflict } from '@/lib/api'
 import { plansApi } from '@/lib/endpoints'
+import { amountSign } from '@/lib/money'
 import { isAbortError, queryInt, queryStr } from '@/lib/query'
 import { formatDuration, modelsSummary, PLAN_STATUS_LABELS, ruleSummary } from '@/lib/quota'
 import { useCustomMetersStore } from '@/stores/customMeters'
@@ -136,7 +137,7 @@ async function applyStatus() {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="套餐" description="（管理员）定义套餐的有效期、覆盖模型与周期配额规则。用户通过兑换码或管理员开通套餐。">
+    <PageHeader title="套餐" description="（管理员）定义套餐的有效期、覆盖模型与周期配额规则。设置售价后用户可用余额购买 / 续费 / 升级，也可通过兑换码或管理员开通。">
       <template #actions>
         <Button variant="outline" size="sm" as-child>
           <RouterLink to="/console/billing/subscriptions">
@@ -213,7 +214,7 @@ async function applyStatus() {
                   有效订阅
                 </TableHead>
                 <TableHead class="hidden text-right sm:table-cell">
-                  标价
+                  售价
                 </TableHead>
                 <TableHead class="w-10">
                   <span class="sr-only">操作</span>
@@ -261,7 +262,7 @@ async function applyStatus() {
                   <span v-else>0</span>
                 </TableCell>
                 <TableCell class="hidden text-right whitespace-nowrap tabular-nums sm:table-cell">
-                  {{ p.listPrice === null ? '—' : money(p.listPrice) }}
+                  {{ amountSign(p.listPrice) > 0 ? money(p.listPrice) : '不售卖' }}
                 </TableCell>
                 <TableCell>
                   <DropdownMenu>
@@ -319,11 +320,11 @@ async function applyStatus() {
       @confirm="applyStatus"
     >
       <template v-if="statusTarget?.status === 'active'">
-        <p>下架后该套餐不会出现在用户的套餐目录中，也不能再通过管理员或兑换码开通 / 续期（对应兑换码将兑换失败）。</p>
+        <p>下架后该套餐不会出现在用户的购买页中，也不能再通过余额购买、管理员或兑换码开通 / 续期（对应兑换码将兑换失败），也不能作为升级目标；持有该套餐的用户仍可补差价升级到其他在售套餐。</p>
         <p><strong class="text-foreground">已开通的订阅不受影响</strong>，会按原有规则继续生效直到到期（当前有效订阅 {{ statusTarget?.subscribers ?? 0 }} 个）。</p>
       </template>
       <p v-else>
-        重新上架后，套餐会出现在套餐目录中，并可再次开通。
+        重新上架后，套餐会出现在用户的购买页中，并可再次购买或开通。
       </p>
     </ConfirmDialog>
   </div>

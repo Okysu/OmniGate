@@ -2859,6 +2859,174 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/billing/purchase/options:
+    get:
+      tags: [billing]
+      operationId: getPurchaseOptions
+      summary: 余额购买选项
+      description: |
+        在售套餐（顺序同 `/api/plans`）以及对当前用户而言购买、续费或补差价升级到每个套餐的价格与效果（phase15-api.md §3.1）。
+        `listPrice` 为空或 0 的套餐 `purchasable = false`。
+      x-required-permission: billing.own
+      responses:
+        "200":
+          description: 购买选项
+          headers:
+            X-OmniGate-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseOptions"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/billing/purchase:
+    post:
+      tags: [billing]
+      operationId: purchasePlan
+      summary: 用余额购买 / 续费 / 补差价升级套餐
+      description: |
+        不带 `fromSubscriptionId`：购买（`new`）或续费（`renew`，不可叠加且已持有该套餐时顺延到期时间）。
+        带 `fromSubscriptionId`：把该订阅原地升级到目标套餐，补差价 = 两档按剩余时间折算的价格之差（向上取整到 0.01），
+        到期时间不变，同 id 规则的已用量保留（phase15-api.md §2）。实际价格高于 `expectedPrice` → `409 price_changed`。
+        扣款写 `charge` 账本（`refType = purchase`），不受 `billing.enforce` 影响；审计 `subscription.purchase`。
+      x-required-permission: billing.own
+      parameters:
+        - $ref: "#/components/parameters/XRequestedWith"
+        - $ref: "#/components/parameters/Origin"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [planId, expectedPrice]
+              properties:
+                planId: { type: string, format: uuid }
+                fromSubscriptionId: { type: [string, "null"], format: uuid }
+                expectedPrice:
+                  $ref: "#/components/schemas/Money"
+      responses:
+        "200":
+          description: 购买成功
+          headers:
+            X-OmniGate-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PurchaseResult"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: "`insufficient_balance`（`details.price`、`details.available`）或权限 / CSRF 错误"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: 套餐或来源订阅不存在（含不属于本人的订阅）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "`plan_archived` / `plan_not_for_sale` / `subscription_not_active` / `not_an_upgrade` / `price_changed`（`details.price`）"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: "`validation_failed`（请求体非法）"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/billing/purchases:
+    get:
+      tags: [billing]
+      operationId: listPurchases
+      summary: 我的购买记录
+      x-required-permission: billing.own
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 购买记录（新到旧）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/PurchaseRecord"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/billing/referral:
+    get:
+      tags: [billing]
+      operationId: getReferral
+      summary: 我的邀请码与返利统计
+      description: |
+        邀请码首次查询时生成（8 位，永久不变），邀请链接 `{OMNIGATE_PUBLIC_URL}/login?invite=<code>`。
+        `invitees` 为最近 50 位被邀请人，名称已脱敏（phase15-api.md §4.4）。
+      x-required-permission: billing.own
+      responses:
+        "200":
+          description: 邀请信息
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferralInfo"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/billing/referral/rebates:
+    get:
+      tags: [billing]
+      operationId: listReferralRebates
+      summary: 我获得的邀请返利记录
+      x-required-permission: billing.own
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 返利记录（新到旧）
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/ListMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ReferralRebate"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/billing/subscriptions:
     get:
       tags: [billing]
@@ -3078,7 +3246,7 @@ paths:
       description: |
         所有 `active` 套餐（用户可见的套餐目录），按 `createdAt` 倒序，最多 1000 条，不分页（`page` 固定为 1，`pageSize` 为返回条数）。
         任何已登录用户都可以访问（不需要特定权限）。只返回套餐内容（`CatalogPlan`）；订阅人数、状态、版本等管理信息只在 `/api/admin/billing/plans` 中返回。
-        OmniGate 没有在线支付，用户通过兑换码或管理员开通获得套餐。
+        用户可以用钱包余额购买、续费或补差价升级（`/api/billing/purchase`），也可以通过兑换码或管理员开通获得套餐。
       x-required-permission: null
       responses:
         "200":
@@ -7630,6 +7798,9 @@ components:
         publicModelPlaza:
           type: boolean
           description: 系统设置 `site.publicModelPlaza`；true 时未登录也可访问 `GET /api/plaza/models`（落地页 `/models`）
+        referralEnabled:
+          type: boolean
+          description: 系统设置 `billing.referralEnabled`（是否发放邀请返利）
 
     RegistrationMode:
       type: string
@@ -10564,7 +10735,7 @@ components:
           $ref: "#/components/schemas/Money"
         refType:
           type: string
-          enum: [request, redeem, admin, signup]
+          enum: [request, redeem, admin, signup, purchase, referral]
         refId:
           type: string
           description: request = 网关请求 ID；redeem = 兑换记录 ID；admin = 调整记录 ID；signup = 用户 ID（注册赠送 `billing.signupCredit`，每个用户最多一次）
@@ -11254,6 +11425,112 @@ components:
               type: boolean
               description: used ≥ limit
 
+    PurchaseOptions:
+      type: object
+      required: [available, currency, plans]
+      properties:
+        available:
+          $ref: "#/components/schemas/Money"
+        currency: { type: string }
+        plans:
+          type: array
+          items:
+            $ref: "#/components/schemas/PurchaseOption"
+
+    PurchaseOption:
+      type: object
+      required: [plan, purchasable, action, price, renewSubscriptionId, currentEndsAt, newEndsAt, upgrades]
+      properties:
+        plan:
+          $ref: "#/components/schemas/CatalogPlan"
+        purchasable: { type: boolean, description: "`listPrice > 0`" }
+        action: { type: string, enum: [new, renew] }
+        price: { type: [string, "null"], description: 直接购买 / 续费的价格（= listPrice） }
+        renewSubscriptionId: { type: [string, "null"], format: uuid }
+        currentEndsAt: { type: [string, "null"], format: date-time }
+        newEndsAt: { type: [string, "null"], format: date-time }
+        upgrades:
+          type: array
+          items:
+            $ref: "#/components/schemas/UpgradeOption"
+
+    UpgradeOption:
+      type: object
+      required: [fromSubscriptionId, fromPlanId, fromPlanName, fromPrice, price, remainingSeconds, endsAt]
+      properties:
+        fromSubscriptionId: { type: string, format: uuid }
+        fromPlanId: { type: string, format: uuid }
+        fromPlanName: { type: string }
+        fromPrice: { type: [string, "null"], description: 旧套餐当前 listPrice }
+        price:
+          $ref: "#/components/schemas/Money"
+        remainingSeconds: { type: integer }
+        endsAt: { type: string, format: date-time, description: 升级后的到期时间（不变） }
+
+    PurchaseResult:
+      type: object
+      required: [id, action, price, wallet, subscription]
+      properties:
+        id: { type: string, format: uuid }
+        action: { type: string, enum: [new, renew, upgrade] }
+        price:
+          $ref: "#/components/schemas/Money"
+        wallet:
+          $ref: "#/components/schemas/Wallet"
+        subscription:
+          $ref: "#/components/schemas/Subscription"
+
+    PurchaseRecord:
+      type: object
+      required: [id, action, planId, planName, fromPlanName, price, subscriptionId, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        action: { type: string, enum: [new, renew, upgrade] }
+        planId: { type: string, format: uuid }
+        planName: { type: string }
+        fromPlanName: { type: [string, "null"] }
+        price:
+          $ref: "#/components/schemas/Money"
+        subscriptionId: { type: [string, "null"], format: uuid }
+        createdAt: { type: string, format: date-time }
+
+    ReferralInfo:
+      type: object
+      required: [enabled, rate, minRecharge, code, link, invitedCount, rebateTotal, invitees]
+      properties:
+        enabled: { type: boolean }
+        rate: { type: string, description: 返利比例（百分比） }
+        minRecharge:
+          $ref: "#/components/schemas/Money"
+        code: { type: string, example: K7QM2XD9 }
+        link: { type: string, example: "https://gateway.example.com/login?invite=K7QM2XD9" }
+        invitedCount: { type: integer }
+        rebateTotal:
+          $ref: "#/components/schemas/Money"
+        invitees:
+          type: array
+          items:
+            type: object
+            required: [displayName, joinedAt, rebateTotal]
+            properties:
+              displayName: { type: string, description: 脱敏名称 }
+              joinedAt: { type: string, format: date-time }
+              rebateTotal:
+                $ref: "#/components/schemas/Money"
+
+    ReferralRebate:
+      type: object
+      required: [id, inviteeName, recharge, rate, rebate, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        inviteeName: { type: string, description: 脱敏名称 }
+        recharge:
+          $ref: "#/components/schemas/Money"
+        rate: { type: string }
+        rebate:
+          $ref: "#/components/schemas/Money"
+        createdAt: { type: string, format: date-time }
+
     Subscription:
       type: object
       required: [id, user, plan, status, startsAt, endsAt, source, models, rules, createdAt]
@@ -11291,7 +11568,7 @@ components:
           description: 续期时延长；取消不修改 `endsAt`
         source:
           type: string
-          enum: [admin, redeem]
+          enum: [admin, redeem, purchase]
         models:
           type: array
           items:
@@ -12026,6 +12303,17 @@ components:
             signupCredit:
               $ref: "#/components/schemas/Money"
               description: 新用户首次登录时赠送的余额（ledger `grant` / `signup`），默认 `"0"`
+            referralEnabled:
+              type: boolean
+              default: false
+              description: 邀请返利开关（phase15-api.md §4）
+            referralRate:
+              type: string
+              default: "10"
+              description: 返利比例，百分比 0–100，最多 2 位小数
+            referralMinRecharge:
+              $ref: "#/components/schemas/Money"
+              description: 单次余额兑换码充值金额达到该值才返利，默认 `"0"`
         gateway:
           type: object
           required: [maxAttempts, logRetentionDays]
@@ -12167,6 +12455,9 @@ components:
           properties:
             enforce: { type: [boolean, "null"] }
             signupCredit: { type: [string, "null"] }
+            referralEnabled: { type: [boolean, "null"] }
+            referralRate: { type: [string, "null"] }
+            referralMinRecharge: { type: [string, "null"] }
         gateway:
           type: object
           additionalProperties: false

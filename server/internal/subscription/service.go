@@ -47,8 +47,9 @@ const (
 	StatusExpired   = "expired" // derived: now >= ends_at
 	StatusCancelled = "cancelled"
 
-	SourceAdmin  = "admin"
-	SourceRedeem = "redeem"
+	SourceAdmin    = "admin"
+	SourceRedeem   = "redeem"
+	SourcePurchase = "purchase"
 
 	MaxPeriods     = 120
 	maxNameLen     = 100
@@ -536,7 +537,7 @@ func GrantTx(ctx context.Context, q db.Querier, now time.Time, userID, planID uu
 		return nil, false, apperr.Validation("参数校验失败", map[string]any{
 			"periods": fmt.Sprintf("必须在 1 到 %d 之间", MaxPeriods)})
 	}
-	if source != SourceAdmin && source != SourceRedeem {
+	if source != SourceAdmin && source != SourceRedeem && source != SourcePurchase {
 		return nil, false, fmt.Errorf("subscription: invalid source %q", source)
 	}
 	now = dbTime(now)

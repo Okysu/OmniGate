@@ -61,6 +61,9 @@ type RequestMeta struct {
 	UserAgent string
 	IPPrefix  string
 	RequestID string
+	// Invite is the invite code carried through the OAuth round trip
+	// (phase15-api.md §4.2); only used when the login creates the account.
+	Invite string
 }
 
 // LoginResult is returned by CompleteLogin.

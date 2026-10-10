@@ -16,6 +16,8 @@ export interface SystemInfo {
   docsUrl?: string
   /** `site.publicModelPlaza` (anonymous visitors may open `/models`); absent on older backends → true. */
   publicModelPlaza?: boolean
+  /** phase15 §4.1: `billing.referralEnabled` (visible without a session); absent on older backends. */
+  referralEnabled?: boolean
 }
 
 export interface AuthProvider {
@@ -793,7 +795,7 @@ export interface LedgerEntry {
   kind: LedgerKind | string
   amount: string
   balanceAfter: string
-  refType: 'request' | 'redeem' | 'admin' | string
+  refType: 'request' | 'redeem' | 'admin' | 'purchase' | 'referral' | string
   refId: string
   note: string | null
   createdAt: string
@@ -979,7 +981,7 @@ export interface RuleUsage extends QuotaRule {
 }
 
 export type SubscriptionStatus = 'active' | 'expired' | 'cancelled'
-export type SubscriptionSource = 'admin' | 'redeem'
+export type SubscriptionSource = 'admin' | 'redeem' | 'purchase'
 
 export interface Subscription {
   id: string
@@ -992,6 +994,120 @@ export interface Subscription {
   source: SubscriptionSource | string
   models: string[]
   rules: RuleUsage[]
+  createdAt: string
+}
+
+// ---------------------------------------------------------------------------
+// Round 15 (phase15-api.md): wallet purchases of plans and referral rebates.
+// ---------------------------------------------------------------------------
+
+export type PurchaseAction = 'new' | 'renew' | 'upgrade'
+
+/** phase15 §3.1: an active subscription that can be upgraded to the option's plan. */
+export interface UpgradeOption {
+  fromSubscriptionId: string
+  fromPlanId: string
+  /** Name from the subscription snapshot. */
+  fromPlanName: string
+  /** Current listPrice of the old plan (null: not for sale, counted as 0). */
+  fromPrice: string | null
+  /** Price difference to pay right now. */
+  price: string
+  remainingSeconds: number
+  /** End date after the upgrade (= the current end date). */
+  endsAt: string
+}
+
+/** phase15 §3.1: one plan on the purchase page (prices computed by the server). */
+export interface PurchaseOption {
+  plan: CatalogPlan
+  /** listPrice > 0. */
+  purchasable: boolean
+  /** Action of a direct purchase. */
+  action: 'new' | 'renew'
+  /** Direct purchase price (= listPrice; null when not purchasable). */
+  price: string | null
+  renewSubscriptionId: string | null
+  /** action = renew: the current end date. */
+  currentEndsAt: string | null
+  /** End date after a direct purchase. */
+  newEndsAt: string | null
+  /** Ascending by price. */
+  upgrades: UpgradeOption[]
+}
+
+/** `GET /api/billing/purchase/options`. */
+export interface PurchaseOptions {
+  /** Wallet available balance (balance − reserved). */
+  available: string
+  currency: string
+  plans: PurchaseOption[]
+}
+
+/** `POST /api/billing/purchase` body. */
+export interface PurchaseInput {
+  planId: string
+  /** Present: upgrade from this subscription. */
+  fromSubscriptionId?: string
+  /** The price shown to the user; a higher actual price is rejected (409 price_changed). */
+  expectedPrice: string
+}
+
+/** `POST /api/billing/purchase` response. */
+export interface PurchaseResult {
+  /** Purchase record id. */
+  id: string
+  action: PurchaseAction
+  /** Amount actually charged. */
+  price: string
+  wallet: Wallet
+  subscription: Subscription
+}
+
+/** `GET /api/billing/purchases` item. */
+export interface PurchaseRecord {
+  id: string
+  action: PurchaseAction | string
+  planId: string
+  planName: string
+  fromPlanName: string | null
+  price: string
+  subscriptionId: string
+  createdAt: string
+}
+
+/** phase15 §4.4: someone who signed up through my invite link (name masked). */
+export interface Invitee {
+  displayName: string
+  joinedAt: string
+  /** Rebates this invitee has earned me in total. */
+  rebateTotal: string
+}
+
+/** `GET /api/billing/referral`. */
+export interface ReferralInfo {
+  enabled: boolean
+  /** Current rebate percentage. */
+  rate: string
+  minRecharge: string
+  code: string
+  /** `{publicUrl}/login?invite=<code>`. */
+  link: string
+  invitedCount: number
+  rebateTotal: string
+  /** Newest 50 invitees. */
+  invitees: Invitee[]
+}
+
+/** `GET /api/billing/referral/rebates` item. */
+export interface ReferralRebate {
+  id: string
+  inviteeName: string
+  /** The invitee's recharge amount. */
+  recharge: string
+  /** Rate at the time (percentage). */
+  rate: string
+  rebate: string
   createdAt: string
 }
 
@@ -1614,6 +1730,12 @@ export interface SystemSettings {
   billing: {
     enforce: boolean
     signupCredit: string
+    /** phase15 §4.1: referral rebates (absent on older backends → off / "10" / "0"). */
+    referralEnabled?: boolean
+    /** Rebate percentage, decimal string 0–100 (at most 2 decimals). */
+    referralRate?: string
+    /** Minimum single wallet recharge (redeem code) that earns a rebate. */
+    referralMinRecharge?: string
   }
   gateway: {
     maxAttempts: number

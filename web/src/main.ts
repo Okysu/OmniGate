@@ -2,11 +2,16 @@ import { createPinia } from 'pinia'
 import { createApp } from 'vue'
 import { setUnauthorizedHandler } from '@/lib/api'
 import { loginLocation } from '@/lib/paths'
+import { captureInviteFromUrl } from '@/lib/referral'
 import { router } from '@/router'
 import { useAuthStore } from '@/stores/auth'
 import App from './App.vue'
 import 'vue-sonner/style.css'
 import './style.css'
+
+// phase15 §4.2: remember `?invite=` from whatever page the visitor lands on, before
+// the router guard redirects (and drops the query) to the login page.
+captureInviteFromUrl(window.location.search)
 
 const app = createApp(App)
 const pinia = createPinia()

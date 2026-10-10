@@ -521,3 +521,6 @@ func (h *Handler) meters(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 }
+
+// CatalogView renders one catalog entry (GET /api/plans).
+func CatalogView(p *Plan) CatalogPlanJSON { return catalogViews([]*Plan{p})[0] }

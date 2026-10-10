@@ -77,6 +77,11 @@ type Auth struct {
 type Billing struct {
 	Enforce      bool   `json:"enforce"`
 	SignupCredit string `json:"signupCredit"`
+	// Referral rebates (phase15-api.md §4.1): on/off, the percentage of an
+	// invitee's wallet_credit recharge and the minimum recharge that earns one.
+	ReferralEnabled     bool   `json:"referralEnabled"`
+	ReferralRate        string `json:"referralRate"`
+	ReferralMinRecharge string `json:"referralMinRecharge"`
 }
 
 type Gateway struct {
@@ -146,6 +151,9 @@ var fields = []field{
 	{"auth.allowedEmailDomains", []string{}, decodeDomains},
 	{"billing.enforce", false, decodeBool},
 	{"billing.signupCredit", "0", decodeMoney},
+	{"billing.referralEnabled", false, decodeBool},
+	{"billing.referralRate", "10", decodeRate},
+	{"billing.referralMinRecharge", "0", decodeMoney},
 	{"gateway.maxAttempts", int64(3), decodeInt(1, 5)},
 	{"gateway.retryOn", slices.Clone(routing.DefaultRetryClasses), decodeRetryOn},
 	{"gateway.logRetentionDays", int64(90), decodeInt(0, 3650)},
@@ -330,8 +338,10 @@ func (v values) settings() Settings {
 	return Settings{
 		Site: Site{Name: str("site.name"), Announcement: str("site.announcement"), LandingEnabled: boolean("site.landingEnabled"), DocsURL: str("site.docsUrl"),
 			PublicModelPlaza: boolean("site.publicModelPlaza")},
-		Auth:    Auth{RegistrationMode: str("auth.registrationMode"), AllowedEmailDomains: slices.Clone(domains)},
-		Billing: Billing{Enforce: boolean("billing.enforce"), SignupCredit: str("billing.signupCredit")},
+		Auth: Auth{RegistrationMode: str("auth.registrationMode"), AllowedEmailDomains: slices.Clone(domains)},
+		Billing: Billing{Enforce: boolean("billing.enforce"), SignupCredit: str("billing.signupCredit"),
+			ReferralEnabled: boolean("billing.referralEnabled"), ReferralRate: str("billing.referralRate"),
+			ReferralMinRecharge: str("billing.referralMinRecharge")},
 		Gateway: Gateway{MaxAttempts: int(num("gateway.maxAttempts")), RetryOn: slices.Clone(retryOn), LogRetentionDays: int(num("gateway.logRetentionDays")),
 			Affinity: aff},
 		Notifications: Notifications{
@@ -761,3 +771,43 @@ func (s *Service) SiteName(ctx context.Context) string { return s.Current(ctx).S
 
 // Readonly returns the environment-only configuration shown by the settings page.
 func (s *Service) Readonly() map[string]any { return s.opts.Readonly }
+
+// decodeRate accepts a percentage 0–100 with at most 2 decimals (a decimal
+// string, or a JSON number for convenience).
+func decodeRate(raw json.RawMessage) (any, string) {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		var n json.Number
+		if json.Unmarshal(raw, &n) != nil {
+			return nil, "必须是十进制字符串"
+		}
+		s = n.String()
+	}
+	a, err := money.Parse(strings.TrimSpace(s))
+	if err != nil || a < 0 || a > money.MustParse("100") || a%money.MustParse("0.01") != 0 {
+		return nil, "必须是 0–100 的数，最多 2 位小数"
+	}
+	return a.String(), ""
+}
+
+// Referral is the effective referral rebate configuration.
+type Referral struct {
+	Enabled bool
+	// Rate is the percentage string; RateBP is it in basis points.
+	Rate        string
+	RateBP      int64
+	MinRecharge money.Amount
+}
+
+// Referral returns billing.referral*.
+func (s *Service) Referral(ctx context.Context) Referral {
+	b := s.Current(ctx).Billing
+	out := Referral{Enabled: b.ReferralEnabled, Rate: b.ReferralRate}
+	if a, err := money.Parse(b.ReferralRate); err == nil {
+		out.RateBP = int64(a / money.MustParse("0.01"))
+	}
+	if a, err := money.Parse(b.ReferralMinRecharge); err == nil {
+		out.MinRecharge = a
+	}
+	return out
+}

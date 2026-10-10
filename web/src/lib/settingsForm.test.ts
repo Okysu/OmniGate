@@ -89,6 +89,25 @@ describe('settings form', () => {
     expect(buildSectionPatch('billing', f.billing, saved, 1).settings).toEqual({ billing: { signupCredit: '1.5' } })
   })
 
+  it('defaults referral settings for older backends and patches them canonically', () => {
+    const f = formFromSettings(saved)
+    expect(f.billing).toMatchObject({ referralEnabled: false, referralRate: '10', referralMinRecharge: '0' })
+    expect(isSectionDirty('billing', f.billing, saved)).toBe(false)
+    f.billing.referralRate = '10.00'
+    expect(isSectionDirty('billing', f.billing, saved)).toBe(false)
+    f.billing.referralEnabled = true
+    f.billing.referralRate = '12.50'
+    f.billing.referralMinRecharge = '20.0'
+    expect(changedFields('billing', f.billing, saved)).toEqual(['referralEnabled', 'referralRate', 'referralMinRecharge'])
+    expect(buildSectionPatch('billing', f.billing, saved, 7)).toEqual({
+      version: 7,
+      settings: { billing: { referralEnabled: true, referralRate: '12.5', referralMinRecharge: '20' } },
+    })
+    const withReferral = { ...saved, billing: { ...saved.billing, referralEnabled: true, referralRate: '5', referralMinRecharge: '1' } }
+    expect(formFromSettings(withReferral).billing).toMatchObject({ referralEnabled: true, referralRate: '5', referralMinRecharge: '1' })
+    expect(buildResetPatch('billing.referralRate', 2)).toEqual({ version: 2, settings: { billing: { referralRate: null } } })
+  })
+
   it('builds reset patches with null', () => {
     expect(buildResetPatch('site.name', 3)).toEqual({ version: 3, settings: { site: { name: null } } })
     expect(buildResetPatch('gateway.logRetentionDays', 4)).toEqual({ version: 4, settings: { gateway: { logRetentionDays: null } } })
@@ -113,6 +132,11 @@ describe('settings validation', () => {
     expect(validateSection('billing', f.billing)['billing.signupCredit']).toBeDefined()
     f.billing.signupCredit = '0.123456789'
     expect(validateSection('billing', f.billing)).toEqual({})
+    for (const bad of ['100.01', '-1', '1.234', 'abc', ''])
+      expect(validateSection('billing', { ...f.billing, referralRate: bad })['billing.referralRate']).toBeDefined()
+    for (const ok of ['0', '100', '12.5', '99.99'])
+      expect(validateSection('billing', { ...f.billing, referralRate: ok })).toEqual({})
+    expect(validateSection('billing', { ...f.billing, referralMinRecharge: '-5' })['billing.referralMinRecharge']).toBeDefined()
 
     f.gateway.maxAttempts = 0
     f.gateway.logRetentionDays = ''

@@ -108,6 +108,7 @@ type oauthState struct {
 	Nonce    string `json:"n"`
 	Verifier string `json:"v"`
 	Redirect string `json:"r"`
+	Invite   string `json:"i,omitempty"`
 	Expires  int64  `json:"e"`
 }
 
@@ -130,6 +131,9 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	st := oauthState{
 		Provider: p.ID(), State: randString(), Nonce: randString(), Verifier: oauth2.GenerateVerifier(),
 		Redirect: SafeRedirect(r.URL.Query().Get("redirect")), Expires: time.Now().Add(stateTTL).Unix(),
+	}
+	if inv := strings.TrimSpace(r.URL.Query().Get("invite")); len(inv) <= 32 {
+		st.Invite = inv
 	}
 	raw, _ := json.Marshal(st)
 	sealed, err := h.stateBox.Seal(raw, stateCookie)
@@ -181,7 +185,9 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, "oauth_failed")
 		return
 	}
-	res, err := h.svc.CompleteLogin(r.Context(), ext, h.meta(r))
+	m := h.meta(r)
+	m.Invite = st.Invite
+	res, err := h.svc.CompleteLogin(r.Context(), ext, m)
 	if err != nil {
 		if e := apperr.As(err); e.Kind == apperr.KindForbidden {
 			if e.Code == DenyAccountDisabled {

@@ -506,7 +506,7 @@ gateway.example.com {
   （其次是一步转换，最后是 Messages ↔ Responses 这类经 Chat 两步转换的渠道），协议匹配度相同的再按 `weight`（1–1000）加权随机；
   前一个渠道连接失败、超时、上游 401/403/404/408/429/5xx 时自动回退到下一个（每个模型最多 3 个平台渠道，可在系统设置 `gateway.maxAttempts` 修改，
   且只在尚未向客户端输出任何内容时回退）。用户自己的渠道和别人共享给他的渠道总是排在平台渠道之前，见 [8.8](#88-渠道归属与计费)。
-- 同一渠道连续 3 次失败后熔断 30 秒，再放行一个探测请求；熔断状态在各进程内存中，重启后归零。
+- 同一渠道连续 3 次失败后熔断 30 秒。冷却结束后后台每 15 秒主动探测一次（OpenAI / Anthropic 渠道请求模型列表，自定义协议渠道调用插件的 `health.check`，没有则 `models.list`）：成功即恢复为 healthy，401 / 403 / 408 / 429 / 5xx 或连接失败则再熔断 30 秒；探测结果不确定（如上游没有模型列表接口返回 404）时改为放行一个真实请求作为探测，5 分钟后再主动探测。熔断状态在各进程内存中，重启后归零。
 - “发现模型”按钮调用上游模型列表，只用于展示差异，不会自动写入映射。
 - **按模型指定上游协议**（Round 4，仅 `openai` 渠道）：映射中的 `upstreamProtocol` 为 `chat`（默认，保存为空、响应中省略）或 `responses`。
   设为 `responses` 时，该模型的所有请求（不论客户端用 Chat、Messages 还是 Responses）都以 OpenAI Responses 协议发送到 `{baseUrl}/responses`，
@@ -1000,15 +1000,16 @@ SDK 说明 `docs/contracts/plugin-sdk.md` §5.1）：
 ## 11. 套餐与周期配额
 
 套餐（Plan）用一组**周期配额规则**描述“买了之后能用多少”，例如“每 5 小时 200 次请求、每周 500 万 token”（类似 Claude Pro / Max 的用量窗口）。
-用户持有套餐的一份**订阅**（Subscription）期间，被套餐覆盖的模型优先按配额使用，不扣钱包余额。OmniGate 没有在线支付，订阅只能由管理员开通或通过
-**套餐兑换码**获得。设计见 ADR-0006 与 `docs/contracts/billing-and-quota.md`，接口契约见 `docs/contracts/phase3-api.md` 与 `openapi.yaml`。
+用户持有套餐的一份**订阅**（Subscription）期间，被套餐覆盖的模型优先按配额使用，不扣钱包余额。OmniGate 没有在线支付；订阅可以由管理员开通、
+通过**套餐兑换码**获得，或由用户**用钱包余额购买 / 续费 / 补差价升级**（§11.6.2）。设计见 ADR-0006 与 `docs/contracts/billing-and-quota.md`，
+接口契约见 `docs/contracts/phase3-api.md`、`docs/contracts/phase15-api.md` 与 `openapi.yaml`。
 
 ### 11.1 套餐、订阅与规则
 
 | 对象 | 说明 |
 |---|---|
-| 套餐 | 名称、说明、展示用标价 `listPrice`（不参与扣费）、每份有效期 `duration`、覆盖的逻辑模型 `models`（空 = 全部模型）、1–10 条规则 `rules`、`stackable`、状态 `active` / `archived` |
-| 订阅 | 用户持有的一份套餐：`startsAt` / `endsAt`、来源（`admin` / `redeem`）、开通时**快照**的 `models` 与 `rules`。之后修改套餐**不影响**已有订阅（续期也不更新快照）；要让老用户用上新规则，需要取消后重新开通 |
+| 套餐 | 名称、说明、售价 `listPrice`（余额购买与续费的价格；为空或 0 时不能用余额购买）、每份有效期 `duration`、覆盖的逻辑模型 `models`（空 = 全部模型）、1–10 条规则 `rules`、`stackable`、状态 `active` / `archived` |
+| 订阅 | 用户持有的一份套餐：`startsAt` / `endsAt`、来源（`admin` / `redeem` / `purchase`）、开通时**快照**的 `models` 与 `rules`。之后修改套餐**不影响**已有订阅（续期也不更新快照）；要让老用户用上新规则，需要取消后重新开通 |
 | 规则 | `id`（套餐内唯一，`^[a-z0-9_-]{1,32}$`）、`label`、计量 `meter`、窗口 `window`、上限 `limit`、可选的 `models` / `modelWeights`、超额行为 `onExceed` |
 
 时长（`duration`、窗口的 `duration` / `every`）的格式是 `<正整数><单位>`，单位 `m`（分钟）、`h`、`d`（24 小时），如 `5h`、`7d`、`30d`；
@@ -1204,6 +1205,28 @@ curl -sS https://gateway.example.com/api/admin/billing/redeem-batches \
   rolling 窗口清空。订阅没有匹配的规则、不在限定套餐内、订阅已结束时会被拒绝，**卡不会被消耗**；同一张卡并发使用只会成功一次。
 - 作废批次后，其中未使用的卡（含已过期的）无法再使用，已使用的卡不受影响。
 - 审计：`reset_card.issue`、`reset_card.revoke`、`reset_card.use`；收件人收到通知 `reset_card.issued`（默认站内 + 邮件）。在「用户」详情中可以查看某位用户的卡。
+
+### 11.6.2 余额购买、续费与补差价升级
+
+用户在控制台“购买套餐”页（`GET /api/billing/purchase/options`、`POST /api/billing/purchase`，契约见 `docs/contracts/phase15-api.md`）用钱包余额：
+
+- **购买**：套餐在售（`active`）且 `listPrice > 0` 时，扣 `listPrice` 并开通一份新订阅（来源 `purchase`）。
+- **续费**：已持有该（不可叠加）套餐的有效订阅时，同样扣 `listPrice`，到期时间顺延一个周期，规则快照与已用量不变（与兑换码续期相同）。
+- **补差价升级**：从一份有效订阅升级到更贵的在售套餐，价格 = 新套餐按剩余时间折算的价格 − 旧套餐按剩余时间折算的价格（向上取整到 0.01）；
+  旧套餐价格取其当前 `listPrice`（已下架的旧套餐也一样，没有售价按 0 计）。升级**原地替换**订阅的名称、模型与规则，到期时间不变，
+  同 `id` 规则的已用量保留，百分比按新上限计算。不支持降级。
+- 扣款写一条 `charge` 账本记录（`refType = purchase`），不受 `billing.enforce` 影响；审计 `subscription.purchase`。余额不足返回 `403 insufficient_balance`。
+- 只想通过兑换码发放、不允许自助购买的套餐，把 `listPrice` 留空即可。
+
+### 11.6.3 邀请返利
+
+系统设置 `billing` 组（默认关闭）：`referralEnabled`（开关）、`referralRate`（返利比例，百分比，0–100，最多 2 位小数，默认 10）、
+`referralMinRecharge`（单次充值金额达到该值才返利，默认 0）。
+
+- 每个用户在“邀请返利”页拿到固定的邀请码与链接 `{OMNIGATE_PUBLIC_URL}/login?invite=<code>`。新用户通过该链接**首次登录创建账号**时绑定邀请人
+  （已有账号不会绑定，绑定后不可更改；关闭返利时也会绑定）。
+- 被邀请人每次兑换**余额兑换码**且金额 ≥ `referralMinRecharge` 时，邀请人获得 `金额 × referralRate%` 的余额（`grant`，`refType = referral`），
+  并收到 `wallet.credited` 通知。套餐兑换码、余额购买、管理员调整与注册赠送不返利。
 
 ### 11.7 注意事项与限制
 

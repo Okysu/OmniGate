@@ -14,7 +14,7 @@ export const SECTIONS: SettingsSection[] = ['site', 'auth', 'billing', 'gateway'
 export const SECTION_FIELDS: Record<SettingsSection, string[]> = {
   site: ['name', 'announcement', 'landingEnabled', 'docsUrl', 'publicModelPlaza'],
   auth: ['registrationMode', 'allowedEmailDomains'],
-  billing: ['enforce', 'signupCredit'],
+  billing: ['enforce', 'signupCredit', 'referralEnabled', 'referralRate', 'referralMinRecharge'],
   gateway: ['maxAttempts', 'retryOn', 'logRetentionDays'],
   notifications: ['smtp.host', 'smtp.port', 'smtp.security', 'smtp.username', 'smtp.password', 'smtp.from', 'enabled', 'emailRateLimitPerHour'],
 }
@@ -37,6 +37,9 @@ export const FIELD_LABELS: Record<string, string> = {
   'auth.allowedEmailDomains': '允许的邮箱域名',
   'billing.enforce': '余额强制',
   'billing.signupCredit': '新用户赠送余额',
+  'billing.referralEnabled': '邀请返利',
+  'billing.referralRate': '返利比例',
+  'billing.referralMinRecharge': '起返金额（单次充值）',
   'gateway.maxAttempts': '默认最多尝试次数',
   'gateway.logRetentionDays': '请求日志保留天数',
   'gateway.retryOn': '默认重试条件（未命中路由规则时）',
@@ -101,6 +104,9 @@ export const LIMITS = {
   domainsMax: 100,
   smtpPort: [1, 65535],
   emailRateLimitPerHour: [1, 10000],
+  /** Referral rebate percentage (phase15 §4.1): 0–100, at most 2 decimals. */
+  referralRateMax: '100',
+  referralRateDecimals: 2,
 } as const
 
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
@@ -113,7 +119,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
 export const DEFAULT_SETTINGS: SystemSettings = {
   site: { name: 'OmniGate', announcement: '', landingEnabled: true, docsUrl: '', publicModelPlaza: true },
   auth: { registrationMode: 'restricted', allowedEmailDomains: [] },
-  billing: { enforce: false, signupCredit: '0' },
+  billing: { enforce: false, signupCredit: '0', referralEnabled: false, referralRate: '10', referralMinRecharge: '0' },
   gateway: { maxAttempts: 3, logRetentionDays: 90, retryOn: [...DEFAULT_RETRY_ON] },
   notifications: DEFAULT_NOTIFICATION_SETTINGS,
 }
@@ -138,7 +144,7 @@ export interface NotificationsForm {
 export interface SettingsForm {
   site: { name: string, announcement: string, landingEnabled: boolean, docsUrl: string, publicModelPlaza: boolean }
   auth: { registrationMode: RegistrationMode, allowedEmailDomains: string[] }
-  billing: { enforce: boolean, signupCredit: string }
+  billing: { enforce: boolean, signupCredit: string, referralEnabled: boolean, referralRate: string, referralMinRecharge: string }
   gateway: { maxAttempts: number | string, logRetentionDays: number | string, retryOn: RetryOn[] }
   notifications: NotificationsForm
 }
@@ -168,7 +174,14 @@ export function formFromSettings(s: SystemSettings): SettingsForm {
     // publicModelPlaza: default true, also when an older backend does not send it.
     site: { name: s.site.name ?? '', announcement: s.site.announcement ?? '', landingEnabled: s.site.landingEnabled !== false, docsUrl: s.site.docsUrl ?? '', publicModelPlaza: s.site.publicModelPlaza !== false },
     auth: { registrationMode: s.auth.registrationMode, allowedEmailDomains: [...(s.auth.allowedEmailDomains ?? [])] },
-    billing: { enforce: !!s.billing.enforce, signupCredit: s.billing.signupCredit ?? '0' },
+    // referral*: absent on older backends → contract defaults (phase15 §4.1).
+    billing: {
+      enforce: !!s.billing.enforce,
+      signupCredit: s.billing.signupCredit ?? '0',
+      referralEnabled: !!s.billing.referralEnabled,
+      referralRate: s.billing.referralRate ?? '10',
+      referralMinRecharge: s.billing.referralMinRecharge ?? '0',
+    },
     // retryOn: absent on older backends → the contract default (so the form is not dirty).
     gateway: { maxAttempts: s.gateway.maxAttempts, logRetentionDays: s.gateway.logRetentionDays, retryOn: Array.isArray(s.gateway.retryOn) ? normalizeRetryOn(s.gateway.retryOn) : [...DEFAULT_RETRY_ON] },
     // notifications: absent on older backends → contract defaults (the card explains it is unsupported).
@@ -225,7 +238,13 @@ export function normalizeSection<S extends SettingsSection>(section: S, f: Setti
     }
     case 'billing': {
       const v = f as SettingsForm['billing']
-      return { enforce: v.enforce, signupCredit: canonicalAmount(v.signupCredit) } as SystemSettings[S]
+      return {
+        enforce: v.enforce,
+        signupCredit: canonicalAmount(v.signupCredit),
+        referralEnabled: v.referralEnabled,
+        referralRate: canonicalAmount(v.referralRate),
+        referralMinRecharge: canonicalAmount(v.referralMinRecharge),
+      } as SystemSettings[S]
     }
     case 'notifications': {
       const v = f as SettingsForm['notifications']
@@ -361,6 +380,11 @@ export function validateSection<S extends SettingsSection>(section: S, f: Settin
     const v = f as SettingsForm['billing']
     if (!isValidAmount(v.signupCredit.trim()))
       e['billing.signupCredit'] = '请输入不小于 0 的金额（最多 9 位小数）'
+    const rate = v.referralRate.trim()
+    if (!isValidAmount(rate, { maxFrac: LIMITS.referralRateDecimals }) || toNano(rate) > toNano(LIMITS.referralRateMax))
+      e['billing.referralRate'] = `请输入 0 到 ${LIMITS.referralRateMax} 之间的数（最多 ${LIMITS.referralRateDecimals} 位小数）`
+    if (!isValidAmount(v.referralMinRecharge.trim()))
+      e['billing.referralMinRecharge'] = '请输入不小于 0 的金额（最多 9 位小数）'
   }
   else if (section === 'notifications') {
     const v = f as SettingsForm['notifications']

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -72,10 +73,19 @@ func newRound5(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *
 		return nil, err
 	}
 	bill.UseSettings(st)
+	bill.UseReferral(func(ctx context.Context) billing.ReferralConfig {
+		r := st.Referral(ctx)
+		return billing.ReferralConfig{Enabled: r.Enabled, Rate: r.Rate, RateBP: r.RateBP, MinRecharge: r.MinRecharge}
+	})
 	authSvc.Registration = st.Registration
 	authSvc.OnUserCreated = func(ctx context.Context, u *identity.User, m auth.RequestMeta) error {
-		return bill.GrantSignupCredit(ctx, billing.Actor{ID: u.ID, Name: u.DisplayName}, st.SignupCredit(ctx),
-			billing.RequestMeta{IPPrefix: m.IPPrefix, RequestID: m.RequestID})
+		// A failed referral binding must not cost the user the sign-up credit.
+		var bindErr error
+		if m.Invite != "" {
+			bindErr = bill.BindReferral(ctx, u.ID, m.Invite)
+		}
+		return errors.Join(bindErr, bill.GrantSignupCredit(ctx, billing.Actor{ID: u.ID, Name: u.DisplayName}, st.SignupCredit(ctx),
+			billing.RequestMeta{IPPrefix: m.IPPrefix, RequestID: m.RequestID}))
 	}
 	routes := routing.NewService(pool, rec, log)
 	if err := routes.Reload(ctx); err != nil {
@@ -103,4 +113,5 @@ func (r *round5) systemInfo(req *http.Request, info map[string]any) {
 	info["docsUrl"] = s.Site.DocsURL
 	info["publicModelPlaza"] = s.Site.PublicModelPlaza
 	info["registrationMode"] = s.Auth.RegistrationMode
+	info["referralEnabled"] = s.Billing.ReferralEnabled
 }

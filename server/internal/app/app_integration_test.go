@@ -37,6 +37,7 @@ func fakeGitHub(t *testing.T) *httptest.Server {
 		"alice": {1001, "alice", "alice@example.com"},
 		"bob":   {1002, "bob", "bob@other.org"},
 		"carol": {1003, "carol", "carol@example.com"},
+		"dave":  {1004, "dave", "dave@example.com"},
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /login/oauth/access_token", func(w http.ResponseWriter, r *http.Request) {

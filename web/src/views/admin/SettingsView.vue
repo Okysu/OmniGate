@@ -249,6 +249,10 @@ const creditPreview = computed(() => {
   const v = form.value.billing.signupCredit.trim()
   return isValidAmount(v) ? money(v) : null
 })
+const minRechargePreview = computed(() => {
+  const v = form.value.billing.referralMinRecharge.trim()
+  return isValidAmount(v) ? money(v) : null
+})
 const enforceTurningOn = computed(() => form.value.billing.enforce && data.value?.settings.billing.enforce === false)
 // ---------- 邮件（SMTP） ----------
 /** Older backends do not send `settings.notifications`: the card explains and stays read-only. */
@@ -478,7 +482,7 @@ const restrictedWithoutDomains = computed(() => form.value.auth.registrationMode
               未保存
             </Badge>
           </CardTitle>
-          <CardDescription>余额强制与新用户赠送余额。</CardDescription>
+          <CardDescription>余额强制、新用户赠送余额与邀请返利。</CardDescription>
         </CardHeader>
         <CardContent class="grid gap-6 lg:grid-cols-2">
           <SettingField label="余额强制（billing.enforce）" for="set-bill-enforce" :source="src('billing.enforce')" :error="errors['billing.enforce']" :resetting="resetting === 'billing.enforce'" :busy="busy" @reset="resetField('billing.enforce')">
@@ -504,6 +508,37 @@ const restrictedWithoutDomains = computed(() => form.value.auth.registrationMode
             <template #hint>
               新用户首次登录（账号创建）时赠送到钱包的余额；0 表示不赠送。<template v-if="creditPreview">
                 当前：{{ creditPreview }}
+              </template>
+            </template>
+          </SettingField>
+          <SettingField label="邀请返利（billing.referralEnabled）" for="set-bill-referral" :source="src('billing.referralEnabled')" :error="errors['billing.referralEnabled']" :resetting="resetting === 'billing.referralEnabled'" :busy="busy" @reset="resetField('billing.referralEnabled')">
+            <div class="flex items-start justify-between gap-4 rounded-lg border p-3">
+              <p class="text-muted-foreground text-xs">
+                开启后，通过邀请链接注册的用户每次兑换<strong class="text-foreground">余额兑换码</strong>充值时，按下方比例给邀请人钱包返利。关闭时邀请关系仍会记录，只是不发放返利。
+              </p>
+              <Switch id="set-bill-referral" v-model="form.billing.referralEnabled" />
+            </div>
+            <template #hint>
+              套餐兑换码、余额购买、管理员调整与注册赠送都不返利。
+            </template>
+          </SettingField>
+          <SettingField label="返利比例（billing.referralRate）" for="set-bill-referral-rate" :source="src('billing.referralRate')" :error="errors['billing.referralRate']" :resetting="resetting === 'billing.referralRate'" :busy="busy" @reset="resetField('billing.referralRate')">
+            <div class="relative max-w-60">
+              <Input id="set-bill-referral-rate" v-model="form.billing.referralRate" inputmode="decimal" placeholder="10" class="pr-7 font-mono tabular-nums" :aria-invalid="!!errors['billing.referralRate']" />
+              <span class="text-muted-foreground pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-sm">%</span>
+            </div>
+            <template #hint>
+              返利 = 单次充值金额 × 比例；0–100，最多 2 位小数。
+            </template>
+          </SettingField>
+          <SettingField :label="`起返金额（单次充值，${currency?.code ?? '结算币种'}）`" for="set-bill-referral-min" :source="src('billing.referralMinRecharge')" :error="errors['billing.referralMinRecharge']" :resetting="resetting === 'billing.referralMinRecharge'" :busy="busy" @reset="resetField('billing.referralMinRecharge')">
+            <div class="relative max-w-60">
+              <span class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-sm">{{ currency?.symbol ?? '' }}</span>
+              <Input id="set-bill-referral-min" v-model="form.billing.referralMinRecharge" inputmode="decimal" placeholder="0" class="pl-7 font-mono tabular-nums" :aria-invalid="!!errors['billing.referralMinRecharge']" />
+            </div>
+            <template #hint>
+              单次兑换码充值金额不低于该值才返利；0 表示不限。<template v-if="minRechargePreview">
+                当前：{{ minRechargePreview }}
               </template>
             </template>
           </SettingField>

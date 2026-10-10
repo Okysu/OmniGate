@@ -84,6 +84,7 @@ type Service struct {
 	currency   string
 	redeemRate *limiter
 	settings   SettingsSource
+	referral   func(ctx context.Context) ReferralConfig
 
 	// OnLedger, when set, is called after a transaction that changed a wallet
 	// balance has committed (notifications: low balance, credits).

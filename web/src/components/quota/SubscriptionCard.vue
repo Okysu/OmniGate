@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { QuotaOverflow, Subscription } from '@/lib/types'
 import { computed } from 'vue'
-import { ShieldBan, WalletCards } from '@lucide/vue'
+import { ArrowUpRight, ShieldBan, WalletCards } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { formatDateTime } from '@/lib/format'
 import { formatRemaining, modelsSummary, QUOTA_OVERFLOW_SHORT, SUBSCRIPTION_SOURCE_LABELS, SUBSCRIPTION_STATUS_LABELS } from '@/lib/quota'
@@ -13,6 +13,8 @@ const props = defineProps<{
   now?: number
   /** The owner's 「套餐额度用完后」 preference; omitted when unknown (e.g. still loading). */
   overflow?: QuotaOverflow | null
+  /** Owner's own billing page: link an active subscription to 购买套餐 (renew / upgrade). Never in admin views. */
+  storeLink?: boolean
 }>()
 
 const live = computed(() => props.subscription.status === 'active')
@@ -56,6 +58,15 @@ const exceeded = computed(() => live.value && props.subscription.rules.some(r =>
       <span>适用模型：{{ modelsSummary(subscription.models, 3) }}</span>
       <span>来源：{{ SUBSCRIPTION_SOURCE_LABELS[subscription.source] ?? subscription.source }}</span>
       <span v-if="!live">状态：{{ SUBSCRIPTION_STATUS_LABELS[subscription.status] ?? subscription.status }}</span>
+      <RouterLink
+        v-if="live && storeLink"
+        to="/console/store"
+        class="text-primary ml-auto inline-flex items-center gap-0.5 font-medium underline-offset-4 hover:underline"
+        data-testid="subscription-store-link"
+      >
+        续费 / 升级
+        <ArrowUpRight class="size-3.5" aria-hidden="true" />
+      </RouterLink>
     </footer>
   </article>
 </template>

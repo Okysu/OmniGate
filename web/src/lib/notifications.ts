@@ -39,7 +39,7 @@ export const EVENT_CATALOG: EventMeta[] = [
   { type: 'account.status_changed', category: 'account', label: '账号状态变更', description: '管理员停用 / 启用你的账号，或强制下线全部会话（含原因与到期时间）。站内通知不可关闭。', defaults: d(true, true), alert: true, locked: { inApp: true } },
   { type: 'account.group_changed', category: 'account', label: '用户分组变更', description: '管理员把你移到了其他用户组（价格倍率与用量限额随之变化）。', defaults: d(false, true), alert: false },
   { type: 'wallet.balance_low', category: 'wallet', label: '钱包余额不足', description: '可用余额从阈值以上降到阈值以下时通知；恢复到阈值以上后才会再次触发。', defaults: d(true, true), alert: true },
-  { type: 'wallet.credited', category: 'wallet', label: '钱包入账', description: '兑换码充值、管理员调整、新用户赠送。', defaults: d(false, true), alert: false },
+  { type: 'wallet.credited', category: 'wallet', label: '钱包入账', description: '兑换码充值、邀请返利、管理员调整、新用户赠送。', defaults: d(false, true), alert: false },
   { type: 'subscription.expiring', category: 'plan', label: '订阅即将到期', description: '订阅到期前 3 天（每份订阅一次）。', defaults: d(true, true), alert: false },
   { type: 'subscription.expired', category: 'plan', label: '订阅已结束', description: '订阅到期或被取消。', defaults: d(true, true), alert: false },
   { type: 'subscription.quota_reset', category: 'plan', label: '套餐额度已重置', description: '管理员重置了你订阅的套餐额度（含备注）。', defaults: d(true, true), alert: false },

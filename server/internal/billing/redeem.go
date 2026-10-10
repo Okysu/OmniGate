@@ -321,8 +321,10 @@ func (s *Service) Redeem(ctx context.Context, actor Actor, code string, meta Req
 	currency := s.Currency(ctx)
 	var res RedeemResult
 	var credited *walletRow
+	var inviter *walletRow
 	err := db.InTx(ctx, s.pool, func(tx db.Tx) error {
 		credited = nil
+		inviter = nil
 		var codeID, batchID uuid.UUID
 		var prefix string
 		var used int
@@ -387,6 +389,9 @@ func (s *Service) Redeem(ctx context.Context, actor Actor, code string, meta Req
 		if err != nil {
 			return err
 		}
+		if inviter, err = s.referralRebate(ctx, tx, actor, redemptionID, money.Amount(*amt)); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO redemptions (id, code_id, batch_id, user_id, ledger_entry_id, created_at)
 			VALUES ($1, $2, $3, $4, $5, $6)`, redemptionID, codeID, batchID, actor.ID, entry.ID, now); err != nil {
 			return err
@@ -406,6 +411,7 @@ func (s *Service) Redeem(ctx context.Context, actor Actor, code string, meta Req
 		return nil, err
 	}
 	s.dispatch(ctx, credited)
+	s.dispatch(ctx, inviter)
 	return &res, nil
 }
 

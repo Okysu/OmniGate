@@ -222,13 +222,13 @@ async function reloadLatest() {
               <FormField label="名称" for="plan-name" required :error="errors.name">
                 <Input id="plan-name" v-model="form.name" maxlength="100" placeholder="例如：Pro 月度套餐" :aria-invalid="!!errors.name" />
               </FormField>
-              <FormField label="描述" for="plan-desc" :error="errors.description" hint="展示在用户的套餐目录中，最多 2000 字。">
+              <FormField label="描述" for="plan-desc" :error="errors.description" hint="展示在用户的套餐购买页中，最多 2000 字。">
                 <Textarea id="plan-desc" v-model="form.description" rows="3" maxlength="2000" placeholder="套餐包含的内容与适用场景" :aria-invalid="!!errors.description" />
               </FormField>
             </div>
             <div class="space-y-4">
               <div class="grid gap-4 sm:grid-cols-2">
-                <FormField :label="`标价（${currency?.code ?? '结算币种'}）`" for="plan-price" :error="errors.listPrice" hint="仅用于展示，不会扣费；留空表示不标价。">
+                <FormField :label="`售价（${currency?.code ?? '结算币种'}）`" for="plan-price" :error="errors.listPrice" hint="售价：用户用余额购买 / 续费的价格（升级时按剩余时间折算差价）；留空或 0 表示不可购买，仅能通过兑换码或管理员开通。">
                   <div class="relative">
                     <span class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-sm">{{ currency?.symbol ?? '' }}</span>
                     <Input id="plan-price" v-model="form.listPrice" inputmode="decimal" placeholder="可选" class="pl-7 font-mono tabular-nums" :aria-invalid="!!errors.listPrice" />
@@ -255,10 +255,10 @@ async function reloadLatest() {
                   <Label for="plan-stackable">可叠加</Label>
                   <p class="text-muted-foreground text-xs">
                     <template v-if="form.stackable">
-                      开启：每次开通（兑换或管理员开通）都会生成一份新的独立订阅，额度相互叠加。
+                      开启：每次开通（余额购买、兑换或管理员开通）都会生成一份新的独立订阅，额度相互叠加。
                     </template>
                     <template v-else>
-                      关闭：用户已有该套餐的有效订阅时，再次开通只会延长现有订阅的到期时间，额度不叠加。
+                      关闭：用户已有该套餐的有效订阅时，再次开通（含余额续费）只会延长现有订阅的到期时间，额度不叠加；用户也可以从其他套餐补差价升级到该套餐。
                     </template>
                   </p>
                 </div>

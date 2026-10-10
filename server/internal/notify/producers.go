@@ -120,7 +120,8 @@ func (s *Service) drainWallet(ctx context.Context, user uuid.UUID) {
 
 func (s *Service) walletChanged(ctx context.Context, c billing.LedgerChange, stale bool) {
 	if c.Amount > 0 && (c.Kind == billing.KindGrant || c.Kind == billing.KindAdjust) {
-		reason := map[string]string{billing.RefRedeem: "兑换码充值", billing.RefSignup: "新用户赠送", billing.RefAdmin: "管理员调整"}[c.RefType]
+		reason := map[string]string{billing.RefRedeem: "兑换码充值", billing.RefSignup: "新用户赠送", billing.RefAdmin: "管理员调整",
+			billing.RefReferral: "邀请返利"}[c.RefType]
 		if reason == "" {
 			reason = "入账"
 		}

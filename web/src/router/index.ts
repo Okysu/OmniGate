@@ -3,6 +3,7 @@ import type { PlaceholderInfo } from '@/config/nav'
 import { createRouter, createWebHistory } from 'vue-router'
 import { NAV_ITEMS } from '@/config/nav'
 import { CONSOLE_BASE, legacyRedirects, loginLocation, PUBLIC_PATHS, safeRedirect } from '@/lib/paths'
+import { saveInviteCode } from '@/lib/referral'
 import { landingEnabledOf, pageTitle, siteNameOf } from '@/lib/site'
 import { useAuthStore } from '@/stores/auth'
 import { useSystemStore } from '@/stores/system'
@@ -150,6 +151,18 @@ const consoleRoutes: RouteRecordRaw[] = [
     meta: { title: '钱包与订阅', permission: 'billing.own' },
   },
   {
+    path: 'store',
+    name: 'store',
+    component: () => import('@/views/billing/store/StoreView.vue'),
+    meta: { title: '购买套餐', permission: 'billing.own' },
+  },
+  {
+    path: 'referral',
+    name: 'referral',
+    component: () => import('@/views/billing/referral/ReferralView.vue'),
+    meta: { title: '邀请返利', permission: 'billing.own' },
+  },
+  {
     path: 'billing/plans',
     name: 'billing-plans',
     component: () => import('@/views/billing/plans/PlansView.vue'),
@@ -264,6 +277,10 @@ export const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  // phase15 §4.2: in-app links carrying `?invite=` (the initial URL is captured in main.ts).
+  if (to.query.invite)
+    saveInviteCode(to.query.invite)
+
   const auth = useAuthStore()
   await auth.ensureLoaded()
 
