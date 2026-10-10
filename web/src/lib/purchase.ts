@@ -26,8 +26,10 @@ export interface PurchaseIntent {
   fromPlanName: string | null
   /** Renew: the current end date. */
   currentEndsAt: string | null
-  /** End date after the purchase (upgrade: unchanged). */
+  /** End date after the purchase (upgrade: a new term starting now). */
   endsAt: string | null
+  /** Upgrade: value of the unused old time deducted from the price. */
+  credit: string | null
 }
 
 export interface PurchaseCard {
@@ -56,6 +58,7 @@ export function directIntent(o: PurchaseOption): PurchaseIntent | null {
     fromPlanName: null,
     currentEndsAt: o.action === 'renew' ? o.currentEndsAt : null,
     endsAt: o.newEndsAt,
+    credit: null,
   }
 }
 
@@ -70,8 +73,9 @@ export function upgradeIntents(o: PurchaseOption): PurchaseIntent[] {
       price: u.price,
       fromSubscriptionId: u.fromSubscriptionId,
       fromPlanName: u.fromPlanName,
-      currentEndsAt: u.endsAt,
+      currentEndsAt: null,
       endsAt: u.endsAt,
+      credit: u.credit ?? null,
     }))
     .sort((a, b) => compareAmounts(a.price, b.price))
 }
@@ -180,7 +184,7 @@ export function purchaseSuccessText(r: PurchaseResult, money: MoneyFormatter): {
     case 'renew':
       return { title: '续费成功', description: `套餐「${name}」已续期至 ${until}；${paid}。` }
     case 'upgrade':
-      return { title: '升级成功', description: `已升级为「${name}」，到期时间 ${until} 不变；${paid}。` }
+      return { title: '升级成功', description: `已升级为「${name}」，新周期从现在起至 ${until}；${paid}。` }
     default:
       return { title: '购买成功', description: `套餐「${name}」已开通，有效期至 ${until}；${paid}。` }
   }

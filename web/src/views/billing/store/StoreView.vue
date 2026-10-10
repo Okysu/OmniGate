@@ -427,6 +427,14 @@ function recordTitle(r: PurchaseRecord): string {
           <dd class="truncate text-right" :title="pending.planName">
             {{ pending.action === 'upgrade' ? `${pending.fromPlanName ?? '当前套餐'} → ${pending.planName}` : pending.planName }}
           </dd>
+          <template v-if="pending.action === 'upgrade' && pending.credit">
+            <dt class="text-muted-foreground">
+              当前套餐剩余抵扣
+            </dt>
+            <dd class="text-right tabular-nums">
+              −{{ money(pending.credit) }}
+            </dd>
+          </template>
           <dt class="text-muted-foreground">
             {{ pending.action === 'upgrade' ? '补差价' : '价格' }}
           </dt>
@@ -453,7 +461,7 @@ function recordTitle(r: PurchaseRecord): string {
               {{ formatDateTime(pending.currentEndsAt) }} → {{ formatDateTime(pending.endsAt) }}
             </template>
             <template v-else-if="pending.action === 'upgrade'">
-              {{ formatDateTime(pending.endsAt) }}（不变）
+              {{ formatDateTime(pending.endsAt) }}（从现在起重新计算）
             </template>
             <template v-else>
               {{ formatDateTime(pending.endsAt) }}
@@ -462,7 +470,7 @@ function recordTitle(r: PurchaseRecord): string {
         </dl>
 
         <p v-if="pending?.action === 'upgrade'" class="bg-muted/50 rounded-md p-3 text-xs">
-          到期时间不变；已用额度保留，按新套餐上限重新计算百分比。补差价按剩余时间折算两档套餐的价差。
+          升级后从现在起开始新套餐的完整周期；当前套餐未用完的天数按价值抵扣，越早升级越划算。已用额度保留，按新套餐上限重新计算百分比。
         </p>
 
         <div

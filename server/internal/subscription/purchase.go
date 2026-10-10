@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -116,63 +117,90 @@ func RenewTarget(subs []*Subscription, plan *Plan) *Subscription {
 	return best
 }
 
-// UpgradePrice is the price of switching a subscription from a plan priced
-// oldPrice per oldPeriod to one priced newPrice per newPeriod for the remaining
-// time: the difference of the two prorated prices, rounded up to
-// PriceDecimals. A result ≤ 0 means the target is not an upgrade.
-func UpgradePrice(newPrice money.Amount, newPeriod time.Duration, oldPrice money.Amount, oldPeriod time.Duration,
-	remaining time.Duration) (money.Amount, error) {
-	if remaining <= 0 || newPeriod <= 0 || oldPeriod <= 0 {
-		return 0, nil
-	}
-	sec := int64(remaining / time.Second)
-	n, err := newPrice.MulDiv(sec, int64(newPeriod/time.Second))
-	if err != nil {
-		return 0, err
-	}
-	o, err := oldPrice.MulDiv(sec, int64(oldPeriod/time.Second))
-	if err != nil {
-		return 0, err
-	}
-	diff := n - o
-	if diff <= 0 {
-		return 0, nil
-	}
-	return ceilAmount(diff, PriceDecimals), nil
+// UpgradeQuote is the cost and effect of upgrading a subscription now.
+type UpgradeQuote struct {
+	// Price = Periods × the new plan's price − Credit.
+	Price money.Amount
+	// Credit is the value of the unused time of the old plan.
+	Credit money.Amount
+	// Periods is the number of new-plan periods the upgraded subscription runs
+	// from now (1 unless the credit exceeds one period's price).
+	Periods int
+	EndsAt  time.Time
 }
 
-// ceilAmount rounds a positive amount up to decimals.
-func ceilAmount(a money.Amount, decimals int) money.Amount {
+// QuoteUpgrade prices an upgrade the way subscription services usually do: the
+// upgraded subscription starts a fresh term of the new plan now, and the unused
+// time of the old plan (oldPrice per oldPeriod, remaining left) is credited.
+// Upgrading early is therefore cheap and upgrading just before expiry costs
+// about a new purchase — the remaining time can't be bought at a discount. A
+// credit worth more than one new period (e.g. after several renewals) extends
+// the new term by whole periods until it covers the credit, so nothing paid is
+// lost. The credit is rounded down and the price up to PriceDecimals.
+func QuoteUpgrade(newPrice money.Amount, newPeriod time.Duration, oldPrice money.Amount, oldPeriod time.Duration,
+	remaining time.Duration, now time.Time) (UpgradeQuote, error) {
+	if newPeriod <= 0 || oldPeriod <= 0 || newPrice <= 0 {
+		return UpgradeQuote{}, fmt.Errorf("subscription: invalid upgrade quote input")
+	}
+	var credit money.Amount
+	if remaining > 0 && oldPrice > 0 {
+		c, err := oldPrice.MulDiv(int64(remaining/time.Second), int64(oldPeriod/time.Second))
+		if err != nil {
+			return UpgradeQuote{}, err
+		}
+		credit = floorAmount(c, PriceDecimals)
+	}
+	periods := 1
+	for newPrice*money.Amount(periods) <= credit && periods < MaxPeriods {
+		periods++
+	}
+	price := ceilAmount(newPrice*money.Amount(periods)-credit, PriceDecimals)
+	return UpgradeQuote{Price: price, Credit: credit, Periods: periods, EndsAt: now.Add(newPeriod * time.Duration(periods))}, nil
+}
+
+func amountStep(decimals int) money.Amount {
 	step := money.Amount(1)
 	for i := decimals; i < money.Scale; i++ {
 		step *= 10
 	}
+	return step
+}
+
+// ceilAmount rounds a non-negative amount up to decimals.
+func ceilAmount(a money.Amount, decimals int) money.Amount {
+	step := amountStep(decimals)
 	if r := a % step; r != 0 {
 		a += step - r
 	}
 	return a
 }
 
+// floorAmount rounds a non-negative amount down to decimals.
+func floorAmount(a money.Amount, decimals int) money.Amount {
+	return a - a%amountStep(decimals)
+}
+
 // UpgradeCheck validates an upgrade of from to plan for a user whose live
-// subscriptions are subs, returning the price at now.
-func UpgradeCheck(from *Subscription, fromPlan, plan *Plan, subs []*Subscription, now time.Time) (money.Amount, error) {
+// subscriptions are subs and quotes it at now. Only plans that cost more per
+// day than the current one are upgrades.
+func UpgradeCheck(from *Subscription, fromPlan, plan *Plan, subs []*Subscription, now time.Time) (UpgradeQuote, error) {
 	if from.StatusAt(now) != StatusActive {
-		return 0, NotActiveError()
+		return UpgradeQuote{}, NotActiveError()
 	}
 	if from.PlanID == plan.ID {
-		return 0, NotAnUpgradeError("已经是该套餐，请直接续费")
+		return UpgradeQuote{}, NotAnUpgradeError("已经是该套餐，请直接续费")
 	}
 	if plan.Stackable {
-		return 0, NotAnUpgradeError("可叠加的套餐不能作为升级目标")
+		return UpgradeQuote{}, NotAnUpgradeError("可叠加的套餐不能作为升级目标")
 	}
 	for _, s := range subs {
 		if s.PlanID == plan.ID {
-			return 0, NotAnUpgradeError("已持有该套餐，请直接续费")
+			return UpgradeQuote{}, NotAnUpgradeError("已持有该套餐，请直接续费")
 		}
 	}
 	newPeriod, err := plan.Period()
 	if err != nil {
-		return 0, err
+		return UpgradeQuote{}, err
 	}
 	var oldPrice money.Amount
 	oldPeriod := newPeriod
@@ -184,28 +212,30 @@ func UpgradeCheck(from *Subscription, fromPlan, plan *Plan, subs []*Subscription
 			oldPeriod = d
 		}
 	}
-	price, err := UpgradePrice(*plan.ListPrice, newPeriod, oldPrice, oldPeriod, from.EndsAt.Sub(now))
+	// Daily price comparison: new/newPeriod > old/oldPeriod.
+	scaled, err := plan.ListPrice.MulDiv(int64(oldPeriod/time.Second), int64(newPeriod/time.Second))
 	if err != nil {
-		return 0, err
+		return UpgradeQuote{}, err
 	}
-	if price <= 0 {
-		return 0, NotAnUpgradeError("目标套餐不比当前套餐贵，不支持降级")
+	if scaled <= oldPrice {
+		return UpgradeQuote{}, NotAnUpgradeError("目标套餐不比当前套餐贵，不支持降级")
 	}
-	return price, nil
+	return QuoteUpgrade(*plan.ListPrice, newPeriod, oldPrice, oldPeriod, from.EndsAt.Sub(now), now)
 }
 
-// UpgradeTx replaces the (locked) subscription's snapshot with plan's in place:
-// starts_at, ends_at and quota usage are kept, so rules with the same id in both
-// plans keep their used amounts.
-func UpgradeTx(ctx context.Context, q db.Querier, now time.Time, sub *Subscription, plan *Plan) (*Subscription, error) {
+// UpgradeTx replaces the (locked) subscription's snapshot with plan's in place
+// and sets its end to endsAt (the new term, see QuoteUpgrade). starts_at and
+// quota usage are kept, so rules with the same id in both plans keep their
+// used amounts.
+func UpgradeTx(ctx context.Context, q db.Querier, now time.Time, sub *Subscription, plan *Plan, endsAt time.Time) (*Subscription, error) {
 	// The raw plan JSON, exactly as GrantTx snapshots it.
 	var models, rules []byte
 	if err := q.QueryRow(ctx, `SELECT models, rules FROM plans WHERE id = $1`, plan.ID).Scan(&models, &rules); err != nil {
 		return nil, err
 	}
 	if _, err := q.Exec(ctx, `UPDATE subscriptions SET plan_id = $2, plan_name = $3, models = $4, rules = $5,
-			version = version + 1, updated_at = $6
-		WHERE id = $1`, sub.ID, plan.ID, plan.Name, models, rules, dbTime(now)); err != nil {
+			ends_at = $6, version = version + 1, updated_at = $7
+		WHERE id = $1`, sub.ID, plan.ID, plan.Name, models, rules, dbTime(endsAt), dbTime(now)); err != nil {
 		return nil, err
 	}
 	return getSub(ctx, q, sub.ID, false)

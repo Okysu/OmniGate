@@ -9,32 +9,32 @@ import (
 	"omnigate/internal/money"
 )
 
-func TestUpgradePrice(t *testing.T) {
+func TestQuoteUpgrade(t *testing.T) {
 	m := money.MustParse
-	month := 30 * 24 * time.Hour
+	day := 24 * time.Hour
+	month := 30 * day
+	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
 	cases := []struct {
+		name       string
 		newP, oldP string
 		remaining  time.Duration
-		want       string
+		price      string
+		credit     string
+		periods    int
 	}{
-		{"59", "25", 20 * 24 * time.Hour, "22.67"}, // 34 × 20/30 = 22.666… → rounded up
-		{"59", "25", month, "34"},
-		{"25", "59", month, "0"},  // downgrade
-		{"25", "25", month, "0"},  // same price
-		{"25", "0", 15 * 24 * time.Hour, "12.5"},
-		{"59", "25", time.Second, "0.01"}, // tiny remainders still cost the minimum unit
-		{"59", "25", 0, "0"},
+		{"right after buying", "59", "25", month, "34", "25", 1},
+		{"20 days left", "59", "25", 20 * day, "42.34", "16.66", 1}, // credit 16.666… rounded down
+		{"one day left costs about a new purchase", "59", "25", day, "58.17", "0.83", 1},
+		{"expired source", "59", "25", 0, "59", "0", 1},
+		{"no old price", "59", "0", month, "59", "0", 1},
+		{"renewed three times: credit 75 > 59 → two periods", "59", "25", 3 * month, "43", "75", 2},
 	}
 	for _, c := range cases {
-		got, err := UpgradePrice(m(c.newP), month, m(c.oldP), month, c.remaining)
-		if err != nil || got != m(c.want) {
-			t.Errorf("UpgradePrice(%s, %s, %v) = %s, %v; want %s", c.newP, c.oldP, c.remaining, got, err, c.want)
+		q, err := QuoteUpgrade(m(c.newP), month, m(c.oldP), month, c.remaining, now)
+		if err != nil || q.Price != m(c.price) || q.Credit != m(c.credit) || q.Periods != c.periods ||
+			!q.EndsAt.Equal(now.Add(month*time.Duration(c.periods))) {
+			t.Errorf("%s: %+v, %v; want price %s credit %s periods %d", c.name, q, err, c.price, c.credit, c.periods)
 		}
-	}
-	// Different periods compare daily prices: ¥10/7d vs ¥30/30d.
-	got, _ := UpgradePrice(m("30"), month, m("10"), 7*24*time.Hour, 7*24*time.Hour)
-	if got != 0 {
-		t.Errorf("weekly ¥10 → monthly ¥30 = %s, want 0 (cheaper per day)", got)
 	}
 }
 
@@ -44,8 +44,9 @@ func TestUpgradeCheck(t *testing.T) {
 	goPlus := &Plan{ID: uuid.New(), Name: "Go+", ListPrice: price("25"), Duration: "30d", Status: PlanActive}
 	pro := &Plan{ID: uuid.New(), Name: "Pro", ListPrice: price("59"), Duration: "30d", Status: PlanActive}
 	sub := &Subscription{ID: uuid.New(), PlanID: goPlus.ID, State: StatusActive, EndsAt: now.Add(10 * 24 * time.Hour)}
-	if p, err := UpgradeCheck(sub, goPlus, pro, []*Subscription{sub}, now); err != nil || p.String() != "11.34" {
-		t.Fatalf("upgrade = %s, %v", p, err)
+	q, err := UpgradeCheck(sub, goPlus, pro, []*Subscription{sub}, now)
+	if err != nil || q.Price.String() != "50.67" || !q.EndsAt.Equal(now.Add(30*24*time.Hour)) { // 59 − 25 × 10/30 (8.33)
+		t.Fatalf("upgrade = %+v, %v", q, err)
 	}
 	if _, err := UpgradeCheck(sub, pro, goPlus, []*Subscription{sub}, now); err == nil {
 		t.Fatal("downgrade must be rejected")
@@ -61,11 +62,18 @@ func TestUpgradeCheck(t *testing.T) {
 	if _, err := UpgradeCheck(expired, goPlus, pro, nil, now); err == nil {
 		t.Fatal("expired source must be rejected")
 	}
-	// A granted plan without a price pays the new plan's full prorated price.
+	// A weekly ¥10 plan is dearer per day than a monthly ¥30 one: not an upgrade.
+	weekly := &Plan{ID: uuid.New(), Name: "周卡", ListPrice: price("10"), Duration: "7d", Status: PlanActive}
+	monthly := &Plan{ID: uuid.New(), Name: "月卡", ListPrice: price("30"), Duration: "30d", Status: PlanActive}
+	ws := &Subscription{ID: uuid.New(), PlanID: weekly.ID, State: StatusActive, EndsAt: now.Add(24 * time.Hour)}
+	if _, err := UpgradeCheck(ws, weekly, monthly, []*Subscription{ws}, now); err == nil {
+		t.Fatal("cheaper per day must not count as an upgrade")
+	}
+	// A granted plan without a price is credited nothing.
 	free := &Plan{ID: uuid.New(), Name: "赠送", Duration: "30d", Status: PlanArchived}
 	sub2 := &Subscription{ID: uuid.New(), PlanID: free.ID, State: StatusActive, EndsAt: now.Add(15 * 24 * time.Hour)}
-	if p, err := UpgradeCheck(sub2, free, pro, []*Subscription{sub2}, now); err != nil || p.String() != "29.5" {
-		t.Fatalf("upgrade from free = %s, %v", p, err)
+	if q, err := UpgradeCheck(sub2, free, pro, []*Subscription{sub2}, now); err != nil || q.Price.String() != "59" {
+		t.Fatalf("upgrade from free = %+v, %v", q, err)
 	}
 }
 

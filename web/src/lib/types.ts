@@ -1011,10 +1011,12 @@ export interface UpgradeOption {
   fromPlanName: string
   /** Current listPrice of the old plan (null: not for sale, counted as 0). */
   fromPrice: string | null
-  /** Price difference to pay right now. */
+  /** Price to pay right now: the new plan's price minus `credit`. */
   price: string
+  /** Value of the unused time of the current plan, deducted from the price. */
+  credit: string
   remainingSeconds: number
-  /** End date after the upgrade (= the current end date). */
+  /** End date after the upgrade: a new term of the plan starting now. */
   endsAt: string
 }
 

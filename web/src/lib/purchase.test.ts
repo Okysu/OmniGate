@@ -40,6 +40,7 @@ const upgrade = (id: string, name: string, price: string) => ({
   fromPlanName: name,
   fromPrice: '20',
   price,
+  credit: '0.66',
   remainingSeconds: 86400,
   endsAt: '2026-10-20T00:00:00Z',
 })
@@ -57,7 +58,7 @@ describe('purchase intents', () => {
     const o = option({ upgrades: [upgrade('b', 'Go+', '30.5'), upgrade('a', 'Go', '12'), upgrade('c', 'X', '0')] })
     const ups = upgradeIntents(o)
     expect(ups.map(u => u.fromSubscriptionId)).toEqual(['a', 'b'])
-    expect(ups[0]).toMatchObject({ action: 'upgrade', planName: 'Pro', fromPlanName: 'Go', price: '12', endsAt: '2026-10-20T00:00:00Z' })
+    expect(ups[0]).toMatchObject({ action: 'upgrade', planName: 'Pro', fromPlanName: 'Go', price: '12', endsAt: '2026-10-20T00:00:00Z', credit: '0.66', currentEndsAt: null })
     const cards = buildPurchaseCards({ available: '50', currency: 'USD', plans: [o, option({ purchasable: false, price: null }, { id: 'free' })] })
     expect(cards).toHaveLength(2)
     expect(cards[1]!.direct).toBeNull()

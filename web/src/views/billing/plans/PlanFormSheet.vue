@@ -228,7 +228,7 @@ async function reloadLatest() {
             </div>
             <div class="space-y-4">
               <div class="grid gap-4 sm:grid-cols-2">
-                <FormField :label="`售价（${currency?.code ?? '结算币种'}）`" for="plan-price" :error="errors.listPrice" hint="售价：用户用余额购买 / 续费的价格（升级时按剩余时间折算差价）；留空或 0 表示不可购买，仅能通过兑换码或管理员开通。">
+                <FormField :label="`售价（${currency?.code ?? '结算币种'}）`" for="plan-price" :error="errors.listPrice" hint="售价：用户用余额购买 / 续费的价格（升级时从现在起开始新周期，旧套餐剩余天数按价值抵扣）；留空或 0 表示不可购买，仅能通过兑换码或管理员开通。">
                   <div class="relative">
                     <span class="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-sm">{{ currency?.symbol ?? '' }}</span>
                     <Input id="plan-price" v-model="form.listPrice" inputmode="decimal" placeholder="可选" class="pl-7 font-mono tabular-nums" :aria-invalid="!!errors.listPrice" />

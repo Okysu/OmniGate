@@ -91,7 +91,7 @@ func TestWalletPurchase(t *testing.T) {
 	}
 	u := ups[0].(map[string]any)
 	price, _ := strconv.ParseFloat(u["price"].(string), 64)
-	if u["fromSubscriptionId"] != subID || u["fromPlanName"] != "Go+" || u["fromPrice"] != "25" || price < 33.98 || price > 34 {
+	if u["fromSubscriptionId"] != subID || u["fromPlanName"] != "Go+" || u["fromPrice"] != "25" || price < 33.98 || price > 34.02 || u["credit"] == "0" {
 		t.Fatalf("upgrade option = %v", u)
 	}
 	resp, out = e.carol.do(http.MethodPost, "/api/billing/purchase", map[string]any{"planId": goPlus, "fromSubscriptionId": subID, "expectedPrice": "100"})
@@ -100,9 +100,16 @@ func TestWalletPurchase(t *testing.T) {
 	}
 	r = e.mustDo(e.carol, http.MethodPost, "/api/billing/purchase", map[string]any{"planId": pro, "fromSubscriptionId": subID, "expectedPrice": u["price"]}, 200)
 	sub = r["subscription"].(map[string]any)
-	if r["action"] != "upgrade" || sub["id"] != subID || sub["plan"].(map[string]any)["name"] != "Pro" || sub["endsAt"] != endsAt {
+	if r["action"] != "upgrade" || sub["id"] != subID || sub["plan"].(map[string]any)["name"] != "Pro" || sub["endsAt"] == nil {
 		t.Fatalf("upgrade = %v", r)
 	}
+	// The upgrade starts a new 30-day term of Pro from now.
+	bought, _ := time.Parse(time.RFC3339Nano, endsAt)
+	upgradedEnds, _ := time.Parse(time.RFC3339Nano, sub["endsAt"].(string))
+	if upgradedEnds.Before(bought) || upgradedEnds.Sub(time.Now()) < 29*24*time.Hour {
+		t.Fatalf("upgraded endsAt = %v (bought until %v)", upgradedEnds, bought)
+	}
+	endsAt = sub["endsAt"].(string)
 	for _, rule := range sub["rules"].([]any) {
 		ru := rule.(map[string]any)
 		if ru["used"] != "1" || (ru["id"] == "5h" && ru["limit"] != "20") {
@@ -158,7 +165,7 @@ func TestWalletPurchase(t *testing.T) {
 		t.Fatalf("purchase entries = %d", purchases)
 	}
 	w := e.mustDo(e.carol, http.MethodGet, "/api/billing/wallet", nil, 200)
-	if b, _ := strconv.ParseFloat(w["balance"].(string), 64); b < 82 || b > 82.03 { // 200 − 25 − ~34 − 59
+	if b, _ := strconv.ParseFloat(w["balance"].(string), 64); b < 81.97 || b > 82.03 { // 200 − 25 − ~34 − 59
 		t.Fatalf("wallet = %v", w)
 	}
 	if n, _ := e.auditCount("subscription.purchase"); n != 3 {

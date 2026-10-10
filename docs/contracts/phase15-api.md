@@ -20,20 +20,25 @@
 | --- | --- | --- | --- |
 | `new` | U 没有 P 的生效中订阅（或 P 可叠加） | `P.listPrice` | 新建订阅，`startsAt = now`，`endsAt = now + P.duration`，`source = purchase` |
 | `renew` | P 不可叠加，且 U 有 P 的生效中订阅 S | `P.listPrice` | `S.endsAt += P.duration`；快照与用量不变（与兑换码续期相同） |
-| `upgrade` | 从 U 的生效中订阅 S（套餐 O ≠ P）升级，见下 | 补差价 | 原地把 S 换成 P：快照（名称 / 模型 / 规则）换成 P，`startsAt`、`endsAt` 不变，**已用额度保留** |
+| `upgrade` | 从 U 的生效中订阅 S（套餐 O ≠ P）升级，见下 | 补差价 | 原地把 S 换成 P：快照（名称 / 模型 / 规则）换成 P，从 now 起开始 P 的新周期（`endsAt = now + k × P.duration`），`startsAt` 不变，**已用额度保留** |
 
-**升级条件**：S 状态 `active` 且未到期；P 不可叠加；U 没有 P 的其他生效中订阅（有的话应当续费 P）；补差价 > 0（即“更贵”，不支持降级）。
+**升级条件**：S 状态 `active` 且未到期；P 不可叠加；U 没有 P 的其他生效中订阅（有的话应当续费 P）；P 的日均价格高于 O（`P.listPrice / P.duration > O.listPrice / O.duration`），不支持降级。
 
-**补差价**（按剩余时间折算两档的日均价差）：
+**补差价**（与 Claude 等订阅服务相同：升级即开始新周期，旧套餐未用完的时间按价值抵扣）：
 
 ```
-remaining = S.endsAt − now                         （秒）
-price     = P.listPrice × remaining / P.duration − O.listPrice × remaining / O.duration
+remaining = S.endsAt − now                                   （秒）
+credit    = O.listPrice × remaining / O.duration             （向下取整到 0.01）
+k         = 使 k × P.listPrice > credit 的最小正整数（通常为 1）
+price     = k × P.listPrice − credit                         （向上取整到 0.01）
+endsAt    = now + k × P.duration
 ```
+
+越早升级抵扣越多；临近到期时升级几乎等于新购，因此不能靠“到期前一天补一点差价”换取整月的高档额度。
 
 - `O.listPrice` 取旧套餐**当前**的 `listPrice`（含已归档的旧套餐）；为 `null` 时按 0 计（兑换码 / 管理员开通的套餐，补的是新套餐剩余时间的全价）。
-- 两项分别精确计算（`MulDiv`，四舍五入），相减后向上取整到结算币种的最小单位（2 位小数）；`price ≤ 0` 视为不是升级（不出现在选项里，直接购买返回 `not_an_upgrade`）。
-- 剩余时间超过 P 的一个周期（例如旧订阅续了多期）时照样按秒折算——补的是剩余全部时间的差价。
+- 旧订阅续了多期、抵扣超过 P 一个周期的价格时，新周期按整数倍延长（`k > 1`），已付的钱不会浪费。
+- 抵扣随时间减少，所以升级价格随时间**上升**（约每天 `O.listPrice / O.duration`）。
 
 **用量保留**：`quota_usage` 以 `(subscription_id, rule_id, window_start)` 为键，升级不换订阅行，所以 P 中与 O **同 id** 的规则
 （如 `5h` / `weekly` / `monthly`）沿用已用量，百分比按新上限重新计算（已用 $60：Go+ 75% → Pro 30%）；P 独有的规则从 0 开始，
@@ -68,9 +73,10 @@ interface UpgradeOption {
   fromPlanId: string
   fromPlanName: string              // 订阅快照中的名称
   fromPrice: string | null          // 旧套餐当前 listPrice
-  price: string                     // 此刻的补差价
+  price: string                     // 此刻的补差价（= k × P.listPrice − credit）
+  credit: string                    // 旧套餐剩余时间的抵扣
   remainingSeconds: number
-  endsAt: string                    // 升级后到期时间（= 原到期时间）
+  endsAt: string                    // 升级后到期时间（now + k × P.duration）
 }
 ```
 
@@ -91,7 +97,7 @@ interface PurchaseResult {
 
 - 不带 `fromSubscriptionId`：按 §2 决定 `new` / `renew`。带上：`upgrade`。
 - `expectedPrice` 是界面上展示给用户的价格。实际价格 **> expectedPrice** 时拒绝（`409 price_changed`，`details.price` 为当前价格）；
-  升级价格随时间只降不升，所以实际价格 ≤ 展示价格时按实际价格扣款。
+  实际价格 ≤ 展示价格时按实际价格扣款。升级价格随时间缓慢上升，界面停留较久后确认会得到 `price_changed`，刷新后重新确认即可。
 - 一次事务内完成：锁用户 → 读套餐 → 锁订阅 → 锁钱包 → 校验余额（`available ≥ price`）→ 扣款（`ledger kind = charge`，
   `refType = purchase`，`refId = 购买记录 id`，`note = "购买套餐 <名称>" / "续费套餐 …" / "升级套餐 <旧> → <新>"`）→ 写订阅 → 写购买记录 → 审计。
 - 余额购买**不受** `billing.enforce` 影响（未开启计费时同样扣余额）。

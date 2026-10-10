@@ -47,8 +47,10 @@ type UpgradeOption struct {
 	FromPlanName       string
 	FromPrice          *money.Amount
 	Price              money.Amount
-	Remaining          time.Duration
-	EndsAt             time.Time
+	// Credit is the value of the unused old time deducted from the price.
+	Credit    money.Amount
+	Remaining time.Duration
+	EndsAt    time.Time
 }
 
 // PurchaseOptions lists the active plans with the price and effect of buying,
@@ -99,12 +101,12 @@ func (s *Service) PurchaseOptions(ctx context.Context, userID uuid.UUID) (*Purch
 					continue
 				}
 				from := fromPlans[sub.PlanID]
-				price, err := subscription.UpgradeCheck(sub, from, p, subs, now)
+				q, err := subscription.UpgradeCheck(sub, from, p, subs, now)
 				if err != nil {
 					continue
 				}
 				u := UpgradeOption{FromSubscriptionID: sub.ID, FromPlanID: sub.PlanID, FromPlanName: sub.PlanName,
-					Price: price, Remaining: sub.EndsAt.Sub(now), EndsAt: sub.EndsAt}
+					Price: q.Price, Credit: q.Credit, Remaining: sub.EndsAt.Sub(now), EndsAt: q.EndsAt}
 				if from != nil {
 					u.FromPrice = from.ListPrice
 				}
@@ -164,6 +166,7 @@ func (s *Service) Purchase(ctx context.Context, actor Actor, in PurchaseInput, m
 		action, price := subscription.PurchaseNew, *plan.ListPrice
 		var from *subscription.Subscription
 		var fromPlan *subscription.Plan
+		var quote subscription.UpgradeQuote
 		if in.FromSubscriptionID != nil {
 			if from, err = subscription.GetSubTx(ctx, tx, *in.FromSubscriptionID, true); err != nil {
 				return err
@@ -174,9 +177,10 @@ func (s *Service) Purchase(ctx context.Context, actor Actor, in PurchaseInput, m
 			if fromPlan, err = subscription.PlanTx(ctx, tx, from.PlanID, now, false); err != nil {
 				return err
 			}
-			if price, err = subscription.UpgradeCheck(from, fromPlan, plan, subs, now); err != nil {
+			if quote, err = subscription.UpgradeCheck(from, fromPlan, plan, subs, now); err != nil {
 				return err
 			}
+			price = quote.Price
 			action = subscription.PurchaseUpgrade
 		} else if subscription.RenewTarget(subs, plan) != nil {
 			action = subscription.PurchaseRenew
@@ -213,7 +217,7 @@ func (s *Service) Purchase(ctx context.Context, actor Actor, in PurchaseInput, m
 			return err
 		}
 		if action == subscription.PurchaseUpgrade {
-			sub, err = subscription.UpgradeTx(ctx, tx, now, from, plan)
+			sub, err = subscription.UpgradeTx(ctx, tx, now, from, plan, quote.EndsAt)
 		} else {
 			var renewed bool
 			sub, renewed, err = subscription.GrantTx(ctx, tx, now, actor.ID, plan.ID, 1, subscription.SourcePurchase, id.String())

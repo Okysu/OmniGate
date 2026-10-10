@@ -39,6 +39,7 @@ type upgradeJSON struct {
 	FromPlanName       string    `json:"fromPlanName"`
 	FromPrice          *string   `json:"fromPrice"`
 	Price              string    `json:"price"`
+	Credit             string    `json:"credit"`
 	RemainingSeconds   int64     `json:"remainingSeconds"`
 	EndsAt             time.Time `json:"endsAt"`
 }
@@ -73,7 +74,7 @@ func (h *Handler) purchaseOptions(w http.ResponseWriter, r *http.Request) {
 			NewEndsAt: o.NewEndsAt, Upgrades: []upgradeJSON{}}
 		for _, u := range o.Upgrades {
 			v.Upgrades = append(v.Upgrades, upgradeJSON{FromSubscriptionID: u.FromSubscriptionID, FromPlanID: u.FromPlanID,
-				FromPlanName: u.FromPlanName, FromPrice: amountPtr(u.FromPrice), Price: u.Price.String(),
+				FromPlanName: u.FromPlanName, FromPrice: amountPtr(u.FromPrice), Price: u.Price.String(), Credit: u.Credit.String(),
 				RemainingSeconds: int64(u.Remaining / time.Second), EndsAt: u.EndsAt})
 		}
 		out.Plans = append(out.Plans, v)

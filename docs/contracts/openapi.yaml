@@ -2890,8 +2890,8 @@ paths:
       summary: 用余额购买 / 续费 / 补差价升级套餐
       description: |
         不带 `fromSubscriptionId`：购买（`new`）或续费（`renew`，不可叠加且已持有该套餐时顺延到期时间）。
-        带 `fromSubscriptionId`：把该订阅原地升级到目标套餐，补差价 = 两档按剩余时间折算的价格之差（向上取整到 0.01），
-        到期时间不变，同 id 规则的已用量保留（phase15-api.md §2）。实际价格高于 `expectedPrice` → `409 price_changed`。
+        带 `fromSubscriptionId`：把该订阅原地升级到目标套餐并从现在起开始新周期，补差价 = 新套餐售价 − 旧套餐剩余时间的价值（`credit`），
+        同 id 规则的已用量保留（phase15-api.md §2）。实际价格高于 `expectedPrice` → `409 price_changed`。
         扣款写 `charge` 账本（`refType = purchase`），不受 `billing.enforce` 影响；审计 `subscription.purchase`。
       x-required-permission: billing.own
       parameters:
@@ -11456,7 +11456,7 @@ components:
 
     UpgradeOption:
       type: object
-      required: [fromSubscriptionId, fromPlanId, fromPlanName, fromPrice, price, remainingSeconds, endsAt]
+      required: [fromSubscriptionId, fromPlanId, fromPlanName, fromPrice, price, credit, remainingSeconds, endsAt]
       properties:
         fromSubscriptionId: { type: string, format: uuid }
         fromPlanId: { type: string, format: uuid }
@@ -11464,8 +11464,10 @@ components:
         fromPrice: { type: [string, "null"], description: 旧套餐当前 listPrice }
         price:
           $ref: "#/components/schemas/Money"
+        credit:
+          $ref: "#/components/schemas/Money"
         remainingSeconds: { type: integer }
-        endsAt: { type: string, format: date-time, description: 升级后的到期时间（不变） }
+        endsAt: { type: string, format: date-time, description: 升级后的到期时间（now + k × 新套餐周期） }
 
     PurchaseResult:
       type: object
