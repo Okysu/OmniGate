@@ -1,6 +1,0 @@
-{
-  "name": "非流式响应：HTTP 200 中的错误体",
-  "hook": "parseResponse",
-  "response": { "status": 200, "body": { "error": { "message": "Model Not Exist", "type": "invalid_request_error", "code": "invalid_request_error" } } },
-  "expect": { "output": { "error": { "status": 502, "message": "invalid_request_error: Model Not Exist" } } }
-}

@@ -1,7 +1,0 @@
-{
-  "name": "构造请求：默认不限制 max_tokens（原样转发）",
-  "hook": "buildRequest",
-  "secrets": { "apiKey": "sk-test" },
-  "request": { "model": "deepseek-flash", "prompt": "SELECT ", "max_tokens": 9000 },
-  "expect": { "output": { "body": { "max_tokens": 9000 } } }
-}

@@ -1,6 +1,0 @@
-{
-  "name": "错误映射：限流与非 JSON 错误体",
-  "hook": "normalizeError",
-  "response": { "status": 429, "headers": { "Content-Type": "text/plain" }, "body": "Rate Limit Reached" },
-  "expect": { "output": { "status": 429, "message": "Rate Limit Reached" } }
-}

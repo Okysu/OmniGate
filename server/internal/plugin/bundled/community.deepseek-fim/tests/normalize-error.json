@@ -1,6 +1,0 @@
-{
-  "name": "错误映射：余额不足",
-  "hook": "normalizeError",
-  "response": { "status": 402, "body": { "error": { "message": "Insufficient Balance", "type": "unknown_error", "param": null, "code": "invalid_request_error" } } },
-  "expect": { "output": { "status": 402, "message": "DeepSeek 账户余额不足：Insufficient Balance" } }
-}

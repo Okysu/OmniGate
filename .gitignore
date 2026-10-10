@@ -30,3 +30,6 @@ coverage.out
 
 # 本地数据目录（OMNIGATE_DATA_DIR 开发默认值：结算 journal）
 .data/
+
+# 自用插件（不随公开仓库与镜像发布）
+/private-plugins/

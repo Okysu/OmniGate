@@ -310,7 +310,7 @@ export default definePlugin({
 	}
 }
 
-// The editor template and the bundled billing / body-rewrite plugins type-check against the
+// The editor template and the bundled billing plugin type-check against the
 // SDK declarations with the editor's compiler options (needs web/node_modules).
 func TestTemplatesTypeCheck(t *testing.T) {
 	tsc, _ := filepath.Abs("../../../web/node_modules/.bin/tsc")
@@ -323,12 +323,9 @@ func TestTemplatesTypeCheck(t *testing.T) {
 	for k, v := range bundled["community.billing-examples"] {
 		files["billing/"+k] = v
 	}
-	for k, v := range bundled["community.body-rewrite"] {
-		files["rewrite/"+k] = v
-	}
 	files["sdk.d.ts"] = SDKTypes
 	files["tsconfig.json"] = `{"compilerOptions":{"target":"ES2017","module":"ESNext","moduleResolution":"node","strict":true,"noEmit":true,
-	  "lib":["es2020"],"types":[],"ignoreDeprecations":"6.0"},"files":["sdk.d.ts","src/index.ts","src/acme.ts","billing/src/index.ts","rewrite/src/index.ts"]}`
+	  "lib":["es2020"],"types":[],"ignoreDeprecations":"6.0"},"files":["sdk.d.ts","src/index.ts","src/acme.ts","billing/src/index.ts"]}`
 	for k, v := range files {
 		p := filepath.Join(dir, k)
 		_ = os.MkdirAll(filepath.Dir(p), 0o755)

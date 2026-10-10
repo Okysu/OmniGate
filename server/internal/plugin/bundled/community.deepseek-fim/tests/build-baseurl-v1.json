@@ -1,8 +1,0 @@
-{
-  "name": "构造请求：Base URL 以 /v1 结尾时按源拼接 fimPath",
-  "hook": "buildRequest",
-  "baseUrl": "https://api.deepseek.com/v1",
-  "secrets": { "apiKey": "sk-test" },
-  "request": { "model": "deepseek-flash", "prompt": "x" },
-  "expect": { "output": { "url": "https://api.deepseek.com/beta/completions" } }
-}
