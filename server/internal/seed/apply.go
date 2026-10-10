@@ -481,7 +481,7 @@ func infoSummary(i *plaza.Info) string {
 		name string
 	}{{i.Capabilities.Vision, "vision"}, {i.Capabilities.Tools, "tools"}, {i.Capabilities.Reasoning, "reasoning"},
 		{i.Capabilities.Embedding, "embedding"}, {i.Capabilities.ImageGeneration, "imageGeneration"},
-		{i.Capabilities.AudioInput, "audioInput"}, {i.Capabilities.AudioOutput, "audioOutput"}} {
+		{i.Capabilities.AudioInput, "audioInput"}, {i.Capabilities.AudioOutput, "audioOutput"}, {i.Capabilities.Completions, "completions"}} {
 		if c.on {
 			caps = append(caps, c.name)
 		}

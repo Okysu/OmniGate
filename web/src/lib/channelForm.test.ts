@@ -154,3 +154,20 @@ describe('hasBalanceOutput', () => {
     expect(hasBalanceOutput(null)).toBe(false)
   })
 })
+
+describe('Completions support (phase14)', () => {
+  it('round-trips supportsCompletions and only sends it for openai channels', () => {
+    expect(emptyChannelForm().supportsCompletions).toBe(false)
+    expect(formFromChannel(channel).supportsCompletions).toBe(false)
+    const f = formFromChannel({ ...channel, config: { supportsCompletions: true } })
+    expect(f.supportsCompletions).toBe(true)
+    expect(buildChannelPayload(f, channel).config).toEqual({ supportsCompletions: true })
+    f.supportsCompletions = false
+    expect(buildChannelPayload(f, channel).config).toEqual({})
+
+    const a = emptyChannelForm()
+    a.type = 'anthropic'
+    a.supportsCompletions = true // ignored: anthropic channels never serve completions
+    expect(buildChannelPayload(a).config).toEqual({})
+  })
+})

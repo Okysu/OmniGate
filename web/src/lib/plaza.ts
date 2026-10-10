@@ -11,7 +11,7 @@ import { normalizePlazaTiers, resolveTiers } from './priceTiers'
 // Normalisation (defensive against nulls from the Go backend)
 // ---------------------------------------------------------------------------
 
-export const NO_CAPABILITIES: ModelCapabilities = { vision: false, tools: false, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false }
+export const NO_CAPABILITIES: ModelCapabilities = { vision: false, tools: false, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false, completions: false }
 
 type Loose<T> = { [K in keyof T]?: T[K] | null }
 
@@ -35,6 +35,8 @@ export function normalizeCapabilities(c: Loose<ModelCapabilities> | null | undef
     // phase9 §1: absent on older backends.
     audioInput: c?.audioInput === true,
     audioOutput: c?.audioOutput === true,
+    // phase14: absent on older backends.
+    completions: c?.completions === true,
   }
 }
 
@@ -198,6 +200,7 @@ export const CAPABILITIES: CapabilityMeta[] = [
   { key: 'imageGeneration', label: '图片生成', description: '支持图片生成 / 编辑（Images 接口）' },
   { key: 'audioInput', label: '语音识别', description: '音频输入：语音转写 / 翻译（/v1/audio/transcriptions、/v1/audio/translations）' },
   { key: 'audioOutput', label: '语音合成', description: '音频输出：文字转语音（/v1/audio/speech）' },
+  { key: 'completions', label: '文本补全 / FIM', description: '旧版文本补全（/v1/completions），支持 suffix 的 FIM 代码补全；需由开启了 Completions 的渠道提供' },
 ]
 
 /** Short badge text per client protocol. */
@@ -208,6 +211,7 @@ export const PROTOCOL_LABELS: Record<string, string> = {
   'openai.embeddings': 'Embeddings',
   'openai.images': 'Images',
   'openai.audio': 'Audio',
+  'openai.completions': 'Completions',
 }
 
 /** Full protocol description (tooltips, filter options). */
@@ -218,9 +222,10 @@ export const PROTOCOL_DESCRIPTIONS: Record<string, string> = {
   'openai.embeddings': 'OpenAI Embeddings（/v1/embeddings）',
   'openai.images': 'OpenAI Images（/v1/images/generations、/v1/images/edits）',
   'openai.audio': 'OpenAI Audio（/v1/audio/transcriptions、/v1/audio/translations、/v1/audio/speech）',
+  'openai.completions': 'OpenAI Completions（/v1/completions，含 FIM）',
 }
 
-const PROTOCOL_ORDER = ['openai.chat', 'openai.responses', 'anthropic.messages', 'openai.embeddings', 'openai.images', 'openai.audio']
+const PROTOCOL_ORDER = ['openai.chat', 'openai.responses', 'anthropic.messages', 'openai.completions', 'openai.embeddings', 'openai.images', 'openai.audio']
 
 export function sortProtocols(list: readonly string[]): string[] {
   const rank = (p: string) => {
@@ -518,9 +523,10 @@ export function audioModes(m: Pick<PlazaModel, 'protocols' | 'capabilities'>): A
  * (server/internal/plaza `clientProtocols`): chat models (tools / vision /
  * reasoning, or nothing special marked) get Chat, Responses and Messages;
  * embeddings / images / audio only when marked and an OpenAI-compatible
- * channel serves the model.
+ * channel serves the model; Completions (phase14) only when marked and a
+ * channel with Completions support serves it (the mark does not hide Chat).
  */
-export function protocolsForCapabilities(caps: ModelCapabilities, openaiChannel = true): string[] {
+export function protocolsForCapabilities(caps: ModelCapabilities, openaiChannel = true, completionsChannel = openaiChannel): string[] {
   const special = caps.embedding || caps.imageGeneration || caps.audioInput || caps.audioOutput
   const out: string[] = []
   if (caps.tools || caps.vision || caps.reasoning || !special)
@@ -533,5 +539,7 @@ export function protocolsForCapabilities(caps: ModelCapabilities, openaiChannel 
     if (caps.audioInput || caps.audioOutput)
       out.push('openai.audio')
   }
+  if (completionsChannel && caps.completions)
+    out.push('openai.completions')
   return out
 }

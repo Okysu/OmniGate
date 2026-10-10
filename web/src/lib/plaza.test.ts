@@ -34,16 +34,16 @@ function model(over: Partial<PlazaModel> & { model: string }): PlazaModel {
   return normalizePlazaModel({ displayName: '', description: '', vendor: '', tags: [], protocols: ['openai.chat'], price: null, plans: [], ...over })
 }
 
-const ds = model({ model: 'deepseek-chat', displayName: 'DeepSeek V3', vendor: 'DeepSeek', tags: ['性价比'], contextWindow: 65536, capabilities: { vision: false, tools: true, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false }, price: { inputPerM: '0.27', outputPerM: '1.1', cacheReadPerM: '0.07', cacheWritePerM: null } })
-const gpt = model({ model: 'gpt-4o', vendor: 'OpenAI', contextWindow: 128000, capabilities: { vision: true, tools: true, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false }, protocols: ['anthropic.messages', 'openai.chat', 'openai.responses'], price: { inputPerM: '2.5', outputPerM: '10', cacheReadPerM: '1.25', cacheWritePerM: null }, plans: [{ id: 'p1', name: 'Pro' }] })
+const ds = model({ model: 'deepseek-chat', displayName: 'DeepSeek V3', vendor: 'DeepSeek', tags: ['性价比'], contextWindow: 65536, capabilities: { vision: false, tools: true, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false, completions: false }, price: { inputPerM: '0.27', outputPerM: '1.1', cacheReadPerM: '0.07', cacheWritePerM: null } })
+const gpt = model({ model: 'gpt-4o', vendor: 'OpenAI', contextWindow: 128000, capabilities: { vision: true, tools: true, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false, completions: false }, protocols: ['anthropic.messages', 'openai.chat', 'openai.responses'], price: { inputPerM: '2.5', outputPerM: '10', cacheReadPerM: '1.25', cacheWritePerM: null }, plans: [{ id: 'p1', name: 'Pro' }] })
 const free = model({ model: 'qwen-free', vendor: 'Alibaba', contextWindow: null })
-const emb = model({ model: 'text-embedding-3-small', vendor: 'OpenAI', capabilities: { vision: false, tools: false, reasoning: false, embedding: true, imageGeneration: false, audioInput: false, audioOutput: false }, protocols: ['openai.embeddings'], price: { inputPerM: '0.02', outputPerM: '0', cacheReadPerM: null, cacheWritePerM: null } })
+const emb = model({ model: 'text-embedding-3-small', vendor: 'OpenAI', capabilities: { vision: false, tools: false, reasoning: false, embedding: true, imageGeneration: false, audioInput: false, audioOutput: false, completions: false }, protocols: ['openai.embeddings'], price: { inputPerM: '0.02', outputPerM: '0', cacheReadPerM: null, cacheWritePerM: null } })
 const all = [ds, gpt, free, emb]
 
 describe('normalizePlazaModel', () => {
   it('fills nulls from the backend with safe defaults', () => {
     const m = normalizePlazaModel({ model: 'x', displayName: null, tags: null, protocols: null, plans: null, capabilities: null, contextWindow: 0, price: null } as never)
-    expect(m).toEqual({ model: 'x', displayName: '', description: '', vendor: '', tags: [], contextWindow: null, maxOutput: null, capabilities: { vision: false, tools: false, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false }, protocols: [], price: null, plans: [] })
+    expect(m).toEqual({ model: 'x', displayName: '', description: '', vendor: '', tags: [], contextWindow: null, maxOutput: null, capabilities: { vision: false, tools: false, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false, completions: false }, protocols: [], price: null, plans: [] })
   })
 
   it('keeps cache prices nullable and drops malformed prices', () => {
@@ -181,7 +181,7 @@ describe('currency & mine helpers', () => {
 })
 
 describe('image models (phase7 §1)', () => {
-  const img = model({ model: 'gpt-image-1', vendor: 'OpenAI', capabilities: { vision: false, tools: false, reasoning: false, embedding: false, imageGeneration: true, audioInput: false, audioOutput: false }, protocols: ['openai.images'], price: { inputPerM: '5', outputPerM: '40', cacheReadPerM: null, cacheWritePerM: null, perImage: '0.04', imageInputPerM: '10' } })
+  const img = model({ model: 'gpt-image-1', vendor: 'OpenAI', capabilities: { vision: false, tools: false, reasoning: false, embedding: false, imageGeneration: true, audioInput: false, audioOutput: false, completions: false }, protocols: ['openai.images'], price: { inputPerM: '5', outputPerM: '40', cacheReadPerM: null, cacheWritePerM: null, perImage: '0.04', imageInputPerM: '10' } })
 
   it('normalises the image capability and keeps image prices only when sent', () => {
     expect(img.capabilities.imageGeneration).toBe(true)
@@ -214,12 +214,12 @@ describe('image models (phase7 §1)', () => {
 describe('audio models (phase9 §1)', () => {
   const caps = (over: Partial<PlazaModel['capabilities']>) => ({ ...NO_CAPABILITIES, ...over })
   const stt = model({ model: 'whisper-1', vendor: 'OpenAI', capabilities: caps({ audioInput: true }), protocols: ['openai.chat', 'openai.audio'], price: { inputPerM: '0', outputPerM: '0', cacheReadPerM: null, cacheWritePerM: null, perMinute: '0.006' } })
-  const tts = model({ model: 'gpt-4o-mini-tts', vendor: 'OpenAI', capabilities: caps({ audioOutput: true }), protocols: ['openai.audio', 'openai.chat'], price: { inputPerM: '0.6', outputPerM: '12', cacheReadPerM: null, cacheWritePerM: null, audioOutputPerM: '12', perMCharacters: '15' } })
+  const tts = model({ model: 'gpt-4o-mini-tts', vendor: 'OpenAI', capabilities: caps({ audioOutput: true, completions: false }), protocols: ['openai.audio', 'openai.chat'], price: { inputPerM: '0.6', outputPerM: '12', cacheReadPerM: null, cacheWritePerM: null, audioOutputPerM: '12', perMCharacters: '15' } })
 
   it('defaults the audio capabilities to false for older backends', () => {
     const m = normalizePlazaModel({ model: 'a', capabilities: { vision: true } } as never)
-    expect(m.capabilities).toMatchObject({ vision: true, audioInput: false, audioOutput: false })
-    expect(normalizePlazaModel({ model: 'b', capabilities: { audioInput: true, audioOutput: 'yes' } } as never).capabilities).toMatchObject({ audioInput: true, audioOutput: false })
+    expect(m.capabilities).toMatchObject({ vision: true, audioInput: false, audioOutput: false, completions: false })
+    expect(normalizePlazaModel({ model: 'b', capabilities: { audioInput: true, audioOutput: 'yes' } } as never).capabilities).toMatchObject({ audioInput: true, audioOutput: false, completions: false })
   })
 
   it('keeps audio prices only when sent as strings', () => {
@@ -254,7 +254,7 @@ describe('audio models (phase9 §1)', () => {
     // protocol without either capability: both; reported protocols without openai.audio: none
     expect(audioModes({ protocols: ['openai.audio'], capabilities: caps({}) })).toEqual({ transcription: true, speech: true })
     expect(audioModes({ protocols: ['anthropic.messages'], capabilities: caps({ audioInput: true }) })).toEqual({ transcription: false, speech: false })
-    expect(audioModes({ protocols: [], capabilities: caps({ audioOutput: true }) })).toEqual({ transcription: false, speech: true })
+    expect(audioModes({ protocols: [], capabilities: caps({ audioOutput: true, completions: false }) })).toEqual({ transcription: false, speech: true })
     expect(audioModes(gpt)).toEqual({ transcription: false, speech: false })
   })
 
@@ -326,7 +326,7 @@ describe('per-call prices', () => {
 })
 
 describe('protocolsForCapabilities', () => {
-  const none = { vision: false, tools: false, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false }
+  const none = { vision: false, tools: false, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false, completions: false }
   it('lists only the image endpoint for a pure image model', () => {
     expect(protocolsForCapabilities({ ...none, imageGeneration: true })).toEqual(['openai.images'])
   })
@@ -339,5 +339,18 @@ describe('protocolsForCapabilities', () => {
   })
   it('needs an OpenAI-compatible channel for the special endpoints', () => {
     expect(protocolsForCapabilities({ ...none, imageGeneration: true }, false)).toEqual([])
+  })
+  it('adds Completions to marked models served by a completions channel (phase14), keeping Chat', () => {
+    expect(protocolsForCapabilities({ ...none, completions: true })).toEqual(['openai.chat', 'openai.responses', 'anthropic.messages', 'openai.completions'])
+    expect(protocolsForCapabilities({ ...none, completions: true, tools: true }, true, false)).toEqual(['openai.chat', 'openai.responses', 'anthropic.messages'])
+    expect(protocolsForCapabilities({ ...none, completions: true }, false)).toEqual(['openai.chat', 'openai.responses', 'anthropic.messages'])
+    expect(protocolsForCapabilities({ ...none, embedding: true, completions: true })).toEqual(['openai.embeddings', 'openai.completions'])
+  })
+  it('labels and orders the Completions protocol and capability', () => {
+    expect(PROTOCOL_LABELS['openai.completions']).toBe('Completions')
+    expect(sortProtocols(['openai.embeddings', 'openai.completions', 'openai.chat'])).toEqual(['openai.chat', 'openai.completions', 'openai.embeddings'])
+    expect(CAPABILITIES.find(c => c.key === 'completions')?.label).toBe('文本补全 / FIM')
+    expect(normalizePlazaModel({ model: 'a', capabilities: { completions: true } } as never).capabilities.completions).toBe(true)
+    expect(normalizePlazaModel({ model: 'b', capabilities: { vision: true } } as never).capabilities.completions).toBe(false)
   })
 })

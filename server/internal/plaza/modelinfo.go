@@ -51,6 +51,9 @@ type Capabilities struct {
 	// (/v1/audio/speech) (phase9-api.md §1).
 	AudioInput  bool `json:"audioInput"`
 	AudioOutput bool `json:"audioOutput"`
+	// Completions marks models callable through the legacy text completions
+	// endpoint (/v1/completions, FIM via suffix; phase14-api.md).
+	Completions bool `json:"completions"`
 }
 
 // Info is the display information of a logical model.
@@ -173,8 +176,8 @@ func (in *Input) validate(model string) (*Info, error) {
 		}
 		for k, v := range caps {
 			var b bool
-			if !slices.Contains([]string{"vision", "tools", "reasoning", "embedding", "imageGeneration", "audioInput", "audioOutput"}, k) || json.Unmarshal(v, &b) != nil {
-				details["capabilities"] = "只能包含 vision、tools、reasoning、embedding、imageGeneration、audioInput、audioOutput 七个布尔字段"
+			if !slices.Contains([]string{"vision", "tools", "reasoning", "embedding", "imageGeneration", "audioInput", "audioOutput", "completions"}, k) || json.Unmarshal(v, &b) != nil {
+				details["capabilities"] = "只能包含 vision、tools、reasoning、embedding、imageGeneration、audioInput、audioOutput、completions 八个布尔字段"
 				break
 			}
 			switch k {
@@ -192,6 +195,8 @@ func (in *Input) validate(model string) (*Info, error) {
 				info.Capabilities.AudioInput = b
 			case "audioOutput":
 				info.Capabilities.AudioOutput = b
+			case "completions":
+				info.Capabilities.Completions = b
 			}
 		}
 	}

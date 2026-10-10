@@ -539,6 +539,16 @@ function setScope(v: unknown) {
             </div>
             <Switch id="ch-responses" v-model="form.supportsResponses" />
           </div>
+          <div v-if="form.type === 'openai'" class="flex items-start justify-between gap-4 rounded-lg border p-3">
+            <div class="space-y-1">
+              <Label for="ch-completions">支持 Completions（/v1/completions，含 FIM）</Label>
+              <p class="text-muted-foreground text-xs">
+                开启后，客户端的 /v1/completions 请求（含 suffix 的 FIM 代码补全）会原样直通到此渠道的 {Base URL}/completions；未开启的渠道不会接收这类请求。
+                例如 DeepSeek 的 FIM 补全需要把 Base URL 设为 <span class="font-mono">https://api.deepseek.com/beta</span>。
+              </p>
+            </div>
+            <Switch id="ch-completions" v-model="form.supportsCompletions" />
+          </div>
           <div class="grid gap-4 sm:grid-cols-2">
             <FormField label="超时（秒）" for="ch-timeout" :error="errors['config.timeoutSeconds']" hint="等待上游响应头的超时；0 表示默认 60 秒，最大 600。">
               <Input id="ch-timeout" v-model.number="form.timeoutSeconds" type="number" min="0" max="600" step="1" />

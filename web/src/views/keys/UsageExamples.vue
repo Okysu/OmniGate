@@ -13,6 +13,8 @@ const snippets = {
   curl: all.curl,
   openai: all.openai,
   anthropic: all.anthropic,
+  completionsCurl: all.completionsCurl,
+  completionsPython: all.completionsPython,
   imagesCurl: all.imagesCurl,
   imagesPython: all.imagesPython,
   imageEditCurl: all.imageEditCurl,
@@ -25,6 +27,8 @@ const TABS: { key: keyof typeof snippets, label: string }[] = [
   { key: 'curl', label: 'curl' },
   { key: 'openai', label: 'OpenAI SDK' },
   { key: 'anthropic', label: 'Anthropic SDK' },
+  { key: 'completionsCurl', label: 'FIM 补全 · curl' },
+  { key: 'completionsPython', label: 'FIM 补全 · Python' },
   { key: 'imagesCurl', label: '图片 · curl' },
   { key: 'imagesPython', label: '图片 · Python' },
   { key: 'imageEditCurl', label: '图片编辑 · curl' },
@@ -42,7 +46,7 @@ const TABS: { key: keyof typeof snippets, label: string }[] = [
         使用示例
       </CardTitle>
       <CardDescription>
-        网关同时提供 OpenAI 与 Anthropic 兼容接口（含 OpenAI Images 图片生成 / 编辑接口与 Audio 语音转写 / 语音合成接口），模型名使用「模型」页面中的逻辑模型名。示例中的密钥是占位符，请替换为你自己的 Key。
+        网关同时提供 OpenAI 与 Anthropic 兼容接口（含 OpenAI Images 图片生成 / 编辑接口、Audio 语音转写 / 语音合成接口与 Completions 文本补全 / FIM 接口），模型名使用「模型」页面中的逻辑模型名。示例中的密钥是占位符，请替换为你自己的 Key。
       </CardDescription>
     </CardHeader>
     <CardContent class="space-y-3">

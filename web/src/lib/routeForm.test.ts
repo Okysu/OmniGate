@@ -194,4 +194,7 @@ describe('PREVIEW_INBOUNDS (phase9 §1)', () => {
     expect(PREVIEW_INBOUNDS).toContain('openai.audio.speech')
     expect(PREVIEW_INBOUNDS).not.toContain('openai.audio.translations')
   })
+  it('offers the completions inbound (phase14)', () => {
+    expect(PREVIEW_INBOUNDS).toContain('openai.completions')
+  })
 })

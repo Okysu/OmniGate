@@ -25,6 +25,10 @@ export interface UsageSnippets {
   speechCurl: string
   /** Speech synthesis with the OpenAI Python SDK, streamed to speech.mp3. */
   speechPython: string
+  /** phase14: FIM completion (`/v1/completions` with `suffix`) via curl. */
+  completionsCurl: string
+  /** FIM completion with the OpenAI Python SDK. */
+  completionsPython: string
 }
 
 /** Default image model of the generic samples. */
@@ -32,6 +36,39 @@ export const IMAGE_SAMPLE_MODEL = 'gpt-image-1'
 /** Default transcription / speech models of the generic samples. */
 export const TRANSCRIPTION_SAMPLE_MODEL = 'gpt-4o-mini-transcribe'
 export const SPEECH_SAMPLE_MODEL = 'gpt-4o-mini-tts'
+/** Default model of the generic completions (FIM) samples. */
+export const COMPLETIONS_SAMPLE_MODEL = 'deepseek-v4-pro'
+
+// FIM: the model writes the code between prompt and suffix.
+function completionsCurlSnippet(baseUrl: string, key: string, modelJson: string): string {
+  return `curl ${baseUrl}/completions \\
+  -H "Authorization: Bearer ${key}" \\
+  -H "Content-Type: application/json" \\
+  -d ${shellJson(`{
+    "model": ${modelJson},
+    "prompt": "def fib(n):\\n    a, b = 0, 1\\n",
+    "suffix": "\\n    return a\\n",
+    "max_tokens": 128
+  }`)}`
+}
+
+function completionsPythonSnippet(baseUrl: string, key: string, modelJson: string): string {
+  return `from openai import OpenAI
+
+client = OpenAI(
+    base_url="${baseUrl}",
+    api_key="${key}",
+)
+
+# FIM 补全：模型生成 prompt 与 suffix 之间的代码
+resp = client.completions.create(
+    model=${modelJson},
+    prompt="def fib(n):\\n    a, b = 0, 1\\n",
+    suffix="\\n    return a\\n",
+    max_tokens=128,
+)
+print(resp.choices[0].text)`
+}
 
 function transcriptionCurlSnippet(baseUrl: string, key: string, model: string): string {
   return `curl ${baseUrl}/audio/transcriptions \\
@@ -188,6 +225,8 @@ print(msg.content[0].text)`,
     transcriptionPython: transcriptionPythonSnippet(baseUrl, key, q(TRANSCRIPTION_SAMPLE_MODEL)),
     speechCurl: speechCurlSnippet(baseUrl, key, q(SPEECH_SAMPLE_MODEL)),
     speechPython: speechPythonSnippet(baseUrl, key, q(SPEECH_SAMPLE_MODEL)),
+    completionsCurl: completionsCurlSnippet(baseUrl, key, q(COMPLETIONS_SAMPLE_MODEL)),
+    completionsPython: completionsPythonSnippet(baseUrl, key, q(COMPLETIONS_SAMPLE_MODEL)),
   }
 }
 
@@ -214,6 +253,9 @@ export interface ModelSnippets {
   /** phase9 §1: speech synthesis via curl / Python SDK (saved to speech.mp3). */
   speechCurl: string
   speechPython: string
+  /** phase14: FIM completion (`/v1/completions` with `suffix`) via curl / Python SDK. */
+  completionsCurl: string
+  completionsPython: string
 }
 
 /** JSON string literal for embedding a model name into code samples. */
@@ -292,5 +334,7 @@ print(msg.content[0].text)`,
     transcriptionPython: transcriptionPythonSnippet(baseUrl, key, q(model)),
     speechCurl: speechCurlSnippet(baseUrl, key, q(model)),
     speechPython: speechPythonSnippet(baseUrl, key, q(model)),
+    completionsCurl: completionsCurlSnippet(baseUrl, key, q(model)),
+    completionsPython: completionsPythonSnippet(baseUrl, key, q(model)),
   }
 }

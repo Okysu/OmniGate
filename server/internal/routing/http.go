@@ -173,7 +173,7 @@ func (h *Handler) reorder(w http.ResponseWriter, r *http.Request) {
 }
 
 var inbounds = []string{protocol.OpenAIChat, protocol.OpenAIResponses, protocol.Anthropic, protocol.OpenAIEmbeddings, protocol.OpenAIImagesGenerations,
-	protocol.OpenAIAudioTranscriptions, protocol.OpenAIAudioSpeech}
+	protocol.OpenAIAudioTranscriptions, protocol.OpenAIAudioSpeech, protocol.OpenAICompletions}
 
 func (h *Handler) previewRoute(w http.ResponseWriter, r *http.Request) {
 	var body struct {

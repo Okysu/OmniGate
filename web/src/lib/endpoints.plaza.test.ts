@@ -39,7 +39,7 @@ describe('modelInfoApi', () => {
   it('URL-encodes the model name and sends the CSRF header on writes', async () => {
     const fetchMock = vi.fn(async () => json(200, {}))
     vi.stubGlobal('fetch', fetchMock)
-    await modelInfoApi.save('org/model:v1', { displayName: '', description: '', vendor: '', tags: [], contextWindow: null, maxOutput: null, capabilities: { vision: false, tools: false, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false }, hidden: false, sortOrder: 0, version: 2 })
+    await modelInfoApi.save('org/model:v1', { displayName: '', description: '', vendor: '', tags: [], contextWindow: null, maxOutput: null, capabilities: { vision: false, tools: false, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false, completions: false }, hidden: false, sortOrder: 0, version: 2 })
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('/api/admin/model-info/org%2Fmodel%3Av1')
     expect(init.method).toBe('PUT')

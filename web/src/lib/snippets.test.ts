@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { IMAGE_SAMPLE_MODEL, KEY_PLACEHOLDER, modelSnippets, SPEECH_SAMPLE_MODEL, TRANSCRIPTION_SAMPLE_MODEL, usageSnippets } from './snippets'
+import { COMPLETIONS_SAMPLE_MODEL, IMAGE_SAMPLE_MODEL, KEY_PLACEHOLDER, modelSnippets, SPEECH_SAMPLE_MODEL, TRANSCRIPTION_SAMPLE_MODEL, usageSnippets } from './snippets'
 
 describe('usageSnippets', () => {
   it('points every sample at <origin>/v1', () => {
@@ -94,5 +94,25 @@ describe('audio snippets (phase9 §1)', () => {
     const odd = modelSnippets('http://x', 'tts\'s')
     expect(odd.transcriptionCurl).toContain(`-F 'model=tts'\\''s'`)
     expect(odd.speechCurl).toContain(`"model": "tts'\\''s"`)
+  })
+})
+
+describe('completions snippets (phase14)', () => {
+  it('adds FIM samples with prompt + suffix to the key page', () => {
+    const s = usageSnippets('https://gw.example.com')
+    expect(s.completionsCurl).toContain('curl https://gw.example.com/v1/completions')
+    expect(s.completionsCurl).toContain(`"model": "${COMPLETIONS_SAMPLE_MODEL}"`)
+    // JSON escapes stay escaped (no raw newlines inside the strings).
+    expect(s.completionsCurl).toContain('"suffix": "\\n    return a\\n"')
+    expect(s.completionsPython).toContain('client.completions.create(')
+    expect(s.completionsPython).toContain('suffix="\\n    return a\\n"')
+    expect(s.completionsPython).toContain('print(resp.choices[0].text)')
+  })
+
+  it('uses the plaza model and escapes it', () => {
+    const s = modelSnippets('https://gw.example.com', 'deepseek-flash')
+    expect(s.completionsCurl).toContain('"model": "deepseek-flash"')
+    expect(s.completionsPython).toContain('model="deepseek-flash"')
+    expect(modelSnippets('http://x', 'fim\'s').completionsCurl).toContain(`"model": "fim'\\''s"`)
   })
 })

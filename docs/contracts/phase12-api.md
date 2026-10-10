@@ -126,7 +126,7 @@ multipart / 二进制请求体（图片编辑、语音转写）的 gjson 与 anc
 
 编码：依次哈希角色和内容单元，每个单元为 `标签=完整长度:前 4 KiB 字节\0`（长度前缀，编码无歧义，超大提示词与内联图片的开销有上限）；
 字符串内容与 `text` / `input_text` / `output_text` 块哈希其文本（两种写法等价），其他块哈希类型及除 `type`、`cache_control`
-以外的各字段原始 JSON（`cache_control` 会在轮次之间移动）。没有用户消息、其他协议（embeddings、图片、语音）或 multipart 请求时取不到值。
+以外的各字段原始 JSON（`cache_control` 会在轮次之间移动）。没有用户消息、其他协议（embeddings、图片、语音、文本补全——FIM 的提示词每次按键都变，见 [phase14-api.md §5](phase14-api.md)）或 multipart 请求时取不到值。
 绑定键总是包含用户 id，锚点不会跨用户生效。
 
 ### 2.2 绑定键与存储
@@ -182,7 +182,7 @@ Chat → Anthropic、Anthropic → Chat 不变（Responses → Anthropic 经 Cha
 `metadata.user_id` 变成 OpenAI 的 `user`（哈希值），号池不把它当作会话；普通 Chat 客户端根本不发送会话标识。规则生效（取到会话值）时，
 两个选项给上游请求补上稳定的、按对话区分的标识：
 
-- 只作用于 **OpenAI 格式**的上游请求：Chat Completions 或 Responses（协议转换之后的上游协议）；Anthropic 上游、embeddings / 图片 / 语音、
+- 只作用于 **OpenAI 格式**的上游请求：Chat Completions 或 Responses（协议转换之后的上游协议）；Anthropic 上游、embeddings / 图片 / 语音 / 文本补全（phase14-api.md §5）、
   自定义协议插件不补全。每次尝试、每个渠道都补全。
 - 值由与绑定键相同的内容派生（用户 id + 规则的 `include_*` 部分 + 会话值）：`d = SHA-256("omnigate-affinity/upstream\0" ‖ 绑定键)`，
   所以按用户、按对话区分，从不发送原始会话值，也不发送内存中的绑定键本身。

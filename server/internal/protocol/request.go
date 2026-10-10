@@ -41,7 +41,7 @@ type RequestInfo struct {
 	Model        string
 	Stream       bool
 	MaxTokens    int64 // 0 = not specified; at most MaxTokensLimit
-	IncludeUsage bool  // OpenAI chat: client asked for stream usage
+	IncludeUsage bool  // OpenAI chat / completions: client asked for stream usage
 	BodyBytes    int
 	// Image endpoints: requested image count (n, default 1) and prompt size.
 	Images      int64
@@ -88,9 +88,9 @@ func ParseInfo(dialect string, body []byte) (RequestInfo, error) {
 	return info, nil
 }
 
-// RewriteForPassthrough replaces "model" and, for streaming chat, forces
-// stream_options.include_usage so usage can be metered. All other fields are
-// preserved byte-for-byte.
+// RewriteForPassthrough replaces "model" and, for streaming chat and
+// completions, forces stream_options.include_usage so usage can be metered.
+// All other fields are preserved byte-for-byte.
 func RewriteForPassthrough(dialect string, body []byte, upstreamModel string, stream bool) ([]byte, error) {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(body, &m); err != nil {
@@ -98,7 +98,7 @@ func RewriteForPassthrough(dialect string, body []byte, upstreamModel string, st
 	}
 	mb, _ := json.Marshal(upstreamModel)
 	m["model"] = mb
-	if dialect == OpenAIChat && stream {
+	if (dialect == OpenAIChat || dialect == OpenAICompletions) && stream {
 		var so map[string]json.RawMessage
 		if raw, ok := m["stream_options"]; ok && !isNull(raw) {
 			if err := json.Unmarshal(raw, &so); err != nil {

@@ -61,7 +61,10 @@ func (g *Gateway) Preview(ctx context.Context, userID uuid.UUID, role identity.R
 	}
 	for _, c := range unsupported {
 		msg := "渠道不支持该入口协议"
-		if protocol.OpenAIOnly(inbound) {
+		switch {
+		case inbound == protocol.OpenAICompletions:
+			msg = "该接口仅由开启了 Completions 的 OpenAI 兼容渠道提供"
+		case protocol.OpenAIOnly(inbound):
 			msg = "该接口仅由 OpenAI 兼容渠道提供"
 		}
 		add(c, msg)

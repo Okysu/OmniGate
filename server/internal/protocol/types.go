@@ -16,6 +16,12 @@ const (
 	OpenAIImagesGenerations = "openai.images.generations"
 	OpenAIImagesEdits       = "openai.images.edits"
 	OpenAIImagesVariations  = "openai.images.variations"
+	// OpenAICompletions is the legacy text completions endpoint
+	// (/v1/completions, including FIM via suffix; phase14-api.md). It is
+	// passthrough-only and served by OpenAI channels that declare
+	// supportsCompletions: suffix and token-array prompts have no Chat
+	// equivalent, so it is never converted.
+	OpenAICompletions = "openai.completions"
 )
 
 // IsImages reports whether dialect is one of the image endpoints.
@@ -24,9 +30,9 @@ func IsImages(dialect string) bool {
 }
 
 // OpenAIOnly reports whether dialect is served by OpenAI-compatible channels
-// only, without conversion (embeddings, images, audio).
+// only, without conversion (embeddings, images, audio, completions).
 func OpenAIOnly(dialect string) bool {
-	return dialect == OpenAIEmbeddings || IsImages(dialect) || IsAudio(dialect)
+	return dialect == OpenAIEmbeddings || IsImages(dialect) || IsAudio(dialect) || dialect == OpenAICompletions
 }
 
 // ---- OpenAI Chat Completions ----

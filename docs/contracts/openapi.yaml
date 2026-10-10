@@ -19,6 +19,7 @@ info:
     Round 6（续）的音频接口（`/v1/audio/transcriptions`、`/translations`、`/speech`，按 token / 分钟 / 字符计价、配额计量 `audio_seconds`）
     见 `docs/contracts/phase9-api.md` §1（实现差异见该文件 §4）。
     Round 13 的客户端识别（请求日志 `client`、`GET /api/clients`、统计 `byClient`、会话亲和规则 `client_include`）见 `docs/contracts/phase13-api.md`。
+    Round 14 的文本补全接口（`POST /v1/completions`，含 FIM；渠道 `config.supportsCompletions`、模型能力 `completions`、广场协议 `openai.completions`）见 `docs/contracts/phase14-api.md`。
 
     ## 两棵路由树
     - **控制面** `/api/*`：管理控制台使用，基于 Cookie 会话（`og_session`）认证，带 CSRF 防护，错误统一使用 `Error` 信封。
@@ -83,7 +84,8 @@ info:
       `allowedModels` 不含请求的模型 → `403 permission`；`allowedChannels` 限定候选渠道。
     - 候选渠道：已启用、配置了该逻辑模型、且调用者可使用（所有者 / `global` / 显式共享；`channels.manage` **不**授予使用他人私有渠道的权限）；
       固定到插件版本的渠道还要求该插件处于启用状态、版本已批准（停用插件后其渠道立即不再参与路由）。
-      `/v1/embeddings`、`/v1/images/*` 与 `/v1/audio/*` 只考虑 `openai` 类型的渠道（`channel.Supports`）。
+      `/v1/embeddings`、`/v1/images/*` 与 `/v1/audio/*` 只考虑 `openai` 类型的渠道（`channel.Supports`）；`/v1/completions` 只考虑
+      `config.supportsCompletions = true` 的 `openai` 渠道（Round 14，`phase14-api.md`）。
       没有候选渠道 → `404 model_not_found`。按 `priority` 降序分组；同一优先级内先按协议匹配度排序（无需转换的直通渠道 → 一步转换 →
       经 Chat 两步转换，Round 4 起，`protocol.ConversionHops`），再按 `weight` 加权随机；处于熔断（open）状态的渠道跳过。
       每个候选渠道使用的上游协议见下文“跨协议兼容”的路由表（`channel.Dialect`）。
@@ -133,12 +135,12 @@ info:
       流式响应 5 分钟无数据即中止。
     - 未注册的 `/v1/*` 路径（任意方法）返回 `400 invalid_request`（消息 `unknown endpoint <path>`）；已注册路径使用错误的方法返回 `405`（类别 `invalid_request`）。
       这两种情况下，路径以 `/messages` 结尾或带 `anthropic-version` 头时使用 Anthropic 错误格式，否则使用 OpenAI 错误格式。
-    - 默认不记录请求 / 响应正文；`/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/images/*`、`/v1/audio/*`、`/v1/messages` 的每个请求（含认证失败的请求）写一条请求日志（见 `GET /api/logs`）；
+    - 默认不记录请求 / 响应正文；`/v1/chat/completions`、`/v1/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/images/*`、`/v1/audio/*`、`/v1/messages` 的每个请求（含认证失败的请求）写一条请求日志（见 `GET /api/logs`）；
       日志只记录按请求头识别出的客户端 id 与版本（Round 13，`phase13-api.md`），不记录原始 User-Agent 或其他请求头；
       `/v1/models` 与 `/v1/messages/count_tokens` 不写请求日志、不计费。
 
     ## 数据面：错误类别与映射（`protocol/errors.go`）
-    数据面错误按“类别”分类，再按入口协议渲染。`/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/images/*`、`/v1/audio/*` 以及不带 `anthropic-version` 的 `/v1/models`
+    数据面错误按“类别”分类，再按入口协议渲染。`/v1/chat/completions`、`/v1/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/images/*`、`/v1/audio/*` 以及不带 `anthropic-version` 的 `/v1/models`
     使用 OpenAI 格式 `{"error":{"message","type","param":null,"code"}}`；`/v1/messages` 以及带 `anthropic-version` 的 `/v1/models`
     使用 Anthropic 格式 `{"type":"error","error":{"type","message"}}`。
 
@@ -191,8 +193,8 @@ info:
     ## 数据面：跨协议兼容（`protocol/request.go`、`protocol/responses.go`、`protocol/convert.go`、`protocol/stream.go`）
     Round 4 起 Chat Completions、Responses、Messages 三种协议两两互转（请求、非流式响应、流式响应、工具调用、图片）：以 Chat 为中间格式，
     Chat ↔ Messages、Chat ↔ Responses 为直接转换，Messages ↔ Responses 经 Chat 两步组合（流式时串联两个流处理器）。
-    同协议请求直通，只改写 `model`，其他字段原样保留（OpenAI Chat 流式另外强制 `stream_options.include_usage=true` 以便计量，
-    客户端未请求时网关会过滤掉那条只含 usage 的分片）。`/v1/embeddings`、`/v1/images/*` 与 `/v1/audio/*` 只做直通。
+    同协议请求直通，只改写 `model`，其他字段原样保留（OpenAI Chat 与 Completions 流式另外强制 `stream_options.include_usage=true` 以便计量，
+    客户端未请求时网关会过滤掉那条只含 usage 的分片）。`/v1/embeddings`、`/v1/images/*`、`/v1/audio/*` 与 `/v1/completions` 只做直通。
 
     上游协议的选择（`channel.Dialect(client, model)`，对每个候选渠道分别计算）：
 
@@ -261,9 +263,9 @@ info:
     构造好上游请求之后、发送之前，在同一个插件运行时内依次执行 manifest 中声明的 `transformRequest`、`signRequest`。
     入参为 `{dialect, path, headers, body}` 与 `ctx`（`capability` 为空字符串）：`dialect` 为上游协议（`openai.chat` / `openai.responses` /
     `openai.embeddings` / `openai.images.generations` / `openai.images.edits` / `openai.images.variations` / `openai.audio.transcriptions` /
-    `openai.audio.translations` / `openai.audio.speech` / `anthropic.messages`），
+    `openai.audio.translations` / `openai.audio.speech` / `openai.completions` / `anthropic.messages`），
     `path` 为相对渠道 `baseUrl` 的默认路径（如 `/chat/completions`、`/responses`、`/embeddings`、`/images/generations`、`/images/edits`、
-    `/images/variations`、`/audio/transcriptions`、`/audio/translations`、`/audio/speech`、`/v1/messages`），`headers` 只含渠道 `config.headers`
+    `/images/variations`、`/audio/transcriptions`、`/audio/translations`、`/audio/speech`、`/completions`、`/v1/messages`），`headers` 只含渠道 `config.headers`
     （不含网关设置的认证头），`body` 为已解析的上游请求体。
     - 图片接口（Round 6 续）与音频接口：JSON 请求照常执行 `transformRequest` 与 `signRequest`；`multipart/form-data` 请求**只执行 `signRequest`**，
       入参 `body` 为 `{}`，Hook 可以修改 `path` 与请求头，返回的 `body` 被忽略（multipart 正文由网关重新编码后原样发送）。
@@ -4183,7 +4185,7 @@ paths:
                   format: uuid
                 inbound:
                   type: string
-                  enum: [openai.chat, openai.responses, anthropic.messages, openai.embeddings, openai.images.generations, openai.audio.transcriptions, openai.audio.speech]
+                  enum: [openai.chat, openai.responses, anthropic.messages, openai.embeddings, openai.images.generations, openai.audio.transcriptions, openai.audio.speech, openai.completions]
             example: { model: gpt-4o, inbound: openai.chat }
       responses:
         "200":
@@ -4818,7 +4820,7 @@ paths:
         或带了 `version` 但资料已被删除，均返回 `409 version_conflict`。
         字符串去掉首尾空格；`tags` 去掉首尾空格后丢弃空标签，按不区分大小写去重（保留第一次的写法）。
         `422 validation_failed` 的 `details` 键：`model`、`displayName`、`description`、`vendor`、`tags`（数量或类型）、`tags[i]`（第 i 个标签）、
-        `contextWindow`、`maxOutput`（含“超过上下文长度”）、`capabilities`（只接受 vision / tools / reasoning / embedding / imageGeneration / audioInput / audioOutput 七个布尔字段）、
+        `contextWindow`、`maxOutput`（含“超过上下文长度”）、`capabilities`（只接受 vision / tools / reasoning / embedding / imageGeneration / audioInput / audioOutput / completions 八个布尔字段）、
         `hidden`、`sortOrder`。审计动作 `model_info.update`（`metadata.created`、`before`、`after`）。
       x-required-permission: models.manage
       parameters:
@@ -4837,7 +4839,7 @@ paths:
               tags: [对话, 代码]
               contextWindow: 128000
               maxOutput: 8192
-              capabilities: { vision: false, tools: true, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false }
+              capabilities: { vision: false, tools: true, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false, completions: true }
               hidden: false
               sortOrder: 0
       responses:
@@ -5857,6 +5859,95 @@ paths:
         "404":
           $ref: "#/components/responses/OpenAIErrorResponse"
           description: "`model_not_found`"
+        "413":
+          $ref: "#/components/responses/OpenAIErrorResponse"
+          description: 请求体超过 32 MiB
+        "429":
+          $ref: "#/components/responses/OpenAIRateLimitedResponse"
+        "500":
+          $ref: "#/components/responses/OpenAIErrorResponse"
+          description: "`internal`"
+        "502":
+          $ref: "#/components/responses/OpenAIErrorResponse"
+          description: "`upstream_unavailable` / `upstream_authentication` / `upstream_invalid_response`"
+        "504":
+          $ref: "#/components/responses/OpenAIErrorResponse"
+          description: "`upstream_timeout`"
+
+  /v1/completions:
+    post:
+      tags: [gateway]
+      operationId: createCompletion
+      summary: OpenAI 兼容：文本补全（含 FIM，Round 14）
+      description: |
+        请求 / 响应正文与 [OpenAI Completions](https://platform.openai.com/docs/api-reference/completions/create) 兼容，`suffix` 用于 FIM 补全
+        （`docs/contracts/phase14-api.md`）。**只直通、从不转换**，只路由到 `config.supportsCompletions = true` 的 openai 渠道，
+        转发到 `{baseUrl}/completions`（只改写 `model`；流式时强制 `stream_options.include_usage = true`，客户端未要求时过滤只含 usage 的分片）。
+        没有这样的渠道时返回 `404 model_not_found`，消息为
+        `model "<name>" is not available for this API key (completions are served by OpenAI-compatible channels with Completions support enabled only)`。
+        用量取上游 `usage`：`prompt_tokens_details.cached_tokens` 或 DeepSeek 的 `prompt_cache_hit_tokens` 计为缓存读取（与输入分开计价），
+        `completion_tokens` 为输出。路由、档位、回退、熔断、Key 策略、套餐配额、限额与计费规则与 `/v1/chat/completions` 相同；
+        会话亲和的 `anchor` 来源与 `inject_*` 选项不作用于该接口。每个请求写一条请求日志（`inbound = openai.completions`）。错误使用 OpenAI 格式。
+      security:
+        - gatewayKey: []
+        - gatewayApiKey: []
+      x-required-permission: null
+      externalDocs:
+        description: OpenAI Completions API
+        url: https://platform.openai.com/docs/api-reference/completions
+      requestBody:
+        required: true
+        description: |
+          OmniGate 只解析 `model`（必填）、`stream`、`stream_options.include_usage` 与 `max_tokens`（预留余额用），不解析 `prompt`
+          （字符串、字符串数组与 token 数组都原样转发），其余字段（`suffix`、`echo`、`best_of`、`logit_bias`、`seed` 及未知字段）原样转发。
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompatibleRequestBody"
+            example:
+              model: deepseek-flash
+              prompt: "def fib(n):\n    a, b = 0, 1\n"
+              suffix: "\n    return a\n"
+              max_tokens: 128
+      responses:
+        "200":
+          description: "上游响应原文（`model` 为上游模型名）；`stream: true` 时为 `text/event-stream`"
+          headers:
+            X-OmniGate-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                description: "OpenAI 兼容的 `text_completion` 对象（`choices[].text`、`usage`），结构见官方规范。"
+              example:
+                id: cmpl-1
+                object: text_completion
+                created: 1760000000
+                model: deepseek-flash
+                choices:
+                  - { text: "    for _ in range(n):\n        a, b = b, a + b", index: 0, logprobs: null, finish_reason: stop }
+                usage: { prompt_tokens: 24, completion_tokens: 16, total_tokens: 40, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 24 }
+            text/event-stream:
+              schema:
+                type: string
+                description: "SSE：`data: {text_completion 分片}` … `data: [DONE]`"
+        "400":
+          $ref: "#/components/responses/OpenAIErrorResponse"
+          description: "`invalid_request`（JSON 非法、缺少 `model`）或 `upstream_bad_request`"
+        "401":
+          $ref: "#/components/responses/OpenAIErrorResponse"
+          description: "`authentication`"
+        "402":
+          $ref: "#/components/responses/OpenAIErrorResponse"
+          description: "`insufficient_balance`"
+        "403":
+          $ref: "#/components/responses/OpenAIErrorResponse"
+          description: "`account_disabled` 或 `permission`"
+        "404":
+          $ref: "#/components/responses/OpenAIErrorResponse"
+          description: "`model_not_found`：没有提供该模型且开启了 Completions 的 openai 渠道，或所有尝试都得到上游 404"
         "413":
           $ref: "#/components/responses/OpenAIErrorResponse"
           description: 请求体超过 32 MiB
@@ -8312,6 +8403,12 @@ components:
           description: |
             仅 openai 渠道有意义：上游实现了 `/responses` 时开启，`/v1/responses` 请求以 Responses 协议直通到该渠道；
             未开启时 `/v1/responses` 请求被转换为 Chat Completions。其他入口协议不受影响（按模型强制使用 Responses 请用模型映射的 `upstreamProtocol`）。
+        supportsCompletions:
+          type: boolean
+          description: |
+            仅 openai 渠道有意义（Round 14，`phase14-api.md` §2）：上游实现了旧版 `/completions`（含 `suffix` 的 FIM）时开启，
+            `/v1/completions` 请求直通到 `{baseUrl}/completions`（如 DeepSeek 的 `https://api.deepseek.com/beta`）。
+            只有开启了它的渠道才是 `/v1/completions` 的候选；anthropic / custom 渠道忽略该字段。默认 false。
         timeoutSeconds:
           type: integer
           minimum: 0
@@ -10133,7 +10230,7 @@ components:
         inbound:
           type: string
           enum: [openai.chat, openai.responses, openai.embeddings, anthropic.messages, openai.images.generations, openai.images.edits, openai.images.variations,
-            openai.audio.transcriptions, openai.audio.translations, openai.audio.speech]
+            openai.audio.transcriptions, openai.audio.translations, openai.audio.speech, openai.completions]
         model:
           type: string
           description: 请求中的逻辑模型名（请求体无法解析时为空字符串）；`?model=` 按此字段过滤
@@ -12357,7 +12454,7 @@ components:
     ModelCapabilities:
       type: object
       additionalProperties: false
-      required: [vision, tools, reasoning, embedding, imageGeneration, audioInput, audioOutput]
+      required: [vision, tools, reasoning, embedding, imageGeneration, audioInput, audioOutput, completions]
       properties:
         vision: { type: boolean, description: 支持图片输入 }
         tools: { type: boolean, description: 支持工具调用 }
@@ -12366,6 +12463,7 @@ components:
         imageGeneration: { type: boolean, description: "图片生成模型（Round 6 续，`/v1/images/*`）；决定模型广场是否列出 `openai.images` 协议" }
         audioInput: { type: boolean, description: "语音识别模型（Round 6 续，`/v1/audio/transcriptions`、`/translations`）；与 `audioOutput` 任一为 true 时模型广场列出 `openai.audio` 协议" }
         audioOutput: { type: boolean, description: "语音合成模型（Round 6 续，`/v1/audio/speech`）" }
+        completions: { type: boolean, description: "文本补全 / FIM（Round 14，`/v1/completions`）；有开启 `supportsCompletions` 的渠道提供该模型时模型广场列出 `openai.completions` 协议；旧数据缺省 false" }
 
     ModelInfo:
       type: object
@@ -12546,10 +12644,11 @@ components:
             可用的客户端协议：始终有 `openai.chat`、`openai.responses`、`anthropic.messages`（网关在协议间转换）；
             提供该模型的渠道（广场：global platform 渠道；我的模型：用户可用的渠道）中有 openai 渠道时另有 `openai.embeddings`；
             有 openai 渠道且模型资料标记了 `capabilities.imageGeneration` 时再加 `openai.images`（Round 6 续，即 `/v1/images/*`）；
-            有 openai 渠道且标记了 `capabilities.audioInput` 或 `audioOutput` 时再加 `openai.audio`（Round 6 续，即 `/v1/audio/*`）
+            有 openai 渠道且标记了 `capabilities.audioInput` 或 `audioOutput` 时再加 `openai.audio`（Round 6 续，即 `/v1/audio/*`）；
+            有开启 `config.supportsCompletions` 的渠道且标记了 `capabilities.completions` 时再加 `openai.completions`（Round 14，即 `/v1/completions`）
           items:
             type: string
-            enum: [openai.chat, openai.responses, anthropic.messages, openai.embeddings, openai.images, openai.audio]
+            enum: [openai.chat, openai.responses, anthropic.messages, openai.embeddings, openai.images, openai.audio, openai.completions]
         price:
           description: 当前生效的售价；null = 未定价（不收费）
           oneOf:

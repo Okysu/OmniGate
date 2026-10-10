@@ -4,7 +4,7 @@
 
 主要能力：
 
-- OpenAI Chat Completions / Responses、Anthropic Messages 三种协议入口并自动互转，另有嵌入、图片、音频接口
+- OpenAI Chat Completions / Responses、Anthropic Messages 三种协议入口并自动互转，另有嵌入、图片、音频与文本补全（Completions / FIM）接口
 - 多渠道路由（优先级、协议匹配度、权重、熔断、回退、路由规则），用户自带渠道优先且不计费
 - 插件化渠道：TypeScript 插件（沙盒运行）、原子能力（余额 / 模型 / 健康）、自定义协议、计费插件、在线编辑器与审批
 - 预付费钱包、兑换码、套餐与周期配额（5 小时会话、每周等）、用户组倍率、分时价格、限额

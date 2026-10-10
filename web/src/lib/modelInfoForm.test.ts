@@ -21,7 +21,7 @@ const info: ModelInfo = {
   tags: ['性价比'],
   contextWindow: 65536,
   maxOutput: 8192,
-  capabilities: { vision: false, tools: true, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false },
+  capabilities: { vision: false, tools: true, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false, completions: false },
   hidden: false,
   sortOrder: 10,
   version: 3,
@@ -54,7 +54,7 @@ describe('model info form', () => {
       tags: ['旗舰', 'Vision'],
       contextWindow: 128000,
       maxOutput: 16384,
-      capabilities: { vision: true, tools: false, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false },
+      capabilities: { vision: true, tools: false, reasoning: false, embedding: false, imageGeneration: false, audioInput: false, audioOutput: false, completions: false },
       hidden: false,
       sortOrder: -5,
     })
@@ -127,12 +127,12 @@ describe('audio capabilities (phase9 §1)', () => {
   it('default to false for older rows and are sent in the PUT body', () => {
     const old = { ...info, capabilities: { vision: false, tools: true, reasoning: false, embedding: false, imageGeneration: false } } as unknown as ModelInfo
     const f = formFromModelInfo(old)
-    expect(f.capabilities).toMatchObject({ audioInput: false, audioOutput: false })
+    expect(f.capabilities).toMatchObject({ audioInput: false, audioOutput: false, completions: false })
     f.capabilities.audioInput = true
     f.capabilities.audioOutput = true
     expect(isModelInfoDirty(f, old)).toBe(true)
-    expect(buildModelInfoInput(f).capabilities).toMatchObject({ audioInput: true, audioOutput: true })
-    expect(previewPlazaModel('whisper-1', f, null).capabilities).toMatchObject({ audioInput: true, audioOutput: true })
+    expect(buildModelInfoInput(f).capabilities).toMatchObject({ audioInput: true, audioOutput: true, completions: false })
+    expect(previewPlazaModel('whisper-1', f, null).capabilities).toMatchObject({ audioInput: true, audioOutput: true, completions: false })
   })
 
   it('carries audio prices into the plaza preview', () => {
@@ -148,7 +148,7 @@ describe('imageGeneration capability (phase7 §1)', () => {
     expect(f.capabilities.imageGeneration).toBe(false)
     f.capabilities.imageGeneration = true
     expect(isModelInfoDirty(f, old)).toBe(true)
-    expect(buildModelInfoInput(f).capabilities).toEqual({ vision: true, tools: false, reasoning: false, embedding: false, imageGeneration: true, audioInput: false, audioOutput: false })
+    expect(buildModelInfoInput(f).capabilities).toEqual({ vision: true, tools: false, reasoning: false, embedding: false, imageGeneration: true, audioInput: false, audioOutput: false, completions: false })
     expect(previewPlazaModel('gpt-image-1', f, null).capabilities.imageGeneration).toBe(true)
   })
 

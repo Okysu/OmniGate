@@ -86,3 +86,32 @@ func TestFillHeaders(t *testing.T) {
 		t.Errorf("hook header replaced: %q", req.Header.Get("Session_id"))
 	}
 }
+
+// Completions are served only by openai channels that declare
+// supportsCompletions, passthrough to {baseUrl}/completions (phase14-api.md §2).
+func TestCompletionsSupport(t *testing.T) {
+	on := Config{SupportsCompletions: true}
+	for _, c := range []struct {
+		typ  string
+		cfg  Config
+		want bool
+	}{{TypeOpenAI, on, true}, {TypeOpenAI, Config{}, false}, {TypeAnthropic, on, false}, {TypeCustom, on, false}} {
+		ch := Channel{Type: c.typ, Config: c.cfg}
+		if got := ch.Supports(protocol.OpenAICompletions); got != c.want {
+			t.Errorf("%s %+v: supports = %v", c.typ, c.cfg, got)
+		}
+	}
+	// The flag does not change any other dialect.
+	if ch := (Channel{Type: TypeOpenAI}); !ch.Supports(protocol.OpenAIEmbeddings) || !ch.Supports(protocol.OpenAIChat) {
+		t.Error("other dialects changed")
+	}
+	rt := &Runtime{Channel: Channel{Type: TypeOpenAI, BaseURL: "https://api.deepseek.test/beta", Config: on,
+		Models: []ModelMap{{Model: "m", UpstreamModel: "m", UpstreamProtocol: "responses"}}}, APIKey: "sk-channel"}
+	if d := rt.Dialect(protocol.OpenAICompletions, "m"); d != protocol.OpenAICompletions {
+		t.Errorf("dialect = %s", d)
+	}
+	req, err := rt.NewRequest(context.Background(), protocol.OpenAICompletions, []byte(`{}`), nil, "OmniGate/test")
+	if err != nil || req.URL.String() != "https://api.deepseek.test/beta/completions" || req.Header.Get("Authorization") != "Bearer sk-channel" {
+		t.Fatalf("request = %v %v", req.URL, err)
+	}
+}

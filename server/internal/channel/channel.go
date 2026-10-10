@@ -42,7 +42,12 @@ type ModelMap struct {
 type Config struct {
 	Headers           map[string]string `json:"headers,omitempty"`
 	SupportsResponses bool              `json:"supportsResponses,omitempty"`
-	TimeoutSeconds    int               `json:"timeoutSeconds,omitempty"`
+	// SupportsCompletions (openai channels) declares that the upstream serves
+	// the legacy /completions endpoint (FIM via suffix, phase14-api.md):
+	// only such channels are candidates for /v1/completions. Ignored on
+	// anthropic and custom channels.
+	SupportsCompletions bool `json:"supportsCompletions,omitempty"`
+	TimeoutSeconds      int  `json:"timeoutSeconds,omitempty"`
 	// MaxTokensField selects how converted requests to an openai channel carry
 	// the output limit: "max_tokens" (default) or "max_completion_tokens".
 	MaxTokensField string `json:"maxTokensField,omitempty"`
@@ -473,7 +478,7 @@ func dedupe(ids []uuid.UUID) []uuid.UUID {
 //	                   the gateway; every client protocol needs one conversion)
 func (c *Channel) Dialect(client, model string) string {
 	if protocol.OpenAIOnly(client) {
-		return client // embeddings, images: only routed to openai channels (see Supports)
+		return client // embeddings, images, audio, completions: only routed to openai channels (see Supports)
 	}
 	if c.Type == TypeCustom {
 		return protocol.Custom
@@ -494,7 +499,11 @@ func (c *Channel) Dialect(client, model string) string {
 
 // Supports reports whether the channel can serve a client dialect at all:
 // embeddings, the image and the audio endpoints are served by openai channels
-// only (custom channels serve Chat, Messages and Responses clients).
+// only, completions by openai channels that declare supportsCompletions
+// (custom channels serve Chat, Messages and Responses clients).
 func (c *Channel) Supports(client string) bool {
+	if client == protocol.OpenAICompletions {
+		return c.Type == TypeOpenAI && c.Config.SupportsCompletions
+	}
 	return !protocol.OpenAIOnly(client) || c.Type == TypeOpenAI
 }

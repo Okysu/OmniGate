@@ -95,6 +95,8 @@ func (r *Runtime) DefaultPath(dialect string) string {
 		return "/v1/messages"
 	case protocol.OpenAIEmbeddings:
 		return "/embeddings"
+	case protocol.OpenAICompletions:
+		return "/completions"
 	case protocol.OpenAIImagesGenerations:
 		return "/images/generations"
 	case protocol.OpenAIImagesEdits:

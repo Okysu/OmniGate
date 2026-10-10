@@ -231,7 +231,7 @@ function applyPreset(p: { input: number, output: number }) {
 
 // ---------- samples ----------
 type SampleKey = 'openaiCurl' | 'openaiPython' | 'anthropicCurl' | 'anthropicPython' | 'embeddingsCurl' | 'imagesCurl' | 'imagesPython' | 'imageEditCurl'
-  | 'transcriptionCurl' | 'transcriptionPython' | 'speechCurl' | 'speechPython'
+  | 'transcriptionCurl' | 'transcriptionPython' | 'speechCurl' | 'speechPython' | 'completionsCurl' | 'completionsPython'
 const snippets = computed(() => (m.value ? modelSnippets(window.location.origin, m.value.model) : null))
 const sampleTabs = computed(() => {
   const ps = protocols.value
@@ -244,6 +244,9 @@ const sampleTabs = computed(() => {
     tabs.push({ key: 'openaiCurl', label: 'OpenAI · curl' }, { key: 'openaiPython', label: 'OpenAI · Python' })
   if (unknown || ps.includes('anthropic.messages'))
     tabs.push({ key: 'anthropicCurl', label: 'Anthropic · curl' }, { key: 'anthropicPython', label: 'Anthropic · Python' })
+  // phase14: only when a channel with Completions support serves the model (the protocol says so).
+  if (ps.includes('openai.completions'))
+    tabs.push({ key: 'completionsCurl', label: 'FIM 补全 · curl' }, { key: 'completionsPython', label: 'FIM 补全 · Python' })
   if (ps.includes('openai.embeddings') || m.value?.capabilities.embedding)
     tabs.push({ key: 'embeddingsCurl', label: 'Embeddings · curl' })
   if (m.value && isImageModel(m.value))

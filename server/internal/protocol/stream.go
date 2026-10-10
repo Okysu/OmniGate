@@ -26,6 +26,8 @@ func NewStreamProcessor(client, upstream, model string, includeUsage bool) (Stre
 	switch {
 	case client == upstream && client == OpenAIChat:
 		return &chatPassthrough{includeUsage: includeUsage}, nil
+	case client == upstream && client == OpenAICompletions:
+		return &completionPassthrough{includeUsage: includeUsage}, nil
 	case client == upstream && client == Anthropic:
 		return &anthropicPassthrough{}, nil
 	case client == upstream && client == OpenAIResponses:

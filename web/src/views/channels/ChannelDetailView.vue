@@ -560,6 +560,10 @@ const HEALTH_CLASSES: Record<string, string> = {
                     Responses API
                   </dt>
                   <dd>{{ full.config.supportsResponses ? '支持' : '不支持' }}</dd>
+                  <dt class="text-muted-foreground">
+                    Completions（FIM）
+                  </dt>
+                  <dd>{{ full.config.supportsCompletions ? '支持' : '不支持' }}</dd>
                 </template>
                 <dt class="text-muted-foreground">
                   插件配置

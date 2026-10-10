@@ -56,7 +56,7 @@ export const BREAKER_LABELS: Record<string, string> = {
   half_open: '半开',
 }
 
-export const PREVIEW_INBOUNDS = ['openai.chat', 'openai.responses', 'anthropic.messages', 'openai.embeddings', 'openai.images.generations', 'openai.audio.transcriptions', 'openai.audio.speech'] as const
+export const PREVIEW_INBOUNDS = ['openai.chat', 'openai.responses', 'anthropic.messages', 'openai.embeddings', 'openai.images.generations', 'openai.audio.transcriptions', 'openai.audio.speech', 'openai.completions'] as const
 
 // ---------------------------------------------------------------------------
 // Globs

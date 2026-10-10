@@ -53,6 +53,7 @@ export const INBOUND_LABELS: Record<string, string> = {
   'openai.audio.transcriptions': '语音转写',
   'openai.audio.translations': '语音翻译',
   'openai.audio.speech': '语音合成',
+  'openai.completions': 'OpenAI Completions',
 }
 
 /** Explanations for gateway error classes shown in request logs. */

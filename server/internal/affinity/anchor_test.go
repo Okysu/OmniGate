@@ -62,6 +62,8 @@ func TestAnchorChat(t *testing.T) {
 		"no messages": {protocol.OpenAIChat, `{"model":"gpt-6"}`},
 		"multipart":   {protocol.OpenAIChat, ``},
 		"embeddings":  {protocol.OpenAIEmbeddings, `{"input":"x","messages":[{"role":"user","content":"x"}]}`},
+		// FIM prompts change with every keystroke: never an anchor.
+		"completions": {protocol.OpenAICompletions, `{"prompt":"def f():","suffix":"\n","messages":[{"role":"user","content":"x"}]}`},
 		"not json":    {protocol.OpenAIChat, `{"messages":`},
 	} {
 		if v := Anchor(tc.dialect, []byte(tc.body)); v != "" {

@@ -32,6 +32,12 @@ const anchorUnit = 4 << 10
 //   - Anthropic Messages: system (string or blocks), then the first message
 //     with role user.
 //
+// Legacy completions (openai.completions, phase14-api.md §5) deliberately
+// yield "": their only content is prompt (and suffix), which for FIM code
+// completion changes with every keystroke, so a prompt hash would differ on
+// every request and only ever create fresh bindings. Rules for /v1/completions
+// use a header or body key source instead.
+//
 // Each unit is hashed as tag "=" full length ":" its first 4 KiB, so the
 // encoding is unambiguous. Text parts hash their text; other parts hash
 // their fields except type and cache_control (which clients move between

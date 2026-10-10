@@ -275,8 +275,10 @@ type MyModel struct {
 
 // served aggregates the channels serving one model.
 type served struct {
-	openai  bool // an OpenAI-compatible channel serves it (embeddings)
-	sources Sources
+	openai bool // an OpenAI-compatible channel serves it (embeddings)
+	// completions: a channel that declares supportsCompletions serves it.
+	completions bool
+	sources     Sources
 }
 
 // clientProtocols lists the client protocols a model can be called with,
@@ -287,14 +289,17 @@ type served struct {
 //   - embeddings, image generation and audio endpoints are listed only when
 //     the model is marked with that capability (and an OpenAI-compatible
 //     channel serves it). A pure image or embedding model therefore shows
-//     only its own endpoint.
-func clientProtocols(openai bool, caps Capabilities) []string {
+//     only its own endpoint;
+//   - legacy completions are listed when the model is marked completions and
+//     a channel with supportsCompletions serves it (phase14-api.md §6).
+//     Completions models are text models: the mark does not hide Chat.
+func clientProtocols(s *served, caps Capabilities) []string {
 	special := caps.Embedding || caps.ImageGeneration || caps.AudioInput || caps.AudioOutput
 	out := []string{}
 	if caps.Tools || caps.Vision || caps.Reasoning || !special {
 		out = append(out, protocol.OpenAIChat, protocol.OpenAIResponses, protocol.Anthropic)
 	}
-	if openai {
+	if s.openai {
 		if caps.Embedding {
 			out = append(out, protocol.OpenAIEmbeddings)
 		}
@@ -304,6 +309,9 @@ func clientProtocols(openai bool, caps Capabilities) []string {
 		if caps.AudioInput || caps.AudioOutput {
 			out = append(out, protocol.OpenAIAudio)
 		}
+	}
+	if s.completions && caps.Completions {
+		out = append(out, protocol.OpenAICompletions)
 	}
 	return out
 }
@@ -343,7 +351,7 @@ func (h *Handler) entry(ctx context.Context, c *catalog, model string, s *served
 		m.DisplayName, m.Description, m.Vendor, m.Tags = i.DisplayName, i.Description, i.Vendor, i.Tags
 		m.ContextWindow, m.MaxOutput, m.Capabilities, m.sortOrder = i.ContextWindow, i.MaxOutput, i.Capabilities, i.SortOrder
 	}
-	m.Protocols = clientProtocols(s.openai, m.Capabilities)
+	m.Protocols = clientProtocols(s, m.Capabilities)
 	p, err := h.prices.Lookup(ctx, pricing.KindSell, model, nil, c.now)
 	if err != nil {
 		return m, nil, err
@@ -394,6 +402,7 @@ func (h *Handler) platformModels(w http.ResponseWriter, r *http.Request) {
 				byModel[m] = s
 			}
 			s.openai = s.openai || rt.Type == channel.TypeOpenAI
+			s.completions = s.completions || rt.Supports(protocol.OpenAICompletions)
 		}
 	}
 	c, err := h.loadCatalog(ctx)
@@ -435,6 +444,7 @@ func (h *Handler) myModels(w http.ResponseWriter, r *http.Request) {
 				byModel[m] = s
 			}
 			s.openai = s.openai || rt.Type == channel.TypeOpenAI
+			s.completions = s.completions || rt.Supports(protocol.OpenAICompletions)
 			switch tier {
 			case channel.TierOwn:
 				s.sources.Own++

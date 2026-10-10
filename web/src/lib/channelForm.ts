@@ -20,6 +20,8 @@ export interface ChannelFormState {
   models: ModelMapping[]
   headers: HeaderRow[]
   supportsResponses: boolean
+  /** phase14: the upstream serves legacy /completions (FIM via `suffix`). */
+  supportsCompletions: boolean
   /** 0 = backend default (60 s). */
   timeoutSeconds: number
   maxTokensField: MaxTokensField
@@ -43,6 +45,7 @@ export function emptyChannelForm(): ChannelFormState {
     models: [{ model: '', upstreamModel: '' }],
     headers: [],
     supportsResponses: false,
+    supportsCompletions: false,
     timeoutSeconds: 0,
     maxTokensField: 'max_tokens',
     scope: 'private',
@@ -96,6 +99,7 @@ export function formFromChannel(c: Channel): ChannelFormState {
     models: (c.models ?? []).map(m => ({ ...m })),
     headers: headersToRows(c.config.headers),
     supportsResponses: c.config.supportsResponses ?? false,
+    supportsCompletions: c.config.supportsCompletions ?? false,
     timeoutSeconds: c.config.timeoutSeconds ?? 0,
     maxTokensField: c.config.maxTokensField ?? 'max_tokens',
     scope: c.scope,
@@ -141,6 +145,8 @@ export function buildChannelPayload(form: ChannelFormState, original?: Channel):
   if (form.type === 'openai') {
     if (form.supportsResponses)
       config.supportsResponses = true
+    if (form.supportsCompletions)
+      config.supportsCompletions = true
     if (form.maxTokensField !== 'max_tokens')
       config.maxTokensField = form.maxTokensField
   }

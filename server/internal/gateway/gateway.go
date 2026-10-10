@@ -158,6 +158,7 @@ func (g *Gateway) Wait() { g.wg.Wait() }
 func (g *Gateway) Routes(r chi.Router) {
 	r.Get("/models", g.models)
 	r.Post("/chat/completions", g.handle(protocol.OpenAIChat))
+	r.Post("/completions", g.handle(protocol.OpenAICompletions))
 	r.Post("/responses", g.handle(protocol.OpenAIResponses))
 	r.Post("/embeddings", g.handle(protocol.OpenAIEmbeddings))
 	r.Post("/images/generations", g.handle(protocol.OpenAIImagesGenerations))
@@ -726,6 +727,8 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 				switch {
 				case st.dialect == protocol.OpenAIEmbeddings:
 					msg += " (embeddings are served by OpenAI-compatible channels only)"
+				case st.dialect == protocol.OpenAICompletions:
+					msg += " (completions are served by OpenAI-compatible channels with Completions support enabled only)"
 				case protocol.IsImages(st.dialect):
 					msg += " (image endpoints are served by OpenAI-compatible channels only)"
 				case protocol.IsAudio(st.dialect):
@@ -1093,7 +1096,10 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 }
 
 // openAIText reports whether an upstream dialect is OpenAI Chat or Responses:
-// the requests session affinity's inject options apply to.
+// the requests session affinity's inject options apply to. Completions are
+// excluded on purpose (phase14-api.md §5): FIM upstreams know neither
+// prompt_cache_key nor session headers, and a strict upstream may reject the
+// unknown field.
 func openAIText(dialect string) bool {
 	return dialect == protocol.OpenAIChat || dialect == protocol.OpenAIResponses
 }
@@ -1170,6 +1176,8 @@ func (g *Gateway) unary(w http.ResponseWriter, st *reqState, rt *channel.Runtime
 			usage, ok = protocol.UsageFromAnthropicResponse(raw)
 		case protocol.OpenAIResponses:
 			usage, ok = protocol.UsageFromResponsesResponse(raw)
+		case protocol.OpenAICompletions:
+			usage, ok = protocol.UsageFromCompletionResponse(raw)
 		}
 		if !ok {
 			usage = protocol.Usage{Input: protocol.EstimateTokens(len(st.body)), Output: protocol.EstimateTokens(len(raw)), Estimated: true}

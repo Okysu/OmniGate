@@ -288,6 +288,8 @@ export interface ModelMapping {
 export interface ChannelConfig {
   headers?: Record<string, string>
   supportsResponses?: boolean
+  /** phase14: openai channels only — the upstream serves legacy `/completions` (FIM via `suffix`). */
+  supportsCompletions?: boolean
   timeoutSeconds?: number
   maxTokensField?: MaxTokensField
 }
@@ -614,6 +616,7 @@ export type InboundProtocol
     | 'openai.audio.transcriptions'
     | 'openai.audio.translations'
     | 'openai.audio.speech'
+    | 'openai.completions'
 
 export interface FallbackAttempt {
   channelId: string
@@ -1558,7 +1561,7 @@ export interface RouteRuleInput {
 
 export type RouteRulePatch = Partial<RouteRuleInput> & { version: number }
 
-export type PreviewInbound = 'openai.chat' | 'openai.responses' | 'anthropic.messages' | 'openai.embeddings' | 'openai.images.generations' | 'openai.audio.transcriptions' | 'openai.audio.speech'
+export type PreviewInbound = 'openai.chat' | 'openai.responses' | 'anthropic.messages' | 'openai.embeddings' | 'openai.images.generations' | 'openai.audio.transcriptions' | 'openai.audio.speech' | 'openai.completions'
 export type BreakerState = 'closed' | 'open' | 'half_open'
 
 export interface RoutePreviewInput {
@@ -1780,6 +1783,8 @@ export interface ModelCapabilities {
   audioInput: boolean
   /** phase9 §1: speech synthesis (`/v1/audio/speech`). */
   audioOutput: boolean
+  /** phase14: legacy text completions (`/v1/completions`, FIM via `suffix`); false when an older backend omits it. */
+  completions: boolean
 }
 
 export type ModelCapability = keyof ModelCapabilities
@@ -1822,7 +1827,7 @@ export interface ModelInfoInput {
 }
 
 /** Client protocols a plaza model can be called with. */
-export type PlazaProtocol = 'openai.chat' | 'openai.responses' | 'anthropic.messages' | 'openai.embeddings' | 'openai.images' | 'openai.audio'
+export type PlazaProtocol = 'openai.chat' | 'openai.responses' | 'anthropic.messages' | 'openai.embeddings' | 'openai.images' | 'openai.audio' | 'openai.completions'
 
 /** Current sell price (settlement currency, per 1M tokens); `null` on the model = not priced (free). */
 export interface PlazaPrice {

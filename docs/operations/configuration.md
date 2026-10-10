@@ -488,7 +488,7 @@ gateway.example.com {
 
 | type | 上游协议 | `baseUrl` 约定 | 网关拼接的路径 | 测试 / 发现模型 |
 |---|---|---|---|---|
-| `openai` | OpenAI Chat Completions（默认）或 OpenAI Responses（按模型的 `upstreamProtocol` 或渠道的 `supportsResponses`）；嵌入 | **含版本路径**，如 `https://api.openai.com/v1` | `/chat/completions`、`/responses`、`/embeddings`、`/images/generations`、`/images/edits`、`/images/variations`、`/audio/transcriptions`、`/audio/translations`、`/audio/speech` | `GET {baseUrl}/models` |
+| `openai` | OpenAI Chat Completions（默认）或 OpenAI Responses（按模型的 `upstreamProtocol` 或渠道的 `supportsResponses`）；嵌入；文本补全（`supportsCompletions`） | **含版本路径**，如 `https://api.openai.com/v1` | `/chat/completions`、`/responses`、`/embeddings`、`/images/generations`、`/images/edits`、`/images/variations`、`/audio/transcriptions`、`/audio/translations`、`/audio/speech`、`/completions` | `GET {baseUrl}/models` |
 | `anthropic` | Anthropic Messages | **不含版本路径**，如 `https://api.anthropic.com` | `/v1/messages`、`/v1/messages/count_tokens` | `GET {baseUrl}/v1/models` |
 | `custom` | 插件实现的私有协议（见 [9.9](#99-自定义协议插件)）；只能通过选择 `protocol: "custom"` 的插件版本创建 | 由插件约定 | 由插件的 `buildRequest` 决定 | 插件的 `health.check` / `models.list` 能力 |
 
@@ -547,6 +547,7 @@ gateway.example.com {
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `supportsResponses` | `false` | 仅 `openai` 渠道：上游实现了 `/responses`（如 OpenAI 官方）时开启，`/v1/responses` 请求会**直通**到该渠道（保真度最高，支持 `previous_response_id` 等依赖上游状态的功能）。未开启时 `/v1/responses` 请求被转换为 Chat Completions 发送（Round 4 起不再返回 404）。只影响 Responses 客户端；要让某个模型的**所有**请求都走 Responses，请在模型映射中设置 `upstreamProtocol: "responses"`（见 [8.2](#82-模型映射)）。 |
+| `supportsCompletions` | `false` | 仅 `openai` 渠道：上游实现了旧版 `/completions`（含 `suffix` 的 FIM 代码补全）时开启。只有开启了它的渠道会收到 `/v1/completions` 请求（直通，见 [8.11](#811-文本补全接口completions--fim)）；未开启的渠道永远不会被选中，所以不支持该接口的上游不会因此收到 404。例如 DeepSeek FIM 需要 Base URL `https://api.deepseek.com/beta`。 |
 | `maxTokensField` | `max_tokens` | 仅 `openai` 渠道：Anthropic 请求（如 Claude Code）或 Responses 请求被转换为 Chat Completions 时，输出上限写入哪个字段。o 系列等较新的 OpenAI 模型拒绝 `max_tokens`，此时设为 `max_completion_tokens`。同协议直通、以及发往 Responses 上游（使用 `max_output_tokens`）的请求不受影响。 |
 | `timeoutSeconds` | `0`（= 60 秒） | 等待上游**响应头**的超时，范围 0–600 秒。不限制流式响应的总时长（流式在上游 5 分钟无数据时中止）。推理模型首包较慢时可适当调大。 |
 | `headers` | 无 | 附加到每个上游请求的自定义请求头，最多 20 个。名称只能包含字母、数字、`-`、`_`（最长 64），值不能含换行。**禁止**设置 `Authorization`、`x-api-key`（认证头由网关根据 API Key 生成）以及 `Host`、`Content-Length`、`Content-Type`、`Accept-Encoding`、`Connection`、`Transfer-Encoding`、`Cookie`、`TE`、`Upgrade`、`Keep-Alive`、`Proxy-Authorization`、`Proxy-Connection`（不区分大小写）。典型用途：OpenRouter 的 `HTTP-Referer` / `X-Title`、某些代理服务要求的组织 / 项目头。 |
@@ -595,7 +596,8 @@ gateway.example.com {
 用量取上游的 `prompt_tokens`，按售价的**输入**单价计费；路由回退、熔断、Key 策略、套餐配额与请求日志（`inbound = openai.embeddings`）
 与其他接口相同。强制计费下只按估算的输入 token 预留余额（嵌入不产生输出 token），结算时按实际用量多退少补。
 
-**图片接口** `/v1/images/*` 与**音频接口** `/v1/audio/*` 同样只路由到 `openai` 渠道并直通，见 [8.9](#89-图片接口)、[8.10](#810-音频接口)。
+**图片接口** `/v1/images/*` 与**音频接口** `/v1/audio/*` 同样只路由到 `openai` 渠道并直通，见 [8.9](#89-图片接口)、[8.10](#810-音频接口)；
+**文本补全** `/v1/completions` 只路由到开启了 `supportsCompletions` 的 `openai` 渠道，见 [8.11](#811-文本补全接口completions--fim)。
 
 ### 8.8 渠道归属与计费
 
@@ -728,6 +730,25 @@ OpenAI 兼容的音频接口（Round 6 续，契约见 `docs/contracts/phase9-ap
 **插件 Hook**：语音合成（JSON）照常执行 `transformRequest` 与 `signRequest`；转写 / 翻译（multipart）只执行 `signRequest`，规则同图片接口。
 
 **模型广场**：在模型资料中勾选能力 `audioInput`（语音识别）或 `audioOutput`（语音合成），模型由 openai 渠道提供时，广场的可用协议才会显示 `openai.audio`。
+
+### 8.11 文本补全接口（Completions / FIM）
+
+OpenAI 旧版文本补全 `POST /v1/completions`（Round 14，契约见 `docs/contracts/phase14-api.md`），编辑器代码补全插件常用，`suffix` 字段用于 FIM：
+
+- **只直通、从不转换**：只路由到 `type = openai` 且 `config.supportsCompletions = true` 的渠道，转发到 `{baseUrl}/completions`，
+  只改写 `model`（`prompt` 的字符串 / 数组 / token 数组、`suffix`、`echo`、`best_of`、`logit_bias` 及未知字段原样转发）。
+  没有这样的渠道时返回 `404 model_not_found`（消息注明需要开启了 Completions 的 OpenAI 兼容渠道）。`anthropic` 与自定义协议渠道不提供该接口。
+- **流式**：与 Chat 相同，网关强制 `stream_options.include_usage = true` 以便计量，客户端没有要求时过滤掉只含用量的分片。
+- **计费**：用量取上游 `usage`；`prompt_tokens_details.cached_tokens` 或 DeepSeek 的 `prompt_cache_hit_tokens` 计为缓存读取（按 `cacheReadPerM`），
+  其余提示词 token 为输入。价格、阶梯、分时倍率、套餐、限额、路由规则、Key 策略与请求日志（`inbound = openai.completions`）都与 Chat 相同。
+- **会话亲和**：规则可用 `path_regex: ["^/v1/completions"]` 加请求头或请求体字段作为会话值；`anchor` 来源对文本补全不生效
+  （FIM 的提示词每次按键都变），`inject_prompt_cache_key` / `inject_session_header` 也不作用于文本补全。
+- **模型广场**：在模型资料中勾选能力「文本补全 / FIM」（`completions`），且有开启 `supportsCompletions` 的渠道提供该模型时，
+  广场显示 `Completions` 协议标签与 FIM 调用示例。
+
+**DeepSeek FIM**（[官方文档](https://api-docs.deepseek.com/guides/fim_completion)）：新建 `openai` 渠道，Base URL 填
+`https://api.deepseek.com/beta`，模型如 `deepseek-flash`、`deepseek-v4-pro`，在“高级”中打开「支持 Completions」。FIM 走非思考模式，
+输出上限 4K token。Continue 等插件把 OmniGate 的 `/v1` 地址配置为 OpenAI 兼容的补全端点即可。
 
 ## 9. 插件
 

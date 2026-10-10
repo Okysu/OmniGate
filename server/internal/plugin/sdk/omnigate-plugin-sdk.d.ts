@@ -59,7 +59,7 @@ declare module "@omnigate/plugin-sdk" {
 
   export interface UpstreamRequest {
     dialect: "openai.chat" | "openai.responses" | "anthropic.messages" | "openai.embeddings"
-      | "openai.images.generations" | "openai.images.edits" | "openai.images.variations"
+      | "openai.images.generations" | "openai.images.edits" | "openai.images.variations" | "openai.completions"
     /** Path relative to the channel base URL; must start with "/". */
     path: string
     /** Header values may contain og.secret() handles. */
