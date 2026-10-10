@@ -106,7 +106,7 @@ func TestWalletPurchase(t *testing.T) {
 	// The upgrade starts a new 30-day term of Pro from now.
 	bought, _ := time.Parse(time.RFC3339Nano, endsAt)
 	upgradedEnds, _ := time.Parse(time.RFC3339Nano, sub["endsAt"].(string))
-	if upgradedEnds.Before(bought) || upgradedEnds.Sub(time.Now()) < 29*24*time.Hour {
+	if upgradedEnds.Before(bought) || time.Until(upgradedEnds) < 29*24*time.Hour {
 		t.Fatalf("upgraded endsAt = %v (bought until %v)", upgradedEnds, bought)
 	}
 	endsAt = sub["endsAt"].(string)
