@@ -428,6 +428,7 @@ func TestSessionOutcomes(t *testing.T) {
 	if _, ok := s.Bound(); ok {
 		t.Fatal("no binding yet")
 	}
+	s.Attempted()
 	s.Served(a, true)
 	if s.Outcome() != OutcomeNew {
 		t.Fatalf("outcome = %s", s.Outcome())
@@ -438,6 +439,7 @@ func TestSessionOutcomes(t *testing.T) {
 		t.Fatalf("bound = %v %v", id, ok)
 	}
 	s.Routed()
+	s.Attempted()
 	s.Served(a, true)
 	if s.Outcome() != OutcomeHit {
 		t.Fatalf("outcome = %s", s.Outcome())
@@ -445,6 +447,7 @@ func TestSessionOutcomes(t *testing.T) {
 	// Prefer: the bound channel fails, b serves → rebound.
 	s = svc.Begin(ctx, req)
 	s.Routed()
+	s.Attempted()
 	if s.StopAfter(a) {
 		t.Fatal("prefer must fail over")
 	}
@@ -458,6 +461,7 @@ func TestSessionOutcomes(t *testing.T) {
 	// A fallback model never rebinds.
 	s = svc.Begin(ctx, req)
 	s.Routed()
+	s.Attempted()
 	s.Served(a, false)
 	if s.Outcome() != OutcomeFailover {
 		t.Fatalf("outcome = %s", s.Outcome())
@@ -481,8 +485,17 @@ func TestSessionOutcomes(t *testing.T) {
 	}
 	// Failed request without a binding: miss, nothing bound.
 	s = svc.Begin(ctx, Request{UserID: user, Model: "m", Body: []byte(`{"k":"s2"}`)})
+	s.Attempted()
 	if s.Outcome() != OutcomeMiss {
 		t.Fatalf("outcome = %s", s.Outcome())
+	}
+
+	// Rejected before any upstream attempt (e.g. insufficient balance): no
+	// outcome, the binding is untouched.
+	s = svc.Begin(ctx, req)
+	s.Routed()
+	if s.Outcome() != "" {
+		t.Fatalf("unsent request outcome = %s", s.Outcome())
 	}
 
 	// Strict: the bound channel's failure stops the request; binding kept.
@@ -493,6 +506,7 @@ func TestSessionOutcomes(t *testing.T) {
 		t.Fatal("not routed to the bound channel: no strict stop")
 	}
 	s.Routed()
+	s.Attempted()
 	if s.StopAfter(b) || !s.StopAfter(a) || s.Outcome() != OutcomeStrictFailed {
 		t.Fatalf("strict: outcome = %s", s.Outcome())
 	}
@@ -505,6 +519,7 @@ func TestSessionOutcomes(t *testing.T) {
 	svc.Begin(ctx, req).Served(a, true)
 	s = svc.Begin(ctx, req)
 	s.Routed()
+	s.Attempted()
 	s.Served(b, true)
 	if s.Outcome() != OutcomeFailover {
 		t.Fatalf("outcome = %s", s.Outcome())

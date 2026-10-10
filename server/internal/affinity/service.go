@@ -122,12 +122,13 @@ type Session struct {
 	capacity                        int
 	switchOnSuccess, keepOnDisabled bool
 
-	bound    uuid.UUID
-	hasBound bool
-	routed   bool // the bound channel was a candidate and put first
-	broken   bool
-	strict   bool // strict stop after the bound channel failed
-	served   *uuid.UUID
+	bound     uuid.UUID
+	hasBound  bool
+	routed    bool // the bound channel was a candidate and put first
+	broken    bool
+	strict    bool // strict stop after the bound channel failed
+	attempted bool // an upstream attempt was made
+	served    *uuid.UUID
 }
 
 // PassHeaders returns the client headers to copy upstream (nil = none).
@@ -168,6 +169,15 @@ func (s *Session) Bound() (uuid.UUID, bool) {
 func (s *Session) Routed() {
 	if s != nil {
 		s.routed = true
+	}
+}
+
+// Attempted records that the request was sent to an upstream channel.
+// Requests rejected before any attempt (balance, quota, limits) get no
+// outcome beyond off / broken.
+func (s *Session) Attempted() {
+	if s != nil {
+		s.attempted = true
 	}
 }
 
@@ -213,7 +223,8 @@ func (s *Session) Served(id uuid.UUID, primary bool) {
 	}
 }
 
-// Outcome is the value for request_logs.affinity ("" = no rule applied).
+// Outcome is the value for request_logs.affinity ("" = no rule applied, or
+// the request never reached an upstream).
 func (s *Session) Outcome() string {
 	switch {
 	case s == nil:
@@ -224,6 +235,8 @@ func (s *Session) Outcome() string {
 		return OutcomeStrictFailed
 	case s.broken:
 		return OutcomeBroken
+	case !s.attempted:
+		return ""
 	case !s.hasBound && s.served != nil:
 		return OutcomeNew
 	case !s.hasBound:

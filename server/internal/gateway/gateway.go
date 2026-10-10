@@ -772,6 +772,7 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 				platformAttempts++
 			}
 			attempts++
+			st.affinity.Attempted()
 			gerr, class := g.attempt(w, r, st, c.rt, c.tier)
 			if gerr == nil {
 				st.affinity.Served(c.rt.ID, i == 0)

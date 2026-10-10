@@ -209,7 +209,7 @@ Chat → Anthropic、Anthropic → Chat 不变（Responses → Anthropic 经 Cha
 
 | 列 / 字段 | 说明 |
 | --- | --- |
-| `affinity` / `affinity` | 结果；没有规则生效时为 `null` |
+| `affinity` / `affinity` | 结果；没有规则生效、或请求在发往任何上游之前就被拒绝（余额不足、配额、限额等；`off` / `broken` 除外）时为 `null` |
 | `affinity_rule` / `affinityRule` | 生效规则的名称；从不记录会话值 |
 
 | `affinity` | 含义 |
