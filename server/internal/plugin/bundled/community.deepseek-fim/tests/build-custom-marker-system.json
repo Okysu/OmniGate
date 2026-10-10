@@ -1,0 +1,18 @@
+{
+  "name": "构造请求：自定义空缺标记、includeSystem",
+  "hook": "buildRequest",
+  "config": { "holeMarker": "[[HOLE]]", "includeSystem": true, "defaultMaxTokens": 0 },
+  "secrets": { "apiKey": "sk-test" },
+  "request": {
+    "model": "deepseek-v4-pro",
+    "messages": [
+      { "role": "system", "content": "# file: main.py" },
+      { "role": "user", "content": "import os\n[[HOLE]]\nmain()" }
+    ]
+  },
+  "expect": {
+    "output": {
+      "body": { "model": "deepseek-v4-pro", "prompt": "# file: main.py\nimport os\n", "suffix": "\nmain()", "max_tokens": null }
+    }
+  }
+}

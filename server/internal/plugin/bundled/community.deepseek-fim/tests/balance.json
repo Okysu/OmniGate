@@ -1,0 +1,15 @@
+{
+  "name": "余额（Base URL 以 /v1 结尾时取源）",
+  "capability": "balance.get",
+  "baseUrl": "https://api.deepseek.com/v1",
+  "secrets": { "apiKey": "sk-test" },
+  "fetch": [
+    {
+      "match": { "method": "GET", "url": "https://api.deepseek.com/user/balance" },
+      "response": { "status": 200, "headers": { "Content-Type": "application/json" }, "json": { "is_available": true, "balance_infos": [
+        { "currency": "CNY", "total_balance": "110.00", "granted_balance": "10.00", "topped_up_balance": "100.00" }
+      ] } }
+    }
+  ],
+  "expect": { "output": { "currency": "CNY", "total": "110.00", "granted": "10.00", "toppedUp": "100.00", "available": true } }
+}

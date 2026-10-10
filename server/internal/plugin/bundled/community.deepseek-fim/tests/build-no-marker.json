@@ -1,0 +1,15 @@
+{
+  "name": "构造请求：没有空缺标记时整段续写（不发送 suffix）",
+  "hook": "buildRequest",
+  "secrets": { "apiKey": "sk-test" },
+  "request": {
+    "model": "deepseek-flash",
+    "max_completion_tokens": 64,
+    "messages": [{ "role": "user", "content": "// quick sort in Go\nfunc quickSort(" }]
+  },
+  "expect": {
+    "output": {
+      "body": { "prompt": "// quick sort in Go\nfunc quickSort(", "suffix": null, "max_tokens": 64 }
+    }
+  }
+}

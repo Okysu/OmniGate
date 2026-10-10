@@ -1,0 +1,89 @@
+{
+  "id": "community.deepseek-fim",
+  "name": "DeepSeek FIM 补全",
+  "version": "1.0.0",
+  "sdk": 1,
+  "description": "自定义协议：通过 Chat Completions 接口调用 DeepSeek FIM（Fill In the Middle）补全（Beta，/beta/completions），用于代码补全；附带余额查询与模型发现。",
+  "author": "OmniGate",
+  "homepage": "https://api-docs.deepseek.com/guides/fim_completion",
+  "protocol": "custom",
+  "entry": "src/index.ts",
+  "defaults": {
+    "baseUrl": "https://api.deepseek.com",
+    "models": [
+      { "model": "deepseek-fim", "upstreamModel": "deepseek-flash" },
+      { "model": "deepseek-fim-pro", "upstreamModel": "deepseek-v4-pro" }
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "fimPath": {
+        "type": "string",
+        "title": "FIM 接口路径",
+        "description": "拼接在 Base URL 的源（协议 + 主机 + 端口）之后，忽略 Base URL 自身的路径，所以 Base URL 写成 …/v1 也可以",
+        "default": "/beta/completions",
+        "pattern": "^/[A-Za-z0-9._~/-]*$"
+      },
+      "holeMarker": {
+        "type": "string",
+        "title": "空缺标记",
+        "description": "消息中第一个标记之前为 prompt、之后为 suffix；没有标记时整段续写。DeepSeek 没有规定标记，这是网关的约定",
+        "default": "<|fim_hole|>",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "defaultMaxTokens": {
+        "type": "integer",
+        "title": "默认最大补全长度",
+        "description": "客户端没有给 max_tokens / max_completion_tokens 时使用；0 表示不发送（由 DeepSeek 决定）。文档写明 FIM 最大补全长度为 4K",
+        "default": 4096,
+        "minimum": 0
+      },
+      "maxTokensLimit": {
+        "type": "integer",
+        "title": "最大补全长度上限",
+        "description": "大于该值的 max_tokens 会被截到该值；0 表示不限制（原样转发）",
+        "default": 0,
+        "minimum": 0
+      },
+      "includeSystem": {
+        "type": "boolean",
+        "title": "把 system 消息放在 prompt 前",
+        "description": "仅在从消息中取 prompt 时生效；默认只使用最后一条 user 消息",
+        "default": false
+      }
+    }
+  },
+  "permissions": {
+    "network": ["api.deepseek.com", "$baseUrl"],
+    "secrets": ["apiKey"],
+    "schedule": ["balance.get"]
+  },
+  "capabilities": {
+    "balance.get": { "output": "balance", "userTriggerable": true, "schedule": { "minInterval": "10m" }, "timeout": "10s", "label": "余额" },
+    "models.list": { "output": "models", "userTriggerable": true, "timeout": "10s", "label": "模型列表" },
+    "health.check": { "output": "health", "userTriggerable": true, "timeout": "10s", "label": "健康检查" }
+  },
+  "hooks": ["buildRequest", "parseResponse", "parseStream", "endStream", "normalizeError"],
+  "uiContributions": [
+    {
+      "slot": "channel.detail.overview",
+      "title": "DeepSeek 账户余额",
+      "component": {
+        "type": "statGroup",
+        "items": [
+          { "type": "stat", "label": "总余额", "bind": "balance.get:/total", "format": "money", "currencyBind": "balance.get:/currency" },
+          { "type": "stat", "label": "可调用", "bind": "balance.get:/available", "format": "boolean" }
+        ]
+      },
+      "actions": [{ "label": "刷新余额", "capability": "balance.get" }]
+    },
+    {
+      "slot": "channel.detail.capabilities",
+      "title": "上游模型",
+      "component": { "type": "table", "rowsBind": "models.list:/models", "columns": [{ "key": "id", "label": "模型 ID" }] },
+      "actions": [{ "label": "同步模型列表", "capability": "models.list" }, { "label": "健康检查", "capability": "health.check" }]
+    }
+  ]
+}

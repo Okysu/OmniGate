@@ -1,0 +1,37 @@
+{
+  "name": "modelRegex 匹配（不区分大小写）时改写",
+  "hook": "transformRequest",
+  "config": {
+    "modelRegex": "^QWEN3",
+    "thinking": "off",
+    "thinkingStyle": "qwen_dashscope"
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "qwen3:8b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "qwen3:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ],
+        "enable_thinking": false
+      }
+    }
+  }
+}

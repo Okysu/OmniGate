@@ -1,0 +1,36 @@
+{
+  "name": "openai 写法关闭思考：openai/gpt-6-astra → low",
+  "hook": "transformRequest",
+  "config": {
+    "thinking": "off",
+    "thinkingStyle": "openai"
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "openai/gpt-6-astra",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "openai/gpt-6-astra",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ],
+        "reasoning_effort": "low"
+      }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "openai 写法关闭思考：gpt-5-mini-2025-08-07 → minimal",
+  "hook": "transformRequest",
+  "config": {
+    "thinking": "off",
+    "thinkingStyle": "openai"
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "gpt-5-mini-2025-08-07",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "gpt-5-mini-2025-08-07",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ],
+        "reasoning_effort": "minimal"
+      }
+    }
+  }
+}

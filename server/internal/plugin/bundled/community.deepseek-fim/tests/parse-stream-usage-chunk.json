@@ -1,0 +1,16 @@
+{
+  "name": "流式：单独的用量 chunk、最后一行没有换行（endStream）",
+  "hook": "parseStream",
+  "chunks": [
+    "data: {\"choices\":[{\"text\":\"SELECT 1\",\"index\":0,\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"text\":\"\",\"index\":0,\"finish_reason\":\"stop\"}]}\n\n",
+    "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":3,\"total_tokens\":8,\"prompt_cache_hit_tokens\":0,\"prompt_cache_miss_tokens\":5}}\n\n",
+    "data: [DONE]"
+  ],
+  "expect": {
+    "output": [
+      { "type": "delta", "content": "SELECT 1" },
+      { "type": "finish", "reason": "stop" },
+      { "type": "usage", "usage": { "prompt_tokens": 5, "completion_tokens": 3, "prompt_tokens_details": { "cached_tokens": 0 } } }
+    ]
+  }
+}

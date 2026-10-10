@@ -1,0 +1,76 @@
+{
+  "name": "软开关：多段内容已带开关时不变，没有文本段时追加",
+  "hook": "transformRequest",
+  "config": {
+    "thinking": "on",
+    "thinkingStyle": "qwen_soft_switch"
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "qwen3-vl",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "看图 /think"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": "好"
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "data:image/png;base64,AAAA"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "qwen3-vl",
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "看图 /think"
+              }
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "好"
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image_url"
+              },
+              {
+                "type": "text",
+                "text": "/think"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

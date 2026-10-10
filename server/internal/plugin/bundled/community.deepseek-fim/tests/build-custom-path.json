@@ -1,0 +1,9 @@
+{
+  "name": "构造请求：自定义 fimPath（保留端口，忽略 Base URL 的路径）",
+  "hook": "buildRequest",
+  "baseUrl": "https://fim.example.com:8443/deepseek/v1/",
+  "config": { "fimPath": "/deepseek/beta/completions" },
+  "secrets": { "apiKey": "sk-test" },
+  "request": { "model": "deepseek-flash", "prompt": "x" },
+  "expect": { "output": { "url": "https://fim.example.com:8443/deepseek/beta/completions" } }
+}

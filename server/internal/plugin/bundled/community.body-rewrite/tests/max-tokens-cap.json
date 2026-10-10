@@ -1,0 +1,38 @@
+{
+  "name": "输出上限：max_tokens 超出时压低，未超出的保持",
+  "hook": "transformRequest",
+  "config": {
+    "maxTokensCap": 4096
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "m",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好"
+        }
+      ],
+      "max_tokens": 9000,
+      "max_completion_tokens": 100
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "m",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ],
+        "max_tokens": 4096,
+        "max_completion_tokens": 100
+      }
+    }
+  }
+}

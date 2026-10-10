@@ -1,0 +1,36 @@
+{
+  "name": "百炼兼容模式开启：enable_thinking = true",
+  "hook": "transformRequest",
+  "config": {
+    "thinking": "on",
+    "thinkingStyle": "qwen_dashscope"
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "qwen-plus",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "qwen-plus",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ],
+        "enable_thinking": true
+      }
+    }
+  }
+}

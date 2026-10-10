@@ -1,0 +1,37 @@
+{
+  "name": "custom 写法：不能改写 model",
+  "hook": "transformRequest",
+  "config": {
+    "thinking": "on",
+    "thinkingStyle": "custom",
+    "thinkingPath": "model",
+    "thinkingOnValue": "\"other\""
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "m",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "m",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ]
+      }
+    }
+  }
+}

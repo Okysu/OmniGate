@@ -1,0 +1,40 @@
+{
+  "name": "modelRegex 无效时不做任何改写",
+  "hook": "transformRequest",
+  "config": {
+    "modelRegex": "([",
+    "thinking": "off",
+    "thinkingStyle": "qwen_dashscope",
+    "maxTokensCap": 1024
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "qwen3:8b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好"
+        }
+      ],
+      "max_tokens": 9000
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "qwen3:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ],
+        "max_tokens": 9000,
+        "enable_thinking": null
+      }
+    }
+  }
+}

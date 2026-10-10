@@ -1,0 +1,6 @@
+{
+  "name": "非流式响应：推理资源不足（按 503 换渠道重试）",
+  "hook": "parseResponse",
+  "response": { "status": 200, "body": { "id": "cmpl-3", "choices": [{ "text": "par", "index": 0, "finish_reason": "insufficient_system_resource" }] } },
+  "expect": { "output": { "error": { "status": 503 } } }
+}

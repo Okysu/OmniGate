@@ -1,0 +1,38 @@
+{
+  "name": "构造请求：顶层 prompt / suffix",
+  "hook": "buildRequest",
+  "secrets": { "apiKey": "sk-test" },
+  "request": {
+    "model": "deepseek-flash",
+    "prompt": "def fib(a):",
+    "suffix": "    return fib(a-1) + fib(a-2)",
+    "messages": [{ "role": "user", "content": "会被忽略" }],
+    "max_tokens": 128,
+    "temperature": 0.2,
+    "top_p": 0.9,
+    "stop": ["\n\n"],
+    "frequency_penalty": 0.5,
+    "tools": [{ "type": "function", "function": { "name": "ignored" } }]
+  },
+  "expect": {
+    "output": {
+      "method": "POST",
+      "url": "https://api.deepseek.com/beta/completions",
+      "headers": { "Authorization": "Bearer sk-test", "Accept": "application/json" },
+      "body": {
+        "model": "deepseek-flash",
+        "prompt": "def fib(a):",
+        "suffix": "    return fib(a-1) + fib(a-2)",
+        "max_tokens": 128,
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "stop": ["\n\n"],
+        "stream": false,
+        "stream_options": null,
+        "frequency_penalty": null,
+        "tools": null,
+        "messages": null
+      }
+    }
+  }
+}

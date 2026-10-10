@@ -1,0 +1,43 @@
+{
+  "name": "顺序：removeFields → thinking → maxTokensCap → mergeBody（mergeBody 最后生效）",
+  "hook": "transformRequest",
+  "config": {
+    "removeFields": "reasoning_effort",
+    "thinking": "off",
+    "thinkingStyle": "ollama",
+    "maxTokensCap": 1000,
+    "mergeBody": "{\"max_tokens\": 500, \"keep_alive\": \"5m\"}"
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "qwen3:8b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好"
+        }
+      ],
+      "max_tokens": 9000,
+      "reasoning_effort": "high"
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "qwen3:8b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ],
+        "max_tokens": 500,
+        "reasoning_effort": "none",
+        "keep_alive": "5m"
+      }
+    }
+  }
+}

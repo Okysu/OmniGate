@@ -1,0 +1,27 @@
+{
+  "name": "流式：多字节字符跨块（TextDecoder 流式解码）",
+  "hook": "parseStream",
+  "chunksBase64": [
+    "ZGF0YTogeyJjaG9pY2VzIjpbeyJ0ZXh0Ijoi5rOo6YeK77ya5g==",
+    "lpDms6LpgqPlpZEiLCJpbmRleCI6MCwiZmluaXNoX3JlYXNvbiI6bnVsbH1dfQoKZGF0YTogeyJjaG9pY2VzIjpbeyJ0ZXh0IjoiIiwiaW5kZXgiOjAsImZpbmlzaF9yZWFzb24iOiJzdG9wIn1dLCJ1c2FnZSI6eyJwcm9tcHRfdG9rZW5zIjozLCJjb21wbGV0aW9uX3Rva2VucyI6NCwidG90YWxfdG9rZW5zIjo3fX0KCmRhdGE6IFtET05FXQoK"
+  ],
+  "expect": {
+    "output": [
+      {
+        "type": "delta",
+        "content": "注释：斐波那契"
+      },
+      {
+        "type": "finish",
+        "reason": "stop"
+      },
+      {
+        "type": "usage",
+        "usage": {
+          "prompt_tokens": 3,
+          "completion_tokens": 4
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "Ollama（Responses）关闭：reasoning.effort = none 并移除 think",
+  "hook": "transformRequest",
+  "config": {
+    "thinking": "off",
+    "thinkingStyle": "ollama"
+  },
+  "request": {
+    "dialect": "openai.responses",
+    "path": "/responses",
+    "headers": {},
+    "body": {
+      "model": "qwen3:8b",
+      "input": "hi",
+      "think": true
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "qwen3:8b",
+        "input": "hi",
+        "reasoning": {
+          "effort": "none"
+        },
+        "think": null
+      }
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "name": "chat_template_kwargs 关闭：合并进已有对象",
+  "hook": "transformRequest",
+  "config": {
+    "thinking": "off",
+    "thinkingStyle": "chat_template_kwargs"
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "Qwen/Qwen3-8B",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好"
+        }
+      ],
+      "chat_template_kwargs": {
+        "add_generation_prompt": true
+      }
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "Qwen/Qwen3-8B",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ],
+        "chat_template_kwargs": {
+          "add_generation_prompt": true,
+          "enable_thinking": false,
+          "thinking": false
+        }
+      }
+    }
+  }
+}

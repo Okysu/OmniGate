@@ -1,0 +1,27 @@
+{
+  "name": "输出上限（Responses）：未指定时写 max_output_tokens",
+  "hook": "transformRequest",
+  "config": {
+    "maxTokensCap": 8192,
+    "setMaxTokensWhenMissing": true
+  },
+  "request": {
+    "dialect": "openai.responses",
+    "path": "/responses",
+    "headers": {},
+    "body": {
+      "model": "m",
+      "input": "hi"
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "m",
+        "input": "hi",
+        "max_output_tokens": 8192,
+        "max_tokens": null
+      }
+    }
+  }
+}

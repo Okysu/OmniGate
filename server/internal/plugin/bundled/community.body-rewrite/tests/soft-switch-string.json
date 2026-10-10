@@ -1,0 +1,60 @@
+{
+  "name": "软开关：字符串内容追加 /no_think，替换已有开关，不重复追加",
+  "hook": "transformRequest",
+  "config": {
+    "thinking": "off",
+    "thinkingStyle": "qwen_soft_switch"
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "qwen3",
+      "messages": [
+        {
+          "role": "user",
+          "content": "第一问"
+        },
+        {
+          "role": "assistant",
+          "content": "答"
+        },
+        {
+          "role": "user",
+          "content": "第二问 /think"
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "c1",
+          "content": "42"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "qwen3",
+        "messages": [
+          {
+            "role": "user",
+            "content": "第一问"
+          },
+          {
+            "role": "assistant",
+            "content": "答"
+          },
+          {
+            "role": "user",
+            "content": "第二问 /no_think"
+          },
+          {
+            "role": "tool",
+            "content": "42"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "模型发现",
+  "capability": "models.list",
+  "secrets": { "apiKey": "sk-test" },
+  "fetch": [
+    { "match": { "url": "https://api.deepseek.com/models" }, "response": { "status": 200, "headers": { "Content-Type": "application/json" }, "json": { "object": "list", "data": [
+      { "id": "deepseek-flash", "object": "model" }, { "id": "deepseek-v4-pro", "object": "model" }
+    ] } } }
+  ],
+  "expect": { "output": { "models": [{ "id": "deepseek-flash" }, { "id": "deepseek-v4-pro" }] } }
+}

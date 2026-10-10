@@ -1,0 +1,93 @@
+{
+  "name": "关闭思考时移除历史推理内容（不删除消息与工具调用）",
+  "hook": "transformRequest",
+  "config": {
+    "thinking": "off",
+    "thinkingStyle": "chat_template_kwargs",
+    "stripReasoningContent": true
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "qwen3",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好"
+        },
+        {
+          "role": "assistant",
+          "content": null,
+          "reasoning_content": "想…",
+          "tool_calls": [
+            {
+              "id": "c1",
+              "type": "function",
+              "function": {
+                "name": "f",
+                "arguments": "{}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "c1",
+          "content": "ok"
+        },
+        {
+          "role": "assistant",
+          "content": "好",
+          "reasoning": "再想…"
+        },
+        {
+          "role": "user",
+          "content": "继续"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "qwen3",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          },
+          {
+            "role": "assistant",
+            "reasoning_content": null,
+            "tool_calls": [
+              {
+                "id": "c1",
+                "function": {
+                  "name": "f"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "c1"
+          },
+          {
+            "role": "assistant",
+            "content": "好",
+            "reasoning": null
+          },
+          {
+            "role": "user",
+            "content": "继续"
+          }
+        ],
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        }
+      }
+    }
+  }
+}

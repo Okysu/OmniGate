@@ -1,0 +1,32 @@
+{
+  "name": "默认不改 developer 角色",
+  "hook": "transformRequest",
+  "config": {},
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "m",
+      "messages": [
+        {
+          "role": "developer",
+          "content": "规则"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "m",
+        "messages": [
+          {
+            "role": "developer",
+            "content": "规则"
+          }
+        ]
+      }
+    }
+  }
+}

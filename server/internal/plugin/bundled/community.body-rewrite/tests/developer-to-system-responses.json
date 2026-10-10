@@ -1,0 +1,54 @@
+{
+  "name": "developer 角色改为 system（Responses）",
+  "hook": "transformRequest",
+  "config": {
+    "developerToSystem": true
+  },
+  "request": {
+    "dialect": "openai.responses",
+    "path": "/responses",
+    "headers": {},
+    "body": {
+      "model": "m",
+      "input": [
+        {
+          "type": "message",
+          "role": "developer",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "规则"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": "hi"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "m",
+        "input": [
+          {
+            "type": "message",
+            "role": "system",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "规则"
+              }
+            ]
+          },
+          {
+            "role": "user",
+            "content": "hi"
+          }
+        ]
+      }
+    }
+  }
+}

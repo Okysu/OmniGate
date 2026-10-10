@@ -1,0 +1,55 @@
+{
+  "name": "软开关（Responses）：改最后一条用户消息的 input_text",
+  "hook": "transformRequest",
+  "config": {
+    "thinking": "off",
+    "thinkingStyle": "qwen_soft_switch"
+  },
+  "request": {
+    "dialect": "openai.responses",
+    "path": "/responses",
+    "headers": {},
+    "body": {
+      "model": "qwen3",
+      "input": [
+        {
+          "role": "user",
+          "content": "旧问题"
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "新问题"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "qwen3",
+        "input": [
+          {
+            "role": "user",
+            "content": "旧问题"
+          },
+          {
+            "type": "message",
+            "role": "user",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "新问题 /no_think"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

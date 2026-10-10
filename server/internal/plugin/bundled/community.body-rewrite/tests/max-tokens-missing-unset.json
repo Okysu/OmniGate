@@ -1,0 +1,35 @@
+{
+  "name": "输出上限：请求未指定且未开启写入时不写",
+  "hook": "transformRequest",
+  "config": {
+    "maxTokensCap": 2048
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "m",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好"
+        }
+      ]
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "m",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ],
+        "max_tokens": null
+      }
+    }
+  }
+}

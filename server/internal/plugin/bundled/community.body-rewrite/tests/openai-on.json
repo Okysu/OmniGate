@@ -1,0 +1,38 @@
+{
+  "name": "openai 写法开启思考：reasoning_effort = 配置的强度",
+  "hook": "transformRequest",
+  "config": {
+    "thinking": "on",
+    "thinkingStyle": "openai",
+    "reasoningEffort": "high"
+  },
+  "request": {
+    "dialect": "openai.chat",
+    "path": "/chat/completions",
+    "headers": {},
+    "body": {
+      "model": "gpt-5.1",
+      "messages": [
+        {
+          "role": "user",
+          "content": "你好"
+        }
+      ],
+      "reasoning_effort": "none"
+    }
+  },
+  "expect": {
+    "output": {
+      "body": {
+        "model": "gpt-5.1",
+        "messages": [
+          {
+            "role": "user",
+            "content": "你好"
+          }
+        ],
+        "reasoning_effort": "high"
+      }
+    }
+  }
+}

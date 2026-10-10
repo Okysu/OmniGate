@@ -1,0 +1,11 @@
+{
+  "name": "流式：生成被中断（aborted）",
+  "hook": "parseStream",
+  "chunks": ["data: {\"choices\":[{\"text\":\"ab\",\"index\":0,\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"text\":\"\",\"index\":0,\"finish_reason\":\"aborted\"}]}\n\n"],
+  "expect": {
+    "output": [
+      { "type": "delta", "content": "ab" },
+      { "type": "error", "status": 502, "message": "DeepSeek 生成被中断（aborted）" }
+    ]
+  }
+}
