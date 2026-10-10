@@ -2,7 +2,7 @@
 // confirm dialog and error messages. Pure functions; money formatting is injected
 // (`useCurrency().money`) and amounts stay decimal strings (BigInt nano arithmetic).
 import type { MoneyFormatter } from './quota'
-import type { PurchaseAction, PurchaseInput, PurchaseOption, PurchaseOptions, PurchaseResult } from './types'
+import type { ActiveSubscription, PurchaseAction, PurchaseInput, PurchaseOption, PurchaseOptions, PurchaseResult } from './types'
 import { errorMessage, isApiError } from './api'
 import { formatDateTime } from './format'
 import { amountSign, fromNano, isValidAmount, toNano } from './money'
@@ -196,4 +196,36 @@ export function purchaseSuccessText(r: PurchaseResult, money: MoneyFormatter): {
  */
 export function isLongDescription(d: string): boolean {
   return d.length > 400 || d.split('\n').length > 10
+}
+
+/** Whether two model lists share a model ([] = all models). */
+export function modelsOverlap(a: string[], b: string[]): boolean {
+  if (a.length === 0 || b.length === 0)
+    return true
+  const set = new Set(a)
+  return b.some(m => set.has(m))
+}
+
+/**
+ * Live subscriptions that keep running next to a new purchase of the intent's
+ * plan and cover some of the same models: their limits stack, the one ending
+ * first is used first. Only a direct `new` purchase adds such a parallel
+ * subscription (renewals extend, upgrades replace their source).
+ */
+export function parallelSubscriptions(opts: PurchaseOptions | null | undefined, intent: PurchaseIntent | null | undefined): ActiveSubscription[] {
+  if (!opts || !intent || intent.action !== 'new')
+    return []
+  const plan = opts.plans.find(p => p.plan.id === intent.planId)?.plan
+  if (!plan)
+    return []
+  return (opts.subscriptions ?? []).filter(s => modelsOverlap(s.models, plan.models))
+}
+
+/** The warning shown before a purchase that adds a parallel subscription, or null. */
+export function parallelWarning(subs: ActiveSubscription[], planName: string): string | null {
+  if (subs.length === 0)
+    return null
+  const held = subs.map(s => `「${s.planName}」（至 ${formatDateTime(s.endsAt)}）`).join('、')
+  return `你已持有 ${held}。本次购买会另开一份独立的「${planName}」订阅，与现有订阅额度叠加，先到期的先使用；`
+    + '它不会延长或替换现有订阅。如需延长现有套餐请对它续费，换到更高档位请使用补差价升级。'
 }

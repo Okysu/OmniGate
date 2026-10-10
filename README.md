@@ -10,6 +10,7 @@ OpenAI 与 Anthropic 协议互转 · 多渠道路由与故障转移 · 插件化
 ![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883?logo=vue.js&logoColor=white)
 ![Docker](https://img.shields.io/badge/ghcr.io-okysu%2Fomnigate-2496ED?logo=docker&logoColor=white)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [快速开始](#快速开始) · [功能特性](#功能特性) · [截图](#截图) · [接入方式](#接入方式) · [文档](#文档) · [本地开发](#本地开发)
 
@@ -173,3 +174,7 @@ cd web && pnpm lint && pnpm typecheck && pnpm test && pnpm build
 ```
 
 涉及接口或数据模型的改动，请同步更新 [docs/contracts](docs/contracts) 中的契约与迁移（`server/migrations` 下 PostgreSQL 与 SQLite 各一份）。
+
+## 许可证
+
+[MIT](LICENSE) © Okysu

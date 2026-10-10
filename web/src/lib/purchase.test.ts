@@ -11,6 +11,9 @@ import {
   intentButtonLabel,
   intentTitle,
   isLongDescription,
+  modelsOverlap,
+  parallelSubscriptions,
+  parallelWarning,
   purchaseBody,
   purchaseErrorMessage,
   purchaseSuccessText,
@@ -152,5 +155,41 @@ describe('isLongDescription', () => {
     expect(isLongDescription('short')).toBe(false)
     expect(isLongDescription('x'.repeat(401))).toBe(true)
     expect(isLongDescription(Array.from({ length: 11 }, () => 'a').join('\n'))).toBe(true)
+  })
+})
+
+describe('parallel subscriptions', () => {
+  const opts = (subs: PurchaseOptions['subscriptions']): PurchaseOptions => ({
+    available: '100',
+    currency: 'USD',
+    plans: [option({}, { id: 'go', name: 'Go+', models: [] }), option({}, { id: 'aigo', name: 'Aigo', models: ['glm-5.3'] })],
+    subscriptions: subs,
+  })
+  const pro = { id: 's1', planId: 'pro', planName: 'Pro', models: ['gpt-6-sol'], endsAt: '2026-11-09T00:00:00Z' }
+
+  it('warns when a new purchase stacks next to a subscription covering the same models', () => {
+    const newGo = directIntent(option({}, { id: 'go', name: 'Go+' }))!
+    const subs = parallelSubscriptions(opts([pro]), newGo)
+    expect(subs.map(s => s.id)).toEqual(['s1'])
+    expect(parallelWarning(subs, 'Go+')).toContain('你已持有 「Pro」')
+    expect(parallelWarning(subs, 'Go+')).toContain('额度叠加')
+  })
+
+  it('does not warn for other models, renewals, upgrades or older servers', () => {
+    const newAigo = directIntent(option({}, { id: 'aigo', name: 'Aigo' }))!
+    expect(parallelSubscriptions(opts([pro]), newAigo)).toEqual([])
+    const renew = directIntent(option({ action: 'renew', renewSubscriptionId: 's9', currentEndsAt: '2026-10-20T00:00:00Z' }, { id: 'go' }))!
+    expect(parallelSubscriptions(opts([pro]), renew)).toEqual([])
+    const up = upgradeIntents(option({ upgrades: [upgrade('s1', 'Pro', '10')] }, { id: 'go' }))[0]!
+    expect(parallelSubscriptions(opts([pro]), up)).toEqual([])
+    expect(parallelSubscriptions(opts(undefined), directIntent(option({}, { id: 'go' }))!)).toEqual([])
+    expect(parallelWarning([], 'Go+')).toBeNull()
+  })
+
+  it('treats an empty model list as all models', () => {
+    expect(modelsOverlap([], ['a'])).toBe(true)
+    expect(modelsOverlap(['a'], [])).toBe(true)
+    expect(modelsOverlap(['a'], ['b'])).toBe(false)
+    expect(modelsOverlap(['a', 'b'], ['b'])).toBe(true)
   })
 })

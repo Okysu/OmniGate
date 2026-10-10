@@ -55,6 +55,15 @@ interface PurchaseOptions {
   available: string                 // 钱包可用余额（balance − reserved）
   currency: string                  // 结算币种代码
   plans: PurchaseOption[]           // 在售套餐，顺序同 /api/plans
+  subscriptions: ActiveSubscription[] // 用户的生效中订阅（购买页据此提示：新购会与覆盖相同模型的订阅额度叠加）
+}
+
+interface ActiveSubscription {
+  id: string
+  planId: string
+  planName: string                  // 订阅快照中的名称
+  models: string[]                  // 覆盖的模型（[] = 全部）
+  endsAt: string
 }
 
 interface PurchaseOption {

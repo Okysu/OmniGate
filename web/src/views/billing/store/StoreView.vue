@@ -29,6 +29,8 @@ import {
   intentButtonLabel,
   intentTitle,
   isLongDescription,
+  parallelSubscriptions,
+  parallelWarning,
   PURCHASE_ACTION_LABELS,
   purchaseBody,
   purchaseErrorMessage,
@@ -130,6 +132,9 @@ watch(confirmOpen, (v) => {
 const pendingAfter = computed(() => balanceAfter(available.value, pending.value?.price))
 const pendingAffordable = computed(() => canAfford(available.value, pending.value?.price))
 const pendingShortfall = computed(() => shortfall(available.value, pending.value?.price))
+// A new purchase next to a subscription covering the same models adds a parallel one (limits stack).
+const pendingParallelWarning = computed(() =>
+  pending.value ? parallelWarning(parallelSubscriptions(options.value, pending.value), pending.value.planName) : null)
 
 /** Errors after which the options are stale (plan archived, not for sale, source expired …). */
 const REFRESH_CODES = new Set(['plan_archived', 'plan_not_for_sale', 'not_an_upgrade', 'subscription_not_active', 'not_found', 'insufficient_balance'])
@@ -470,8 +475,19 @@ function recordTitle(r: PurchaseRecord): string {
         </dl>
 
         <p v-if="pending?.action === 'upgrade'" class="bg-muted/50 rounded-md p-3 text-xs">
+          只把「{{ pending.fromPlanName ?? '当前套餐' }}」这一份订阅升级为「{{ pending.planName }}」，你的其他订阅不受影响。
           升级后从现在起开始新套餐的完整周期；当前套餐未用完的天数按价值抵扣，越早升级越划算。已用额度保留，按新套餐上限重新计算百分比。
         </p>
+
+        <div
+          v-if="pendingParallelWarning"
+          role="alert"
+          class="flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300"
+          data-testid="parallel-warning"
+        >
+          <CircleAlert class="mt-0.5 size-4 shrink-0" />
+          <p>{{ pendingParallelWarning }}</p>
+        </div>
 
         <div
           v-if="pending && !pendingAffordable"
@@ -501,7 +517,7 @@ function recordTitle(r: PurchaseRecord): string {
           </Button>
           <Button :disabled="!pending || !pendingAffordable || submitting" data-testid="confirm-purchase" @click="confirmPurchase">
             <Loader2 v-if="submitting" class="animate-spin" />
-            确认{{ pending ? PURCHASE_ACTION_LABELS[pending.action] : '购买' }}
+            {{ pendingParallelWarning ? '仍然购买' : `确认${pending ? PURCHASE_ACTION_LABELS[pending.action] : '购买'}` }}
           </Button>
         </DialogFooter>
       </DialogContent>

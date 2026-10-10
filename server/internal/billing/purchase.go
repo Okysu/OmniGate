@@ -26,6 +26,9 @@ type PurchaseOptions struct {
 	Available money.Amount
 	Currency  string
 	Plans     []PurchaseOption
+	// Active are the user's live subscriptions (the store warns when a purchase
+	// adds a parallel subscription next to one covering the same models).
+	Active []*subscription.Subscription
 }
 
 // PurchaseOption describes what buying one plan would do now.
@@ -80,7 +83,7 @@ func (s *Service) PurchaseOptions(ctx context.Context, userID uuid.UUID) (*Purch
 		}
 		fromPlans[sub.PlanID] = p
 	}
-	out := &PurchaseOptions{Available: w.Available(), Currency: w.Currency, Plans: []PurchaseOption{}}
+	out := &PurchaseOptions{Available: w.Available(), Currency: w.Currency, Plans: []PurchaseOption{}, Active: subs}
 	for _, p := range plans {
 		o := PurchaseOption{Plan: p, Purchasable: p.Purchasable(), Action: subscription.PurchaseNew, Upgrades: []UpgradeOption{}}
 		period, err := p.Period()

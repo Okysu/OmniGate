@@ -82,6 +82,9 @@ func TestWalletPurchase(t *testing.T) {
 	}
 	e.settle()
 	opts = e.mustDo(e.carol, http.MethodGet, "/api/billing/purchase/options", nil, 200)
+	if subs := opts["subscriptions"].([]any); len(subs) != 1 || subs[0].(map[string]any)["id"] != subID || subs[0].(map[string]any)["planName"] != "Go+" {
+		t.Fatalf("active subscriptions = %v", opts["subscriptions"])
+	}
 	if o := optionFor(opts, goPlus); o["action"] != "renew" || o["renewSubscriptionId"] != subID {
 		t.Fatalf("Go+ renew option = %v", o)
 	}

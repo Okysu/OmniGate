@@ -55,10 +55,19 @@ type purchaseOptionJSON struct {
 	Upgrades            []upgradeJSON                `json:"upgrades"`
 }
 
+type activeSubJSON struct {
+	ID       uuid.UUID `json:"id"`
+	PlanID   uuid.UUID `json:"planId"`
+	PlanName string    `json:"planName"`
+	Models   []string  `json:"models"`
+	EndsAt   time.Time `json:"endsAt"`
+}
+
 type purchaseOptionsJSON struct {
-	Available string               `json:"available"`
-	Currency  string               `json:"currency"`
-	Plans     []purchaseOptionJSON `json:"plans"`
+	Available     string               `json:"available"`
+	Currency      string               `json:"currency"`
+	Plans         []purchaseOptionJSON `json:"plans"`
+	Subscriptions []activeSubJSON      `json:"subscriptions"`
 }
 
 func (h *Handler) purchaseOptions(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +76,10 @@ func (h *Handler) purchaseOptions(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	out := purchaseOptionsJSON{Available: opts.Available.String(), Currency: opts.Currency, Plans: []purchaseOptionJSON{}}
+	out := purchaseOptionsJSON{Available: opts.Available.String(), Currency: opts.Currency, Plans: []purchaseOptionJSON{}, Subscriptions: []activeSubJSON{}}
+	for _, s := range opts.Active {
+		out.Subscriptions = append(out.Subscriptions, activeSubJSON{ID: s.ID, PlanID: s.PlanID, PlanName: s.PlanName, Models: s.Models, EndsAt: s.EndsAt})
+	}
 	for _, o := range opts.Plans {
 		v := purchaseOptionJSON{Plan: subscription.CatalogView(o.Plan), Purchasable: o.Purchasable, Action: o.Action,
 			Price: amountPtr(o.Price), RenewSubscriptionID: o.RenewSubscriptionID, CurrentEndsAt: o.CurrentEndsAt,

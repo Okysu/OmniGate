@@ -1044,6 +1044,18 @@ export interface PurchaseOptions {
   available: string
   currency: string
   plans: PurchaseOption[]
+  /** The user's live subscriptions (optional for older servers). */
+  subscriptions?: ActiveSubscription[]
+}
+
+/** A live subscription as listed in the purchase options. */
+export interface ActiveSubscription {
+  id: string
+  planId: string
+  planName: string
+  /** Snapshot of covered models ([] = all models). */
+  models: string[]
+  endsAt: string
 }
 
 /** `POST /api/billing/purchase` body. */
