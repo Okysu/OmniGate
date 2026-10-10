@@ -8,6 +8,7 @@ import {
   Copy,
   Eraser,
   Fingerprint,
+  Laptop,
   LayoutList,
   Link2,
   Link2Off,
@@ -67,6 +68,8 @@ import { errorMessage, fieldErrors, isApiError, isVersionConflict } from '@/lib/
 import { affinityApi, settingsApi } from '@/lib/endpoints'
 import { formatNumber } from '@/lib/format'
 import { SOURCE_LABELS } from '@/lib/settingsForm'
+import { clientIncludeLabel } from '@/lib/clients'
+import { useClientsStore } from '@/stores/clients'
 import AffinityRuleSheet from './AffinityRuleSheet.vue'
 
 /**
@@ -282,10 +285,13 @@ async function loadStats() {
     statsLoading.value = false
   }
 }
+const clients = useClientsStore()
 onMounted(() => {
   reset()
-  if (supported.value)
+  if (supported.value) {
     void loadStats()
+    void clients.ensureLoaded()
+  }
 })
 const clearOpen = ref(false)
 const clearing = ref(false)
@@ -471,6 +477,15 @@ function setGlobalMode(v: unknown) {
                   </p>
                   <p v-if="r.path_regex.length" class="text-muted-foreground truncate font-mono text-[11px]" :title="r.path_regex.join('  ')">
                     {{ r.path_regex.join(' · ') }}
+                  </p>
+                  <p
+                    v-if="r.client_include.length"
+                    class="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] text-teal-700 dark:text-teal-400"
+                    :title="`只对这些客户端生效：${clientIncludeLabel(r.client_include, clients.list)}`"
+                    data-testid="affinity-clients"
+                  >
+                    <Laptop class="size-3 shrink-0" />
+                    <span class="truncate">仅 {{ clientIncludeLabel(r.client_include, clients.list) }}</span>
                   </p>
                 </TableCell>
                 <TableCell class="min-w-44">

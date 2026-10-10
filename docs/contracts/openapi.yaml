@@ -18,6 +18,7 @@ info:
     见 `docs/contracts/phase7-api.md`（含 §5 实现差异）。
     Round 6（续）的音频接口（`/v1/audio/transcriptions`、`/translations`、`/speech`，按 token / 分钟 / 字符计价、配额计量 `audio_seconds`）
     见 `docs/contracts/phase9-api.md` §1（实现差异见该文件 §4）。
+    Round 13 的客户端识别（请求日志 `client`、`GET /api/clients`、统计 `byClient`、会话亲和规则 `client_include`）见 `docs/contracts/phase13-api.md`。
 
     ## 两棵路由树
     - **控制面** `/api/*`：管理控制台使用，基于 Cookie 会话（`og_session`）认证，带 CSRF 防护，错误统一使用 `Error` 信封。
@@ -133,6 +134,7 @@ info:
     - 未注册的 `/v1/*` 路径（任意方法）返回 `400 invalid_request`（消息 `unknown endpoint <path>`）；已注册路径使用错误的方法返回 `405`（类别 `invalid_request`）。
       这两种情况下，路径以 `/messages` 结尾或带 `anthropic-version` 头时使用 Anthropic 错误格式，否则使用 OpenAI 错误格式。
     - 默认不记录请求 / 响应正文；`/v1/chat/completions`、`/v1/responses`、`/v1/embeddings`、`/v1/images/*`、`/v1/audio/*`、`/v1/messages` 的每个请求（含认证失败的请求）写一条请求日志（见 `GET /api/logs`）；
+      日志只记录按请求头识别出的客户端 id 与版本（Round 13，`phase13-api.md`），不记录原始 User-Agent 或其他请求头；
       `/v1/models` 与 `/v1/messages/count_tokens` 不写请求日志、不计费。
 
     ## 数据面：错误类别与映射（`protocol/errors.go`）
@@ -2587,6 +2589,7 @@ paths:
         - $ref: "#/components/parameters/LogModel"
         - $ref: "#/components/parameters/LogStatus"
         - $ref: "#/components/parameters/LogAffinity"
+        - $ref: "#/components/parameters/LogClient"
       responses:
         "200":
           description: 分页请求日志
@@ -2616,6 +2619,7 @@ paths:
         `byModel`、`byChannel` 各按请求数倒序最多 50 项。`totals.cost` 仅持有 `stats.all` 时返回，否则为 `null`。
         `inputTokens` 含缓存读写 token。延迟分位数在无数据时为 `null`。
         Round 12（`phase12-api.md` §5）：`cacheHitRate` = 缓存读取 ÷ `inputTokens`（无输入时为 null），`affinity` 为各会话亲和结果的请求数。
+        Round 13（`phase13-api.md` §4）：`byClient` 为按识别出的客户端的明细（同样的过滤条件，`affinity` / `client` 过滤也适用）。
       x-required-permission: stats.own
       parameters:
         - $ref: "#/components/parameters/LogFrom"
@@ -2625,6 +2629,8 @@ paths:
         - $ref: "#/components/parameters/LogKeyId"
         - $ref: "#/components/parameters/LogModel"
         - $ref: "#/components/parameters/LogStatus"
+        - $ref: "#/components/parameters/LogAffinity"
+        - $ref: "#/components/parameters/LogClient"
       responses:
         "200":
           description: 统计汇总
@@ -2641,6 +2647,38 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/LogRangeInvalid"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/clients:
+    get:
+      tags: [logs]
+      operationId: listKnownClients
+      summary: 可识别的客户端
+      description: |
+        Round 13（`phase13-api.md` §1）：网关能识别的全部客户端，按识别规则的顺序，最后一项为 `unknown`。
+        即 `GET /api/logs?client=` 与会话亲和规则 `client_include` 的可选值；控制台据此渲染过滤与多选，不在前端硬编码。
+      x-required-permission: stats.own
+      responses:
+        "200":
+          description: 客户端列表
+          headers:
+            X-OmniGate-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ClientInfo"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -6567,6 +6605,14 @@ components:
       schema:
         type: string
         enum: [any, hit, new, miss, rebound, failover, broken, strict_failed, "off"]
+    LogClient:
+      name: client
+      in: query
+      required: false
+      description: "识别出的客户端（Round 13，`phase13-api.md` §3）：`GET /api/clients` 中的一个 id；`unknown` 同时包含识别功能上线前的日志；其他值 → 422。"
+      schema:
+        type: string
+        example: claude-code
     DryRun:
       name: dryRun
       in: query
@@ -10186,6 +10232,8 @@ components:
         affinityRule:
           type: [string, "null"]
           description: 生效的会话亲和规则名称；从不记录会话值
+        client:
+          $ref: "#/components/schemas/LogClient"
 
     RequestLogList:
       allOf:
@@ -10329,6 +10377,54 @@ components:
           type: object
           description: 各会话亲和结果的请求数（只含出现过的结果）
           additionalProperties: { type: integer }
+        byClient:
+          type: array
+          description: 按识别出的客户端（Round 13，`phase13-api.md` §4），按请求数倒序；识别功能上线前的日志归入 `unknown`
+          items:
+            type: object
+            required: [client, name, requests, errors, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cacheHitRate,
+              affinityHits, affinityBound, affinityHitRate, charge]
+            properties:
+              client: { type: string, description: 客户端 id }
+              name: { type: string, description: 显示名称 }
+              requests: { type: integer }
+              errors: { type: integer }
+              inputTokens: { type: integer, description: 输入 + 缓存读 + 缓存写 token }
+              outputTokens: { type: integer }
+              cacheReadTokens: { type: integer }
+              cacheWriteTokens: { type: integer }
+              cacheHitRate:
+                type: [number, "null"]
+                description: cacheReadTokens / inputTokens；没有输入 token 时为 null
+              affinityHits: { type: integer, description: 会话亲和结果为 hit 的请求数 }
+              affinityBound: { type: integer, description: 已有绑定的会话请求数（hit + rebound + failover + broken + strict_failed） }
+              affinityHitRate:
+                type: [number, "null"]
+                description: affinityHits / affinityBound；affinityBound 为 0 时为 null
+              charge:
+                $ref: "#/components/schemas/Money"
+
+    ClientInfo:
+      type: object
+      required: [id, name, kind]
+      properties:
+        id: { type: string, example: claude-code }
+        name: { type: string, example: Claude Code }
+        kind:
+          type: string
+          enum: [agent, chat, sdk, tool, unknown]
+          description: agent = 编码代理 / IDE 助手，chat = 聊天客户端，sdk = 官方 SDK，tool = 通用 HTTP 工具，unknown = 未识别
+
+    LogClient:
+      type: object
+      required: [id, name, version]
+      description: '识别出的客户端（Round 13，`phase13-api.md` §3）；识别功能上线前的日志为 `{ id: "unknown", name: "未知", version: null }`'
+      properties:
+        id: { type: string, description: "`GET /api/clients` 中的 id" }
+        name: { type: string }
+        version:
+          type: [string, "null"]
+          description: 能从请求头解析出时的版本（最多 32 个字符），否则为 null
 
     Wallet:
       type: object
@@ -11929,6 +12025,11 @@ components:
           default: ""
           maxLength: 64
           description: OmniGate 扩展（§2.6）：OpenAI 格式上游请求没有该请求头时补全为按对话派生的 UUID（v8）；空 = 关闭；禁止透传的请求头不允许
+        client_include:
+          type: array
+          default: []
+          items: { type: string }
+          description: OmniGate 扩展（Round 13，`phase13-api.md` §5）：只对识别出的这些客户端生效（`GET /api/clients` 中的 id，去重）；空 = 任意客户端；未知 id → 422
 
     AffinityStats:
       type: object

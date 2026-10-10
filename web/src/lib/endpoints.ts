@@ -1,6 +1,7 @@
 import type {
   AffinityOutcome,
   AffinityStats,
+  ClientInfo,
   AdminUserDetail,
   AlertsSummary,
   BulkSubscriptionResult,
@@ -286,6 +287,8 @@ export interface LogsFilter {
   status?: 'success' | 'error'
   /** phase12 §4: one session affinity outcome, or 'any' (an affinity rule applied). */
   affinity?: AffinityOutcome | 'any'
+  /** phase13 §3: one detected client id (GET /api/clients). */
+  client?: string
 }
 
 export const logsApi = {
@@ -293,6 +296,8 @@ export const logsApi = {
     api.get<Paginated<RequestLog>>('/api/logs', { query: { ...params }, signal }),
   summary: (params: { from?: string, to?: string, userId?: string }, signal?: AbortSignal) =>
     api.get<StatsSummary>('/api/stats/summary', { query: { ...params }, signal }),
+  /** phase13 §1: the known client ids (log filter values, affinity client_include). */
+  clients: (signal?: AbortSignal) => api.get<{ items: ClientInfo[] }>('/api/clients', { signal }),
 }
 
 export const billingApi = {

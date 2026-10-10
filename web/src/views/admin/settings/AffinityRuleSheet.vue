@@ -4,6 +4,7 @@ import type { AffinityMode, AffinityRule, AffinityRuleMode } from '@/lib/types'
 import { computed, reactive, ref, watch } from 'vue'
 import { Plus, Trash2 } from '@lucide/vue'
 import FormField from '@/components/FormField.vue'
+import MultiSelect from '@/components/MultiSelect.vue'
 import TagsInput from '@/components/TagsInput.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,6 +25,8 @@ import {
   ruleToForm,
   validateRule,
 } from '@/lib/affinity'
+import { clientOptions } from '@/lib/clients'
+import { useClientsStore } from '@/stores/clients'
 
 const props = defineProps<{
   /** Rule being edited (null = new). */
@@ -36,12 +39,23 @@ const props = defineProps<{
 const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ save: [rule: AffinityRule] }>()
 
+const clients = useClientsStore()
+/** Known clients, plus ids saved in the rule that this backend no longer lists. */
+const clientChoices = computed(() => {
+  const opts = clientOptions(clients.list)
+  for (const id of form.clients) {
+    if (!opts.some(o => o.value === id))
+      opts.push({ value: id, label: id, hint: '未知的客户端标识' })
+  }
+  return opts
+})
+
 const form = reactive<RuleForm>(blank())
 const errors = ref<Record<string, string>>({})
 
 function blank(): RuleForm {
   return { name: '', modelRegex: '', pathRegex: '', userAgent: [], keySources: [{ type: 'gjson', value: '' }], valueRegex: '', ttl: '', headers: [], keepOrigin: true,
-    mode: 'inherit', skipRetry: false, includeGroup: true, includeModel: false, includeRule: true, injectCacheKey: false, injectHeader: '' }
+    mode: 'inherit', skipRetry: false, includeGroup: true, includeModel: false, includeRule: true, injectCacheKey: false, injectHeader: '', clients: [] }
 }
 
 watch(open, (v) => {
@@ -49,6 +63,7 @@ watch(open, (v) => {
     return
   Object.assign(form, props.rule ? ruleToForm(props.rule) : blank())
   errors.value = {}
+  void clients.ensureLoaded()
 })
 
 const isEdit = computed(() => props.rule !== null)
@@ -115,6 +130,13 @@ function submit() {
           </div>
           <FormField label="User-Agent 包含" for="aff-ua" :error="errors.user_agent_include" hint="可选，不区分大小写，包含任一项即可；留空 = 不限制。">
             <TagsInput id="aff-ua" v-model="form.userAgent" placeholder="例如 codex，回车添加" />
+          </FormField>
+          <FormField label="客户端" for="aff-clients" :error="errors.client_include" data-testid="aff-clients">
+            <MultiSelect id="aff-clients" v-model="form.clients" :options="clientChoices" :loading="!clients.items" placeholder="搜索客户端…" empty-label="任意客户端" />
+            <template #hint>
+              OmniGate 扩展：只对网关识别出的这些客户端生效（按请求头与 User-Agent 识别，见请求日志的「客户端」列）；不选 = 任意客户端。
+              「未知」表示未能识别的请求。new-api 不支持此字段。
+            </template>
           </FormField>
         </section>
 

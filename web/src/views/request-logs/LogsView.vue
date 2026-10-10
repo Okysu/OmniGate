@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronDown, ChevronRight, RefreshCw, Radio, ScrollText, UserRound, X } from '@lucide/vue'
 import { useIntervalFn } from '@vueuse/core'
+import ClientBadge from '@/components/ClientBadge.vue'
 import CopyButton from '@/components/CopyButton.vue'
 import DataPagination from '@/components/DataPagination.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -17,7 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -34,11 +35,13 @@ import { ERROR_CLASS_HINTS, INBOUND_LABELS } from '@/lib/labels'
 import { isOutcome, OUTCOME_CLASSES, OUTCOME_HINTS, OUTCOME_LABELS, OUTCOMES } from '@/lib/affinity'
 import { isAbortError, queryInt, queryStr } from '@/lib/query'
 import { useAuthStore } from '@/stores/auth'
+import { useClientsStore } from '@/stores/clients'
 
 const PAGE_SIZE = 50
 const ALL = 'all'
 
 const auth = useAuthStore()
+const clients = useClientsStore()
 const route = useRoute()
 const router = useRouter()
 const { money } = useCurrency()
@@ -103,6 +106,8 @@ const affinity = computed(() => {
   const v = queryStr(route.query.affinity)
   return v === 'any' || isOutcome(v) ? v : ALL
 })
+/** phase13 §3: detected client id (validated by the server; the known list is GET /api/clients). */
+const client = computed(() => queryStr(route.query.client) || ALL)
 const modelInput = ref(model.value)
 watch(model, v => (modelInput.value = v))
 
@@ -141,6 +146,7 @@ async function load(opts: { silent?: boolean } = {}) {
       keyId: keyId.value === ALL ? undefined : keyId.value,
       userId: userId.value || undefined,
       affinity: affinity.value === ALL ? undefined : affinity.value,
+      client: client.value === ALL ? undefined : client.value,
     }, ctrl.signal)
     items.value = res.items
     total.value = res.total
@@ -171,6 +177,7 @@ watch(autoRefresh, v => (v ? resume() : pause()))
 const modelOptions = ref<string[]>([])
 const keys = ref<GatewayKey[]>([])
 onMounted(async () => {
+  void clients.ensureLoaded()
   const [m, k] = await Promise.allSettled([modelsApi.list(), auth.can('keys.own') ? keysApi.list() : Promise.resolve({ items: [] as GatewayKey[] })])
   if (m.status === 'fulfilled')
     modelOptions.value = m.value.items.map(e => e.model)
@@ -194,9 +201,9 @@ function onUserPicked(u: User | null) {
 }
 watch(userPick, v => setQuery({ userId: v[0], page: undefined }))
 
-const hasFilters = computed(() => !!model.value || status.value !== ALL || keyId.value !== ALL || !!userId.value || affinity.value !== ALL)
+const hasFilters = computed(() => !!model.value || status.value !== ALL || keyId.value !== ALL || !!userId.value || affinity.value !== ALL || client.value !== ALL)
 function clearFilters() {
-  setQuery({ model: undefined, status: undefined, keyId: undefined, userId: undefined, affinity: undefined, page: undefined })
+  setQuery({ model: undefined, status: undefined, keyId: undefined, userId: undefined, affinity: undefined, client: undefined, page: undefined })
 }
 
 // ---------- rows ----------
@@ -218,7 +225,7 @@ function statusClass(code: number): string {
   return 'border-emerald-500/40 text-emerald-700 dark:text-emerald-400'
 }
 
-const colCount = computed(() => 12 + (seeAll.value ? 2 : 0))
+const colCount = computed(() => 13 + (seeAll.value ? 2 : 0))
 </script>
 
 <template>
@@ -300,6 +307,25 @@ const colCount = computed(() => 12 + (seeAll.value ? 2 : 0))
                 </SelectItem>
               </SelectContent>
             </Select>
+            <Select :model-value="client" @update:model-value="(v) => setQuery({ client: String(v), page: undefined })">
+              <SelectTrigger class="w-full sm:w-40" aria-label="按客户端过滤" data-testid="client-filter">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem :value="ALL">
+                  全部客户端
+                </SelectItem>
+                <SelectGroup v-for="g in clients.groups" :key="g.kind">
+                  <SelectLabel>{{ g.label }}</SelectLabel>
+                  <SelectItem v-for="c in g.items" :key="c.id" :value="c.id">
+                    {{ c.name }}
+                  </SelectItem>
+                </SelectGroup>
+                <SelectItem v-if="client !== ALL && !clients.byId.has(client)" :value="client">
+                  {{ client }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
             <Popover v-if="seeAll" v-model:open="userPopover">
               <PopoverTrigger as-child>
                 <Button variant="outline" class="w-full justify-start font-normal sm:w-auto">
@@ -338,6 +364,7 @@ const colCount = computed(() => 12 + (seeAll.value ? 2 : 0))
                 <TableHead v-if="seeAll">
                   用户
                 </TableHead>
+                <TableHead>客户端</TableHead>
                 <TableHead>模型</TableHead>
                 <TableHead>渠道</TableHead>
                 <TableHead>协议</TableHead>
@@ -373,6 +400,9 @@ const colCount = computed(() => 12 + (seeAll.value ? 2 : 0))
                   </TableCell>
                   <TableCell v-if="seeAll" class="max-w-28 truncate">
                     {{ l.user?.displayName || '—' }}
+                  </TableCell>
+                  <TableCell class="max-w-32">
+                    <ClientBadge :client="l.client" />
                   </TableCell>
                   <TableCell class="font-mono">
                     <span class="block max-w-48 truncate" :title="l.upstreamModel && l.upstreamModel !== l.model ? `${l.model} → ${l.upstreamModel}` : l.model">
@@ -520,6 +550,14 @@ const colCount = computed(() => 12 + (seeAll.value ? 2 : 0))
                           API Key
                         </dt>
                         <dd>{{ l.keyName ?? '—' }}</dd>
+                        <dt class="text-muted-foreground">
+                          客户端
+                        </dt>
+                        <dd data-testid="client-detail">
+                          <ClientBadge :client="l.client" show-version />
+                          <span class="text-muted-foreground font-mono"> · {{ l.client?.id ?? 'unknown' }}</span>
+                          <span v-if="!l.client || l.client.id === 'unknown'" class="text-muted-foreground block">未能从请求头识别客户端（或记录于识别功能上线之前）。网关不记录原始 User-Agent。</span>
+                        </dd>
                         <template v-if="seeAll">
                           <dt class="text-muted-foreground">
                             用户

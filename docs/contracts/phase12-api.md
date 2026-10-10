@@ -39,6 +39,7 @@ Rule {
   include_rule_name: boolean        // 绑定键包含规则名称
   inject_prompt_cache_key: boolean  // OmniGate 扩展，默认 false：OpenAI 格式上游请求体缺少时补全 prompt_cache_key（§2.6）
   inject_session_header: string     // OmniGate 扩展，默认 ''（关闭）：OpenAI 格式上游请求缺少该请求头时补全（§2.6）
+  client_include: string[]          // OmniGate 扩展（Round 13，phase13-api.md §5），默认 []：只对识别出的这些客户端生效
 }
 
 KeySource = { type: 'gjson', path: string }          // 请求体 JSON 路径（gjson 语法，≤256）

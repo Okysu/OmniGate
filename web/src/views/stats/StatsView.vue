@@ -4,6 +4,7 @@ import type { StatsSummary, User } from '@/lib/types'
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Activity, ArrowDownToLine, ArrowUpFromLine, CircleCheck, Coins, DatabaseZap, Gauge, RefreshCw, Timer, UserRound, Wallet, Waypoints } from '@lucide/vue'
+import ClientBadge from '@/components/ClientBadge.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -23,11 +24,15 @@ import { formatCompact, formatDateTime, formatMs, formatNumber, formatPercent } 
 import { isAbortError, queryStr } from '@/lib/query'
 import { cacheHitRate, errorRate, fillDaily, shortDate } from '@/lib/stats'
 import { affinityHitRate, OUTCOME_LABELS, OUTCOMES } from '@/lib/affinity'
+import { CACHE_RATE_LOW, CACHE_RATE_MIN_PROMPT, CACHE_RATE_WARN, CACHE_TONE_CLASSES, cacheRateTone } from '@/lib/clients'
 import { useAuthStore } from '@/stores/auth'
+import { useClientsStore } from '@/stores/clients'
 
 const ColumnChart = defineAsyncComponent(() => import('@/components/charts/ColumnChart.vue'))
 
 const auth = useAuthStore()
+const clients = useClientsStore()
+void clients.ensureLoaded()
 const route = useRoute()
 const router = useRouter()
 const { money } = useCurrency()
@@ -101,6 +106,9 @@ const affinityCounts = computed(() => data.value?.affinity ?? {})
 const affinityTotal = computed(() => Object.values(affinityCounts.value).reduce((a, b) => a + (b ?? 0), 0))
 const affinityRate = computed(() => affinityHitRate(data.value?.affinity))
 const affinityHint = computed(() => OUTCOMES.filter(o => affinityCounts.value[o]).map(o => `${OUTCOME_LABELS[o]} ${formatNumber(affinityCounts.value[o])}`).join(' · ') || undefined)
+// phase13 §4: per detected client (absent on older backends).
+const byClient = computed(() => data.value?.byClient)
+const cacheLegend = `缓存命中率低于 ${Math.round(CACHE_RATE_LOW * 100)}% 标红、低于 ${Math.round(CACHE_RATE_WARN * 100)}% 标黄（输入少于 ${formatCompact(CACHE_RATE_MIN_PROMPT)} Token 的不标记）`
 const hasChannelCache = computed(() => data.value?.byChannel.some(c => c.cacheReadTokens !== undefined) ?? false)
 
 const latencyHint = computed(() => {
@@ -388,6 +396,76 @@ const latencyHint = computed(() => {
           </CardContent>
         </Card>
       </div>
+
+      <Card v-if="byClient" data-testid="stats-clients">
+        <CardHeader>
+          <CardTitle class="text-base">
+            客户端
+          </CardTitle>
+          <CardDescription>按请求头识别的客户端（按请求量排序）。{{ cacheLegend }}。</CardDescription>
+        </CardHeader>
+        <CardContent class="overflow-x-auto">
+          <Skeleton v-if="loading && !data" class="h-32 w-full" />
+          <p v-else-if="!byClient.length" class="text-muted-foreground py-6 text-center text-sm">
+            暂无数据
+          </p>
+          <Table v-else>
+            <TableHeader>
+              <TableRow>
+                <TableHead>客户端</TableHead>
+                <TableHead class="text-right">
+                  请求
+                </TableHead>
+                <TableHead class="text-right">
+                  失败率
+                </TableHead>
+                <TableHead class="text-right">
+                  输入 / 输出
+                </TableHead>
+                <TableHead class="text-right" title="缓存读取 Token ÷ 输入 Token（含缓存读写）">
+                  缓存命中
+                </TableHead>
+                <TableHead class="text-right" title="已绑定的会话中，由绑定渠道处理的请求占比">
+                  亲和命中
+                </TableHead>
+                <TableHead class="text-right">
+                  收费
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="c in byClient" :key="c.client" :data-client="c.client">
+                <TableCell class="max-w-48">
+                  <ClientBadge :client="{ id: c.client, name: c.name, version: null }" />
+                </TableCell>
+                <TableCell class="text-right tabular-nums">
+                  {{ formatNumber(c.requests) }}
+                </TableCell>
+                <TableCell class="text-right tabular-nums" :class="c.errors > 0 ? 'text-destructive' : ''">
+                  {{ formatPercent(errorRate(c.requests, c.errors)) }}
+                </TableCell>
+                <TableCell class="text-right whitespace-nowrap tabular-nums" :title="`输入 ${formatNumber(c.inputTokens)}（含缓存读 ${formatNumber(c.cacheReadTokens)}、缓存写 ${formatNumber(c.cacheWriteTokens)}）/ 输出 ${formatNumber(c.outputTokens)}`">
+                  {{ formatCompact(c.inputTokens) }} / {{ formatCompact(c.outputTokens) }}
+                </TableCell>
+                <TableCell
+                  class="text-right tabular-nums"
+                  :class="CACHE_TONE_CLASSES[cacheRateTone(c.cacheHitRate, c.inputTokens)]"
+                  :title="`缓存读 ${formatNumber(c.cacheReadTokens)} / 输入 ${formatNumber(c.inputTokens)}`"
+                  :data-tone="cacheRateTone(c.cacheHitRate, c.inputTokens)"
+                >
+                  {{ c.cacheHitRate == null ? '—' : formatPercent(c.cacheHitRate) }}
+                </TableCell>
+                <TableCell class="text-right tabular-nums" :title="c.affinityBound ? `命中 ${formatNumber(c.affinityHits)} / 已绑定会话请求 ${formatNumber(c.affinityBound)}` : '没有已绑定会话的请求'">
+                  {{ c.affinityHitRate == null ? '—' : formatPercent(c.affinityHitRate) }}
+                </TableCell>
+                <TableCell class="text-right tabular-nums">
+                  {{ money(c.charge) }}
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
     </template>
   </div>
 </template>

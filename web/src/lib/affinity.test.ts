@@ -214,7 +214,23 @@ describe('affinity OmniGate extensions', () => {
 
   it('defaults the extensions to off for new-api JSON', () => {
     const r = parseConfigJson(NEW_API).config!.rules[0]!
-    expect([r.inject_prompt_cache_key, r.inject_session_header]).toEqual([false, ''])
+    expect([r.inject_prompt_cache_key, r.inject_session_header, r.client_include]).toEqual([false, '', []])
+  })
+
+  it('round-trips client_include (phase13 §5) and keeps the presets client-agnostic', () => {
+    expect(omnigatePresets().map(r => r.client_include)).toEqual([[], [], []])
+    const raw = `{"rules":[{"name":"cc","client_include":[" claude-code ","codex","claude-code",""],"key_sources":[{"type":"anchor"}]},
+      {"name":"any","client_include":null,"key_sources":[{"type":"anchor"}]}]}`
+    const c = parseConfigJson(raw).config!
+    expect(c.rules.map(r => r.client_include)).toEqual([['claude-code', 'codex'], []])
+    expect(parseConfigJson(stringifyConfig(c)).config).toEqual(c)
+    const f = ruleToForm(c.rules[0]!)
+    expect(f.clients).toEqual(['claude-code', 'codex'])
+    f.clients = ['cherry-studio', 'cherry-studio']
+    expect(formToRule(f).client_include).toEqual(['cherry-studio'])
+    // The server's canonical default (client_include: []) equals the console's default.
+    const server = JSON.parse(stringifyConfig(defaultConfig())) as AffinityConfig
+    expect(configEquals(server, defaultConfig())).toBe(true)
   })
 
   it('validates anchor sources and the session header', () => {

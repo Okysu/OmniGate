@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"omnigate/internal/channel"
+	"omnigate/internal/clientdetect"
 )
 
 // Session modes.
@@ -102,6 +103,10 @@ type Rule struct {
 	// (phase12-api.md §2.6).
 	InjectPromptCacheKey bool   `json:"inject_prompt_cache_key"`
 	InjectSessionHeader  string `json:"inject_session_header"`
+	// ClientInclude (OmniGate extension) limits the rule to requests from
+	// these detected clients (clientdetect ids; [] = any client;
+	// phase13-api.md §5).
+	ClientInclude []string `json:"client_include"`
 
 	model, path []*regexp.Regexp
 	value       *regexp.Regexp
@@ -311,6 +316,19 @@ func decodeRule(raw json.RawMessage, p string) (Rule, []string) {
 		fail(".user_agent_include", "最多 %d 项", MaxPatterns)
 	}
 	r.UserAgentInclude = ua
+	clients := []string{}
+	for _, id := range r.ClientInclude {
+		id = strings.TrimSpace(id)
+		switch {
+		case id == "" || slices.Contains(clients, id):
+		case !clientdetect.IsKnown(id):
+			fail(".client_include", "未知的客户端标识 %q（可选值见 GET /api/clients）", id)
+		default:
+			clients = append(clients, id)
+		}
+	}
+	// Bounded by the known ids (deduped, unknown ids rejected).
+	r.ClientInclude = clients
 	switch {
 	case len(r.KeySources) == 0:
 		fail(".key_sources", "至少需要一个 Key 来源")

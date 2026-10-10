@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -23,7 +24,10 @@ type Request struct {
 	// sources read the body by it.
 	Dialect   string
 	UserAgent string
-	Header    http.Header
+	// Client is the detected client id (clientdetect.Detect) that
+	// client_include rules match.
+	Client string
+	Header http.Header
 	// Body is the JSON request body (nil for multipart bodies: gjson key
 	// sources then find nothing).
 	Body []byte
@@ -35,8 +39,8 @@ type Match struct {
 	Value string
 }
 
-// Match returns the first rule that applies to req: its model, path and
-// user-agent conditions match and one of its key sources yields a non-empty
+// Match returns the first rule that applies to req: its model, path,
+// user-agent and client conditions match and one of its key sources yields a non-empty
 // value (the first one in order, trimmed) that matches value_regex when set.
 // A rule whose key is absent is skipped and matching continues with the next
 // rule. nil when the setting is disabled or no rule applies.
@@ -70,6 +74,9 @@ func (c *Config) Match(req Request) *Match {
 
 func (r *Rule) matches(req Request) bool {
 	if !anyMatch(r.model, req.Model) || !anyMatch(r.path, req.Path) {
+		return false
+	}
+	if len(r.ClientInclude) > 0 && !slices.Contains(r.ClientInclude, req.Client) {
 		return false
 	}
 	if len(r.UserAgentInclude) == 0 {

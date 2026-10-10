@@ -122,6 +122,7 @@ export function emptyRule(): AffinityRule {
     include_rule_name: true,
     inject_prompt_cache_key: false,
     inject_session_header: '',
+    client_include: [],
   }
 }
 
@@ -297,6 +298,7 @@ function normalizeRule(raw: unknown): AffinityRule {
     include_rule_name: r.include_rule_name === true,
     inject_prompt_cache_key: r.inject_prompt_cache_key === true,
     inject_session_header: str(r.inject_session_header).trim(),
+    client_include: [...new Set(strList(r.client_include))],
   }
 }
 
@@ -489,6 +491,8 @@ export interface RuleForm {
   injectCacheKey: boolean
   /** '' = off. */
   injectHeader: string
+  /** client_include: detected client ids; [] = any client. */
+  clients: string[]
 }
 
 export type KeySourceType = 'gjson' | 'request_header' | 'anchor'
@@ -516,6 +520,7 @@ export function ruleToForm(r: AffinityRule): RuleForm {
     includeRule: r.include_rule_name,
     injectCacheKey: r.inject_prompt_cache_key,
     injectHeader: r.inject_session_header,
+    clients: [...r.client_include],
   }
 }
 
@@ -540,6 +545,7 @@ export function formToRule(f: RuleForm): AffinityRule {
     include_rule_name: f.includeRule,
     inject_prompt_cache_key: f.injectCacheKey,
     inject_session_header: f.injectHeader.trim(),
+    client_include: [...new Set(f.clients)],
   }, f.headers, f.keepOrigin)
 }
 

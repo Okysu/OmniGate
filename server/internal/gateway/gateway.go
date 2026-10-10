@@ -24,6 +24,7 @@ import (
 	"omnigate/internal/affinity"
 	"omnigate/internal/apperr"
 	"omnigate/internal/channel"
+	"omnigate/internal/clientdetect"
 	"omnigate/internal/identity"
 	"omnigate/internal/journal"
 	"omnigate/internal/keys"
@@ -540,6 +541,9 @@ type reqState struct {
 	abort bool
 	// affinity is the request's session affinity state (nil = no rule applied).
 	affinity *affinity.Session
+	// client is the client detected from the request headers (once per
+	// request; affinity client_include and the log entry use it).
+	client clientdetect.Client
 }
 
 // groupMultiplier is the sell-price multiplier of the request's user group.
@@ -590,6 +594,12 @@ func (g *Gateway) handle(dialect string) http.HandlerFunc {
 		reqID := httpx.RequestID(r.Context())
 		st.entry = &requestlog.Entry{ID: uuid.Must(uuid.NewV7()), StartedAt: st.start, RequestID: reqID, Inbound: dialect,
 			IPPrefix: httpx.IPPrefix(httpx.ClientIP(r.Context()))}
+		// Only the client id and version are logged, never the raw headers.
+		st.client = clientdetect.Detect(r.Header)
+		st.entry.Client = &st.client.ID
+		if st.client.Version != "" {
+			st.entry.ClientVersion = &st.client.Version
+		}
 		defer st.cleanup()
 		gerr := g.serve(w, r, st)
 		if gerr != nil && !st.written {
@@ -689,7 +699,7 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 		models = append(models, rule.FallbackModels...)
 	}
 	st.affinity = g.opts.Affinity.Begin(r.Context(), affinity.Request{UserID: a.UserID, GroupID: a.GroupID, Model: info.Model,
-		Path: r.URL.Path, Dialect: st.dialect, UserAgent: r.UserAgent(), Header: r.Header, Body: st.body})
+		Path: r.URL.Path, Dialect: st.dialect, UserAgent: r.UserAgent(), Client: st.client.ID, Header: r.Header, Body: st.body})
 
 	var lastErr *protocol.GatewayError
 	attempts := 0

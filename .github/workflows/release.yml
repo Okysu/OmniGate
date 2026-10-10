@@ -22,8 +22,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # PR 的新提交取消旧运行；main / 标签的发布不互相取消。
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # 同一分支（含 main）有新提交时取消旧运行，只构建最新的提交；标签发布不互相取消。
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
   contents: read
@@ -41,6 +41,8 @@ jobs:
     name: Build image
     needs: [ci]
     runs-on: ubuntu-latest
+    # 多架构构建通常 20–30 分钟；卡住（例如 QEMU 下的 arm64）时按时失败，不长期占住队列。
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write

@@ -687,6 +687,8 @@ export interface RequestLog {
   /** phase12 §4: session affinity outcome and rule; null when no rule applied / older backends. */
   affinity?: AffinityOutcome | null
   affinityRule?: string | null
+  /** phase13 §3: detected client (rows logged before detection read as unknown); absent on older backends. */
+  client?: LogClient | null
   /** NOT in the contract: shown in the tooltip when the backend splits the multiplier. */
   groupMultiplier?: string | null
   scheduleMultiplier?: string | null
@@ -741,6 +743,24 @@ export interface StatsByChannel {
   cacheHitRate?: number | null
 }
 
+/** phase13 §4: per-client breakdown row (prompt tokens = input + cache read + cache write). */
+export interface StatsByClient {
+  client: string
+  name: string
+  requests: number
+  errors: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  cacheHitRate: number | null
+  /** Affinity hits and bound-session requests (hit + rebound + failover + broken + strict_failed). */
+  affinityHits: number
+  affinityBound: number
+  affinityHitRate: number | null
+  charge: string
+}
+
 export interface StatsSummary {
   from: string
   to: string
@@ -750,6 +770,8 @@ export interface StatsSummary {
   byChannel: StatsByChannel[]
   /** phase12 §4: requests per session affinity outcome; absent on older backends. */
   affinity?: Partial<Record<AffinityOutcome, number>>
+  /** phase13 §4: per detected client, by requests; absent on older backends. */
+  byClient?: StatsByClient[]
 }
 
 export interface Wallet {
@@ -1659,6 +1681,8 @@ export interface AffinityRule {
   inject_prompt_cache_key: boolean
   /** OmniGate extension: header (e.g. Session_id) set to a per-conversation UUID on OpenAI-format upstream requests without it; '' = off. */
   inject_session_header: string
+  /** OmniGate extension (phase13 §5): detected client ids the rule applies to; [] = any client. Absent in new-api documents. */
+  client_include: string[]
 }
 
 export interface AffinityConfig {
@@ -1677,6 +1701,24 @@ export interface AffinityStats {
   maxEntries: number
   /** Live bindings per rule name. */
   rules: Record<string, number>
+}
+
+// Round 13: client detection (phase13-api.md).
+
+export type ClientKind = 'agent' | 'chat' | 'sdk' | 'tool' | 'unknown'
+
+/** GET /api/clients item: a client the backend recognises (clientdetect.Known). */
+export interface ClientInfo {
+  id: string
+  name: string
+  kind: ClientKind
+}
+
+/** request_logs.client / client_version (phase13-api.md §3). */
+export interface LogClient {
+  id: string
+  name: string
+  version: string | null
 }
 
 /** request_logs.affinity (phase12-api.md §4). */

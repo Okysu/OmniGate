@@ -16,6 +16,7 @@ import (
 	"omnigate/internal/apperr"
 	"omnigate/internal/auth"
 	"omnigate/internal/authz"
+	"omnigate/internal/clientdetect"
 	"omnigate/internal/money"
 	"omnigate/internal/platform/db"
 	"omnigate/internal/platform/httpx"
@@ -28,6 +29,13 @@ func NewHandler(pool *db.DB) *Handler { return &Handler{pool: pool} }
 func (h *Handler) Routes(r chi.Router) {
 	r.With(auth.Require(authz.StatsOwn)).Get("/logs", h.list)
 	r.With(auth.Require(authz.StatsOwn)).Get("/stats/summary", h.summary)
+	r.With(auth.Require(authz.StatsOwn)).Get("/clients", h.clients)
+}
+
+// clients lists the known client ids (phase13-api.md §1): values of the
+// request log client filter and of affinity rules' client_include.
+func (h *Handler) clients(w http.ResponseWriter, _ *http.Request) {
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": clientdetect.Known})
 }
 
 type filter struct {
@@ -98,6 +106,17 @@ func parseFilter(r *http.Request, maxDays int) (*filter, error) {
 		f.add("l.affinity = ?", v)
 	default:
 		return nil, apperr.Validation("affinity 只能是 any、"+strings.Join(affinity.Outcomes, "、"), nil)
+	}
+	// Detected client (phase13-api.md §3); rows logged before detection
+	// existed (NULL) count as unknown.
+	switch v := q.Get("client"); {
+	case v == "":
+	case v == clientdetect.Unknown:
+		f.add("(l.client = ? OR l.client IS NULL)", v)
+	case clientdetect.IsKnown(v):
+		f.add("l.client = ?", v)
+	default:
+		return nil, apperr.Validation("client 不是已知的客户端标识（可选值见 GET /api/clients）", nil)
 	}
 	switch q.Get("status") {
 	case "success":
@@ -177,6 +196,17 @@ type logView struct {
 	// rule (phase12-api.md §4); null when no rule applied.
 	Affinity     *string `json:"affinity"`
 	AffinityRule *string `json:"affinityRule"`
+	// Client is the detected client (phase13-api.md §3); rows logged before
+	// detection existed read as unknown.
+	Client clientRef `json:"client"`
+}
+
+// clientRef is a logged client: id, display name and version (null = not
+// parsed).
+type clientRef struct {
+	ID      string  `json:"id"`
+	Name    string  `json:"name"`
+	Version *string `json:"version"`
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +228,8 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		l.fallback_path, l.ttft_ms, l.duration_ms, l.input_tokens, l.output_tokens, l.cache_read_tokens, l.cache_write_tokens,
 		l.reasoning_tokens, l.usage_estimated, l.cost_nano, l.charge_nano, l.subscription_id, l.quota_charge_nano,
 		COALESCE(l.served_model, l.model), l.channel_tier, l.image_count, l.image_input_tokens, l.price_multiplier,
-		l.audio_seconds, l.audio_input_tokens, l.audio_output_tokens, l.input_characters, l.price_tier, l.affinity, l.affinity_rule
+		l.audio_seconds, l.audio_input_tokens, l.audio_output_tokens, l.input_characters, l.price_tier, l.affinity, l.affinity_rule,
+		l.client, l.client_version
 		FROM request_logs l LEFT JOIN users u ON u.id = l.user_id`+f.sql()+
 		` ORDER BY l.started_at DESC LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
@@ -214,12 +245,13 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		var ttft *int32
 		var dur int32
 		var cost, charge, quota int64
+		var client, clientVersion *string
 		if err := rows.Scan(&v.ID, &v.RequestID, &v.StartedAt, &uid, &uname, &v.KeyID, &v.KeyName, &v.Inbound, &v.Model, &v.ChannelID,
 			&v.ChannelName, &v.UpstreamModel, &v.Stream, &v.StatusCode, &v.ErrorClass, &v.ErrorMessage, &v.Attempts, &v.FallbackPath,
 			&ttft, &dur, &v.Usage.Input, &v.Usage.Output, &v.Usage.CacheRead, &v.Usage.CacheWrite, &v.Usage.Reasoning,
 			&v.Usage.Estimated, &cost, &charge, &v.SubscriptionID, &quota, &v.ServedModel, &v.ChannelTier, &v.ImageCount,
 			&v.Usage.ImageInputTokens, &v.PriceMultiplier, &v.AudioSeconds, &v.Usage.AudioInputTokens, &v.Usage.AudioOutputTokens,
-			&v.Usage.InputCharacters, &v.PriceTier, &v.Affinity, &v.AffinityRule); err != nil {
+			&v.Usage.InputCharacters, &v.PriceTier, &v.Affinity, &v.AffinityRule, &client, &clientVersion); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
@@ -233,6 +265,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 			t := int64(*ttft)
 			v.TTFTMs = &t
 		}
+		v.Client = clientOf(client, clientVersion)
 		v.DurationMs = int64(dur)
 		v.UsageEstimated = v.Usage.Estimated
 		v.Charge = money.Amount(charge).String()
@@ -272,6 +305,63 @@ func numericString(s *string) string {
 		out = "-" + out
 	}
 	return out
+}
+
+// clientOf is the API form of a logged client (NULL = unknown).
+func clientOf(id, version *string) clientRef {
+	c := clientRef{ID: clientdetect.Unknown, Version: version}
+	if id != nil && *id != "" {
+		c.ID = *id
+	}
+	c.Name = clientdetect.Name(c.ID)
+	return c
+}
+
+// boundOutcomes are the affinity outcomes of requests whose session already
+// had a binding: the denominator of the affinity hit rate, hit ÷ bound
+// (phase12-api.md §6).
+var boundOutcomes = "'" + strings.Join([]string{affinity.OutcomeHit, affinity.OutcomeRebound, affinity.OutcomeFailover,
+	affinity.OutcomeBroken, affinity.OutcomeStrictFailed}, "', '") + "'"
+
+// ratio is n ÷ d, nil when d is 0.
+func ratio(n, d int64) *float64 {
+	if d <= 0 {
+		return nil
+	}
+	r := float64(n) / float64(d)
+	return &r
+}
+
+// byClient is the per-client breakdown of the summary (phase13-api.md §4):
+// requests, errors, prompt / output tokens, cache hit rate, affinity hit rate
+// and charge per detected client; rows logged before detection existed
+// (NULL) count as unknown.
+func (h *Handler) byClient(ctx context.Context, where string, args []any) ([]map[string]any, error) {
+	const client = "COALESCE(l.client, '" + clientdetect.Unknown + "')"
+	rows, err := h.pool.Query(ctx, `SELECT `+client+`, count(*), count(*) FILTER (WHERE status_code >= 400),
+		coalesce(sum(input_tokens + cache_read_tokens + cache_write_tokens), 0), coalesce(sum(output_tokens), 0),
+		coalesce(sum(cache_read_tokens), 0), coalesce(sum(cache_write_tokens), 0),
+		count(*) FILTER (WHERE affinity = '`+affinity.OutcomeHit+`'), count(*) FILTER (WHERE affinity IN (`+boundOutcomes+`)),
+		`+h.pool.Dialect().SumText("charge_nano")+`
+		FROM request_logs l`+where+` GROUP BY `+client+` ORDER BY count(*) DESC, `+client, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []map[string]any{}
+	for rows.Next() {
+		var id string
+		var n, e, prompt, o, read, write, hits, bound int64
+		var c *string
+		if err := rows.Scan(&id, &n, &e, &prompt, &o, &read, &write, &hits, &bound, &c); err != nil {
+			return nil, err
+		}
+		out = append(out, map[string]any{"client": id, "name": clientdetect.Name(id), "requests": n, "errors": e,
+			"inputTokens": prompt, "outputTokens": o, "cacheReadTokens": read, "cacheWriteTokens": write,
+			"cacheHitRate": cacheHitRate(read, prompt), "affinityHits": hits, "affinityBound": bound,
+			"affinityHitRate": ratio(hits, bound), "charge": numericString(c)})
+	}
+	return out, rows.Err()
 }
 
 // cacheHitRate is the prompt cache hit ratio: cache-read tokens / prompt
@@ -418,6 +508,13 @@ func (h *Handler) buildSummary(ctx context.Context, f *filter) (map[string]any, 
 		aff[o] = n
 	}
 	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	clients, err := h.byClient(ctx, where, f.args)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{"from": f.from, "to": f.to, "totals": totals, "daily": daily, "byModel": byModel, "byChannel": byChannel,
-		"affinity": aff}, rows.Err()
+		"affinity": aff, "byClient": clients}, nil
 }

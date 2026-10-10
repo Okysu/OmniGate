@@ -172,6 +172,49 @@ func TestDecodeExtensions(t *testing.T) {
 	}
 }
 
+func TestClientInclude(t *testing.T) {
+	// new-api documents and the presets have no client_include: any client.
+	for _, c := range []Config{mustDecode(t, newAPIJSON), Default()} {
+		for _, r := range c.Rules {
+			if r.ClientInclude == nil || len(r.ClientInclude) != 0 {
+				t.Errorf("%s: client_include = %#v", r.Name, r.ClientInclude)
+			}
+		}
+	}
+	c := mustDecode(t, `{"rules":[
+	  {"name":"cc","client_include":[" claude-code ","codex","claude-code",""],"key_sources":[{"type":"request_header","key":"Session_id"}]},
+	  {"name":"rest","client_include":null,"key_sources":[{"type":"request_header","key":"Session_id"}]}
+	]}`)
+	if got := c.Rules[0].ClientInclude; strings.Join(got, ",") != "claude-code,codex" {
+		t.Fatalf("canonical client_include = %v", got)
+	}
+	b, _ := json.Marshal(c)
+	if !strings.Contains(string(b), `"client_include":["claude-code","codex"]`) || !strings.Contains(string(b), `"client_include":[]`) {
+		t.Fatalf("canonical = %s", b)
+	}
+	h := http.Header{}
+	h.Set("Session_id", "s1")
+	for client, want := range map[string]string{"claude-code": "cc", "codex": "cc", "cherry-studio": "rest", "unknown": "rest", "": "rest"} {
+		m := c.Match(Request{Model: "m", Path: "/v1/chat/completions", Client: client, Header: h})
+		if m == nil || m.Rule.Name != want {
+			t.Errorf("client %q: matched %+v, want %s", client, m, want)
+		}
+	}
+	// "unknown" is a valid id (requests no rule recognised).
+	if c := mustDecode(t, `{"rules":[{"name":"u","client_include":["unknown"],"key_sources":[{"type":"anchor"}]}]}`); c.Rules[0].ClientInclude[0] != "unknown" {
+		t.Error("unknown must be accepted")
+	}
+	for name, tc := range map[string]struct{ raw, want string }{
+		"unknown id": {`{"rules":[{"name":"r","client_include":["claude-code","Claude Code"],"key_sources":[{"type":"anchor"}]}]}`,
+			"rules[0].client_include：未知的客户端标识 \"Claude Code\""},
+		"not array": {`{"rules":[{"name":"r","client_include":"codex","key_sources":[{"type":"anchor"}]}]}`, "rules[0]：格式错误"},
+	} {
+		if _, msg := Decode(json.RawMessage(tc.raw)); !strings.Contains(msg, tc.want) {
+			t.Errorf("%s: message %q does not contain %q", name, msg, tc.want)
+		}
+	}
+}
+
 func TestDecodeRejects(t *testing.T) {
 	rule := func(extra string) string {
 		return `{"rules":[{"name":"r","key_sources":[{"type":"gjson","path":"prompt_cache_key"}]` + extra + `}]}`
