@@ -3,7 +3,8 @@
 > 状态：**已实现**。通用约定同前；所有 SQL 同时支持 PostgreSQL 与 SQLite（迁移 `00019_session_affinity`）。
 > 需求原文：“提示词缓存命中率低”：上游网关 / 号池按客户端原生的会话标识把会话留在同一个账号上，而 OmniGate 丢弃了这些标识，
 > 自己的路由又把一段对话分散到多个渠道。规则模型参照 new-api 的“渠道亲和（channel affinity）”，JSON 结构相同，模板可直接复制。
-> 设计是透明的：只透传客户端自己的标识并把会话固定到渠道，不针对任何具体上游。
+> 设计是透明的：透传客户端自己的标识并把会话固定到渠道，不针对任何具体上游；客户端没有标识时补全的也只是 OpenAI / Codex 的标准标识
+> （`prompt_cache_key`、`Session_id`，§2.6）。
 
 ## 1. 设置 `gateway.affinity`
 
@@ -36,10 +37,13 @@ Rule {
   include_using_group: boolean      // 绑定键包含用户的用户组 id
   include_model_name: boolean       // 绑定键包含请求的逻辑模型
   include_rule_name: boolean        // 绑定键包含规则名称
+  inject_prompt_cache_key: boolean  // OmniGate 扩展，默认 false：OpenAI 格式上游请求体缺少时补全 prompt_cache_key（§2.6）
+  inject_session_header: string     // OmniGate 扩展，默认 ''（关闭）：OpenAI 格式上游请求缺少该请求头时补全（§2.6）
 }
 
 KeySource = { type: 'gjson', path: string }          // 请求体 JSON 路径（gjson 语法，≤256）
           | { type: 'request_header', key: string }  // 请求头名称（字母、数字、- 和 _，≤64）
+          | { type: 'anchor' }                       // OmniGate 扩展：对话锚点（§2.1.1），不接受 key / path
 
 Operation = { mode: 'pass_headers', value: string[] | string, keep_origin: boolean }  // value 1–64 个请求头；字符串按逗号分隔
 ```
@@ -47,13 +51,16 @@ Operation = { mode: 'pass_headers', value: string[] | string, keep_origin: boole
 校验（`422`，`details["gateway.affinity"]` 为中文消息，列出出错字段路径，如 `rules[0].key_sources[0].type：…`，最多 5 处）：
 
 - new-api 内部的 Key 来源类型 `context_int`、`context_string` 被拒绝（OmniGate 没有对应的请求上下文），其他未知类型同样拒绝；
+  `anchor` 带 `key` 或 `path` 被拒绝；
+- `inject_session_header` 非空时必须是合法的请求头名称，且不能是下面列出的禁止透传的请求头；
 - `param_override_template` 中 `pass_headers` 以外的操作（`set`、`delete`、`move` …）、`operations` 以外的顶层键（new-api 旧版的扁平参数覆盖）
   以及操作上的其他非空字段（如 `conditions`）被拒绝；
 - 正则编译失败、名称重复、超出数量限制被拒绝；
 - 透传请求头与渠道 `config.headers` 规则相同：名称格式校验，且禁止 `authorization`、`x-api-key`、`cookie`、`host`、`content-length`、
   `connection`、`transfer-encoding`、`te`、`upgrade`、`keep-alive`、`proxy-authorization`、`proxy-connection`、`content-type`、`accept-encoding`。
 
-宽松之处（保证 new-api 的 JSON 可直接粘贴）：未知字段忽略；`null` 数组视为 `[]`；缺少的全局字段取默认值；缺少 `rules` 视为 `[]`。
+宽松之处（保证 new-api 的 JSON 可直接粘贴）：未知字段忽略；`null` 数组视为 `[]`；缺少的全局字段取默认值；缺少 `rules` 视为 `[]`；
+缺少 OmniGate 扩展的两个规则选项（`inject_prompt_cache_key`、`inject_session_header`）时为关闭。
 保存后的值是规范化的形式（数组从不为 `null`，正则去空白与重复）。
 
 **生效的会话保持模式**：规则 `session_mode` 为 `off` / `prefer` / `strict` 时用规则自己的；为 `inherit` 时用全局；为空（new-api 旧版）时
@@ -61,8 +68,26 @@ Operation = { mode: 'pass_headers', value: string[] | string, keep_origin: boole
 
 ### 1.1 默认值（内置预设）
 
-默认开启，带两条规则（与 new-api 的两条规则相同，做了以下调整，使使用非 Claude / 非 GPT 模型的 Claude Code / Codex 用户也受益——
-这些 Key 来源只有这两个客户端会发送，放宽模型匹配是安全的）：
+默认开启，按顺序带三条规则。第一条生效的规则胜出，所以 `gpt session` 排在最前：GPT 模型无论从哪个入口（`/v1/chat/completions`、
+`/v1/responses`、`/v1/messages`，如 Claude Code 调用 gpt-* 模型）进来都由它处理；后两条（与 new-api 的两条规则相同，放宽了模型匹配，
+这些 Key 来源只有这两个客户端会发送）实际上只处理其他模型。
+
+`gpt session`：
+
+| 字段 | 值 |
+| --- | --- |
+| `model_regex` | `["^gpt-"]` |
+| `path_regex` | `[]`（任意路径） |
+| `key_sources` | gjson `prompt_cache_key` → 请求头 `Session_id` → 请求头 `Session-Id` → gjson `metadata.user_id` → 请求头 `X-Claude-Code-Session-Id` → gjson `user` → `anchor` |
+| `pass_headers`（`keep_origin: true`） | 与 `codex cli trace` 相同的 16 个 Codex 请求头 |
+| `inject_prompt_cache_key` | `true` |
+| `inject_session_header` | `"Session_id"` |
+| `session_mode` / 作用域 | `prefer`；`include_using_group`、`include_rule_name`；不含模型 |
+
+说明：Claude Code 的 `metadata.user_id` 含会话 id，原样使用（绑定键是哈希）；Chat 的 `user` 是终端用户 id 而不是会话，放在对话锚点之前作为兜底
+（同一终端用户的流量留在同一渠道）；`previous_response_id` 每轮都变，**不**作为来源。
+
+`codex cli trace` / `claude cli trace`：
 
 | | `codex cli trace` | `claude cli trace` |
 | --- | --- | --- |
@@ -73,8 +98,11 @@ Operation = { mode: 'pass_headers', value: string[] | string, keep_origin: boole
 | `session_mode` | `prefer`（不是 strict：可用性优先，管理员可改为 strict） | `prefer` |
 | 作用域 | `include_using_group`、`include_rule_name`；不含模型 | 同左 |
 
-网关实际提供的路径：`POST /v1/responses`（没有 WebSocket 或其他 Responses 入口）、`POST /v1/messages`；`/v1/messages/count_tokens`
-由单独的处理器提供，不参与会话亲和。
+网关实际提供的路径：`POST /v1/chat/completions`、`POST /v1/responses`（没有 WebSocket 或其他 Responses 入口）、`POST /v1/messages`；
+`/v1/messages/count_tokens` 由单独的处理器提供，不参与会话亲和。
+
+设置值保存在数据库中时（`sources["gateway.affinity"] = "db"`）不会自动获得新增的预设：在控制台点击“填充模板”加入 `gpt session`
+（新规则插在它在预设中后面那条已有规则之前，原样保存过旧默认值时就是第一条），确认它排在会处理 GPT 请求的其他规则之前（可“上移”），再保存。
 
 ## 2. 行为
 
@@ -83,7 +111,22 @@ Operation = { mode: 'pass_headers', value: string[] | string, keep_origin: boole
 按顺序检查规则。一条规则**生效**的条件：`model_regex`、`path_regex`、`user_agent_include` 都匹配，**且**取到非空的会话值——
 按 `key_sources` 的顺序取第一个非空值（去除首尾空白；gjson 结果为 JSON `null` 视为没有），设置了 `value_regex` 时必须匹配。
 取不到值（或值不匹配）时继续检查下一条规则（与 new-api 相同）。第一条生效的规则胜出；没有规则生效时请求完全按原来的方式处理。
-multipart / 二进制请求体（图片编辑、语音转写）的 gjson 来源取不到值。
+multipart / 二进制请求体（图片编辑、语音转写）的 gjson 与 anchor 来源取不到值。
+
+#### 2.1.1 对话锚点（`anchor`，OmniGate 扩展）
+
+客户端不发送任何会话标识时的兜底：从请求体计算对话指纹，值为 SHA-256 的十六进制串。只取对话开头的部分，因此同一段对话的后续轮次
+（只在末尾追加消息）得到同一个值，兄弟对话（第一条用户消息不同）得到不同的值。按入口协议：
+
+- OpenAI Chat：`messages` 开头连续的 `system` / `developer` 消息，加第一条 `user` 消息；
+- OpenAI Responses：`instructions`，加 `input`——字符串即第一条用户消息；数组时取开头的 `system` / `developer` 项和第一条 `user` 项
+  （没有 `role` 的项，如函数调用、reasoning，与 assistant 一样结束“开头”）；
+- Anthropic Messages：`system`（字符串或文本块），加第一条 `user` 消息。
+
+编码：依次哈希角色和内容单元，每个单元为 `标签=完整长度:前 4 KiB 字节\0`（长度前缀，编码无歧义，超大提示词与内联图片的开销有上限）；
+字符串内容与 `text` / `input_text` / `output_text` 块哈希其文本（两种写法等价），其他块哈希类型及除 `type`、`cache_control`
+以外的各字段原始 JSON（`cache_control` 会在轮次之间移动）。没有用户消息、其他协议（embeddings、图片、语音）或 multipart 请求时取不到值。
+绑定键总是包含用户 id，锚点不会跨用户生效。
 
 ### 2.2 绑定键与存储
 
@@ -132,6 +175,25 @@ multipart / 二进制请求体（图片编辑、语音转写）的 gjson 来源�
 `service_tier` 仍是提示类字段（它选择上游的处理 / 计费档位，OpenAI 兼容的 Chat 上游很少实现，只在同协议直通时保留）。
 Chat → Anthropic、Anthropic → Chat 不变（Responses → Anthropic 经 Chat 转换时仍丢弃并告警 `prompt_cache_key`）。
 
+### 2.6 上游会话标识补全（OmniGate 扩展）
+
+上游号池（如在多个 Codex 账号前面的 OpenAI 格式网关）按会话标识把对话留在同一个上游账号上。Anthropic → OpenAI 转换把
+`metadata.user_id` 变成 OpenAI 的 `user`（哈希值），号池不把它当作会话；普通 Chat 客户端根本不发送会话标识。规则生效（取到会话值）时，
+两个选项给上游请求补上稳定的、按对话区分的标识：
+
+- 只作用于 **OpenAI 格式**的上游请求：Chat Completions 或 Responses（协议转换之后的上游协议）；Anthropic 上游、embeddings / 图片 / 语音、
+  自定义协议插件不补全。每次尝试、每个渠道都补全。
+- 值由与绑定键相同的内容派生（用户 id + 规则的 `include_*` 部分 + 会话值）：`d = SHA-256("omnigate-affinity/upstream\0" ‖ 绑定键)`，
+  所以按用户、按对话区分，从不发送原始会话值，也不发送内存中的绑定键本身。
+- `inject_prompt_cache_key`：最终的上游请求体没有非空的 `prompt_cache_key` 时设为 `"og-" + hex(d[0:16])`（32 个十六进制字符）。
+  客户端的值（任何非空值）永远不会被覆盖。字段缺失时插入为第一个成员，其余字节不变；为空串或 `null` 时替换。在插件 hook 之前加入
+  （hook 看得到、签名覆盖它）。
+- `inject_session_header`：上游请求没有该请求头（客户端经 `pass_headers` 透传的、渠道 `config.headers` 或插件 hook 设置的都算有）时，
+  设为由 `d[0:16]` 构成的 UUID 字符串（小写 8-4-4-4-12，版本位 8、RFC 4122 变体位，即合法的 UUIDv8），在其他请求头都设置完之后加入。
+  内置预设用 `Session_id`：Codex 原生的会话请求头，OpenAI 格式号池（如默认配置的 AxonHub，从任意路径的 Codex `Session_id` 提取 trace）
+  与 Codex 后端都以它为会话标识，于是普通 Chat 客户端、Claude Code → GPT 的转换请求无需任何上游配置也能在上游保持会话。
+- 请求日志只记录规则名称与结果，不记录补全的值。
+
 ## 3. 管理端绑定缓存（挂在 `/api/admin`）
 
 | 方法与路径 | 权限 | 说明 |
@@ -177,11 +239,13 @@ Chat → Anthropic、Anthropic → Chat 不变（Responses → Anthropic 经 Cha
 - **系统设置 → 会话亲和**（`settings.write`）：放在“网关”分组之后，单独保存（带设置的整体 `version`）。会话亲和是全局设置，作用于所有层级
   （自有、共享、平台渠道），而路由规则只作用于平台层级，所以放在系统设置而不是路由页。
   - 全局选项：启用、默认会话保持、成功后切换绑定、渠道不可用时保留绑定、默认 TTL、最大缓存条目。
-  - 规则表：名称与模型 / 路径正则；Key 来源（`gjson` / `header` 徽标 + 路径 / 请求头）；会话保持（图标 + 模式，“规则单独设置 / 继承全局”）；
-    TTL（“全局默认” / `Ns`）；作用域徽标（分组 / 模型 / 规则）与透传请求头数；缓存（该规则的条目数）；操作（编辑；更多：上移、下移、复制、
+  - 规则表：名称与模型 / 路径正则；Key 来源（`gjson` / `header` / `anchor` 徽标 + 路径 / 请求头，最多显示 3 个，排在后面的 `anchor` 也显示）；会话保持（图标 + 模式，“规则单独设置 / 继承全局”）；
+    TTL（“全局默认” / `Ns`）；作用域徽标（分组 / 模型 / 规则）、透传请求头数与补全标记（“补全 prompt_cache_key · Session_id”）；缓存（该规则的条目数）；操作（编辑；更多：上移、下移、复制、
     清空该规则缓存、删除）。表格在卡片内横向滚动。
   - “可视化 / JSON”切换：JSON 编辑器读写 §1 的完整 JSON，实时显示解析与校验错误；可粘贴 new-api 的设置。
-  - “填充模板”加入内置预设（§1.1；同名规则被替换，其他规则保留）；“添加规则”打开规则编辑抽屉；“恢复默认”（值来自数据库时）删除数据库中的值。
+  - 规则编辑抽屉：Key 来源类型“gjson（请求体）/ 请求头 / 对话锚点”（锚点无输入框）；“上游会话标识”分组中的“补全 prompt_cache_key”开关与
+    “补全会话请求头”输入框（占位 `Session_id`）。
+  - “填充模板”加入内置预设（§1.1；同名规则被替换，其他规则保留；新规则插在它在预设中后面那条已有规则之前，否则追加到末尾）；“添加规则”打开规则编辑抽屉；“恢复默认”（值来自数据库时）删除数据库中的值。
   - 底部：缓存条目 N / 上限、刷新缓存、清空全部缓存（确认对话框）。
 - **请求日志**：渠道列显示“亲和·命中”等徽标，详情中显示结果、规则与说明；新增“会话亲和”过滤。
 - **统计**：新增“提示词缓存命中率”（缓存读 / 输入）与“会话亲和命中”（已绑定会话中由绑定渠道处理的比例：`hit ÷ (hit + rebound + failover + broken + strict_failed)`）
@@ -190,6 +254,8 @@ Chat → Anthropic、Anthropic → Chat 不变（Responses → Anthropic 经 Cha
 ## 7. 实现差异
 
 - new-api 的 `context_int` / `context_string` Key 来源与 `pass_headers` 以外的参数覆盖操作不支持（校验时拒绝，见 §1）。
+- OmniGate 扩展：`anchor` Key 来源（§2.1.1）、`inject_prompt_cache_key` 与 `inject_session_header`（§2.6）。new-api 的 JSON 不含它们，
+  照样可以粘贴；含扩展的设置粘贴回 new-api 时这些字段 / 来源不被支持。
 - 绑定只在本实例内存中（单实例部署），重启后清空；修改或删除规则不会自动清除它已有的绑定（TTL 到期或手动清空）。
 - 绑定只调整层级内的顺序（§2.3），不会让平台渠道越过用户自己的或共享的渠道。
 - 绑定的渠道熔断器处于 `half_open` 且探测名额已被占用时，这次请求跳过它，由其他渠道处理（之后按 `switch_on_success` 改绑）。

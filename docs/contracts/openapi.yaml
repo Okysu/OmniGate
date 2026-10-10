@@ -11858,7 +11858,8 @@ components:
       type: object
       description: |
         会话亲和（Round 12，`phase12-api.md` §1）。字段名与 new-api 的“渠道亲和”相同（snake_case），new-api 的 JSON 可直接写入：
-        未知字段忽略、`null` 数组视为空、缺少的全局字段取默认值。默认值为内置的 Codex CLI / Claude Code 两条规则（§1.1）。
+        未知字段忽略、`null` 数组视为空、缺少的全局字段取默认值。默认值为内置的 `gpt session`、`codex cli trace`、`claude cli trace`
+        三条规则（§1.1，按此顺序）。
         校验失败 → 422，`details["gateway.affinity"]` 列出字段路径（如 `rules[0].key_sources[0].type`）。
       required: [enabled, session_mode, switch_on_success, keep_on_channel_disabled, max_entries, default_ttl_seconds, rules]
       properties:
@@ -11886,12 +11887,12 @@ components:
           type: array
           minItems: 1
           maxItems: 16
-          description: 按顺序取第一个非空值；`context_int` / `context_string`（new-api 内部类型）被拒绝
+          description: 按顺序取第一个非空值；`context_int` / `context_string`（new-api 内部类型）被拒绝；`anchor`（OmniGate 扩展，对话锚点，§2.1.1）不接受 key / path
           items:
             type: object
             required: [type]
             properties:
-              type: { type: string, enum: [gjson, request_header] }
+              type: { type: string, enum: [gjson, request_header, anchor] }
               path: { type: string, maxLength: 256, description: gjson 路径 }
               key: { type: string, maxLength: 64, description: 请求头名称 }
         value_regex: { type: string }
@@ -11919,6 +11920,15 @@ components:
         include_using_group: { type: boolean }
         include_model_name: { type: boolean }
         include_rule_name: { type: boolean }
+        inject_prompt_cache_key:
+          type: boolean
+          default: false
+          description: OmniGate 扩展（§2.6）：OpenAI 格式（Chat / Responses）上游请求体没有非空 prompt_cache_key 时补全 `og-` + 32 个十六进制字符（按用户、按对话派生）
+        inject_session_header:
+          type: string
+          default: ""
+          maxLength: 64
+          description: OmniGate 扩展（§2.6）：OpenAI 格式上游请求没有该请求头时补全为按对话派生的 UUID（v8）；空 = 关闭；禁止透传的请求头不允许
 
     AffinityStats:
       type: object

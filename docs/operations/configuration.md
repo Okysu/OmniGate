@@ -1654,10 +1654,18 @@ curl -sS https://gateway.example.com/api/admin/prices \
 上游缓存命中率随之下降。会话亲和按客户端**自己的**会话标识把同一会话固定到上次成功处理它的渠道：
 
 - Codex CLI：请求体 `prompt_cache_key`（会话 id），或请求头 `Session_id` / `Session-Id`；
-- Claude Code：请求体 `metadata.user_id`（含会话 id），或请求头 `X-Claude-Code-Session-Id`。
+- Claude Code：请求体 `metadata.user_id`（含会话 id），或请求头 `X-Claude-Code-Session-Id`；
+- 其他客户端（普通 OpenAI Chat 客户端等）什么都不发送时：**对话锚点**——开头的 system / developer 指令加第一条用户消息的指纹，
+  同一段对话后续轮次不变，不同对话不同。
 
-默认开启，内置上面两条规则（“优先保持”：绑定的渠道失败时仍按正常重试规则换渠道，可用性优先）。规则命中时还会把会话相关的客户端请求头
-（`Session_id`、`X-Codex-Turn-Metadata`、`X-Stainless-*`、`Anthropic-Beta`、客户端的 `User-Agent` 等）转发给上游。
+默认开启，内置三条规则（都是“优先保持”：绑定的渠道失败时仍按正常重试规则换渠道，可用性优先），按顺序：
+
+1. `gpt session`：所有 `gpt-*` 模型，不限入口（Chat、Responses、Claude Code 走 `/v1/messages` 调用 GPT 也算），依次取上面的标识，
+   最后用对话锚点兜底；并给 OpenAI 格式的上游请求补全会话标识（见 18.2）；
+2. `codex cli trace`、`claude cli trace`：其他模型的 Codex CLI / Claude Code 请求。
+
+规则命中时还会把会话相关的客户端请求头（`Session_id`、`X-Codex-Turn-Metadata`、`X-Stainless-*`、`Anthropic-Beta`、客户端的 `User-Agent` 等）
+转发给上游。
 
 ### 18.2 上游号池缓存命中
 
@@ -1666,18 +1674,35 @@ AxonHub 等上游网关 / 账号池同样是根据客户端原生的请求头和
 标识，`prompt_cache_key` / `safety_identifier` 在 Responses ⇄ Chat 转换时也会保留，**不需要任何针对具体上游的配置**。
 如果渠道本身配置了同名请求头（渠道 `config.headers` 或插件），默认保留渠道的值（`keep_origin`）。
 
+客户端自己没有会话标识、或标识在协议转换中丢失时（Claude Code 调用 GPT：Anthropic → OpenAI 转换把 `metadata.user_id` 变成哈希后的
+`user`，号池不把它当作会话），`gpt session` 规则给 **OpenAI 格式**（Chat / Responses）的上游请求补全两个标准标识：
+
+- 请求头 `Session_id`：按对话稳定的 UUID。它是 Codex 原生的会话请求头，OpenAI 格式号池（例如默认配置的 AxonHub）与 Codex 后端都以它
+  识别会话，所以普通 Chat 客户端和 Claude Code → GPT 的请求在上游也会留在同一个账号上，**上游无需任何配置或重启**；
+- 请求体 `prompt_cache_key`：`og-` 开头的稳定值（OpenAI 的标准字段，用于提示词缓存路由）。
+
+两者都按用户、按对话由绑定键派生（不发送原始会话标识），客户端已带上的值（或渠道配置的同名请求头）永远不会被覆盖；Anthropic 格式的上游不补全。
+规则编辑抽屉中对应“补全 prompt_cache_key”开关与“补全会话请求头”输入框，自定义规则也可以使用。
+
+可选（**不是必需的**）：如果上游号池支持把请求体字段当作会话标识，也可以让它额外识别标准字段 `prompt_cache_key`，例如 AxonHub 的
+`server.trace.extra_trace_body_fields`（环境变量 `AXONHUB_SERVER_TRACE_EXTRA_TRACE_BODY_FIELDS=prompt_cache_key`）。这只是通用上游选项的
+一个例子，OmniGate 不依赖它。
+
 部署在 nginx 后面时，务必开启 `underscores_in_headers on;`（见 [7. 反向代理](#7-反向代理)），否则 `Session_id` 这类请求头在到达 OmniGate 前就被丢弃。
 
 ### 18.3 配置
 
 在“系统设置 → 会话亲和”中编辑（需要 `settings.write`），也可以通过 `PATCH /api/admin/settings` 的 `gateway.affinity` 修改；保存后立即生效（其他实例 5 秒内）。
 
-- 规则格式与 new-api 的“渠道亲和”相同，new-api 的 JSON 可以直接粘贴到 JSON 编辑器。Key 来源只支持 `gjson`（请求体路径）与 `request_header`；
+- 规则格式与 new-api 的“渠道亲和”相同，new-api 的 JSON 可以直接粘贴到 JSON 编辑器。Key 来源支持 `gjson`（请求体路径）、`request_header`
+  与 OmniGate 扩展的 `anchor`（对话锚点，建议放在最后兜底）；规则的 OmniGate 扩展选项 `inject_prompt_cache_key`、`inject_session_header` 见 18.2；
   `param_override_template` 只支持 `pass_headers`；`Authorization`、`x-api-key`、`Cookie`、`Host`、`Content-Length` 等不能透传。
 - 会话保持模式：`off`（只透传请求头）、`prefer`（默认）、`strict`（绑定渠道失败直接返回错误，缓存优先、可用性较低）。规则可单独设置，
   也可继承全局；new-api 的 `skip_retry_on_failure: true` 等同于 `strict`。
 - 绑定键总是包含用户本身（不同用户的会话互不影响），并按规则勾选的作用域加入用户组、模型、规则名称；内存中只保存其 SHA-256，日志不记录原始值。
-- “填充模板”恢复内置预设（同名规则被替换，其他规则保留）；“恢复默认”删除数据库中的值，回到内置预设。
+- “填充模板”恢复内置预设（同名规则被替换，其他规则保留；新规则按预设顺序插入）；“恢复默认”删除数据库中的值，回到内置预设。
+- **升级提示**：会话亲和设置保存过（来源为“数据库”）的实例不会自动获得新的 `gpt session` 预设。点击“填充模板”加入它，确认它排在
+  第一位（或至少排在其他会处理 GPT 请求的规则之前，可用“上移”），再保存。
 
 ### 18.4 运维
 

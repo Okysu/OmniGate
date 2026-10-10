@@ -1628,8 +1628,8 @@ export type AffinityMode = 'off' | 'prefer' | 'strict'
 export type AffinityRuleMode = '' | 'inherit' | AffinityMode
 
 export interface AffinityKeySource {
-  /** 'gjson' (path into the JSON body) | 'request_header' (key); other values are rejected. */
-  type: 'gjson' | 'request_header' | string
+  /** 'gjson' (path into the JSON body) | 'request_header' (key) | 'anchor' (OmniGate: conversation fingerprint, no key/path); other values are rejected. */
+  type: 'gjson' | 'request_header' | 'anchor' | string
   key?: string
   path?: string
 }
@@ -1655,6 +1655,10 @@ export interface AffinityRule {
   include_using_group: boolean
   include_model_name: boolean
   include_rule_name: boolean
+  /** OmniGate extension: add a per-conversation prompt_cache_key to OpenAI-format upstream bodies without one. */
+  inject_prompt_cache_key: boolean
+  /** OmniGate extension: header (e.g. Session_id) set to a per-conversation UUID on OpenAI-format upstream requests without it; '' = off. */
+  inject_session_header: string
 }
 
 export interface AffinityConfig {

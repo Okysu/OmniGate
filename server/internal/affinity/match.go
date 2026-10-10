@@ -18,7 +18,10 @@ type Request struct {
 	// Model is the logical model requested by the client.
 	Model string
 	// Path is the request path after the /v1/v1 collapse ("/v1/responses").
-	Path      string
+	Path string
+	// Dialect is the inbound protocol (protocol.OpenAIChat …); anchor key
+	// sources read the body by it.
+	Dialect   string
 	UserAgent string
 	Header    http.Header
 	// Body is the JSON request body (nil for multipart bodies: gjson key
@@ -41,12 +44,22 @@ func (c *Config) Match(req Request) *Match {
 	if !c.Enabled {
 		return nil
 	}
+	// The anchor is computed at most once per request, and only when a
+	// matching rule gets to an anchor source.
+	var anchor *string
+	anchorOf := func() string {
+		if anchor == nil {
+			v := Anchor(req.Dialect, req.Body)
+			anchor = &v
+		}
+		return *anchor
+	}
 	for i := range c.Rules {
 		r := &c.Rules[i]
 		if !r.matches(req) {
 			continue
 		}
-		v := r.extract(req)
+		v := r.extract(req, anchorOf)
 		if v == "" || r.value != nil && !r.value.MatchString(v) {
 			continue
 		}
@@ -71,8 +84,9 @@ func (r *Rule) matches(req Request) bool {
 	return false
 }
 
-// extract returns the first non-empty key source value ("" = none).
-func (r *Rule) extract(req Request) string {
+// extract returns the first non-empty key source value ("" = none); anchor
+// returns the request's conversation anchor.
+func (r *Rule) extract(req Request, anchor func() string) string {
 	for _, ks := range r.KeySources {
 		var v string
 		switch ks.Type {
@@ -86,6 +100,8 @@ func (r *Rule) extract(req Request) string {
 			if req.Header != nil {
 				v = req.Header.Get(ks.Key)
 			}
+		case SourceAnchor:
+			v = anchor()
 		}
 		if v = strings.TrimSpace(v); v != "" {
 			return v

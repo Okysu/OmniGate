@@ -124,6 +124,11 @@ type RequestOverride struct {
 	SkipAuth bool
 	// Pass copies client headers to the upstream request (nil = none).
 	Pass *PassHeaders
+	// Fill sets headers the request does not carry after everything else
+	// (channel config, plugin hooks, passed client headers): session
+	// affinity's inject_session_header. Invalid and forbidden names are
+	// ignored.
+	Fill map[string]string
 }
 
 // PassHeaders are client headers a session affinity rule copies to the
@@ -305,6 +310,13 @@ func (r *Runtime) NewRequestBody(ctx context.Context, dialect string, body io.Re
 	}
 	if o != nil && o.Pass != nil {
 		o.Pass.Apply(req.Header, clientHeader, r.Config.Headers, o.Headers)
+	}
+	if o != nil {
+		for k, v := range o.Fill {
+			if validHeaderName(k) && !forbiddenHeaders[strings.ToLower(k)] && len(req.Header.Values(k)) == 0 {
+				req.Header.Set(k, v)
+			}
+		}
 	}
 	return req, nil
 }

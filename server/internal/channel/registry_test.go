@@ -62,3 +62,27 @@ func TestPassHeaders(t *testing.T) {
 		t.Errorf("headers passed without a rule: %v", req.Header)
 	}
 }
+
+func TestFillHeaders(t *testing.T) {
+	rt := &Runtime{Channel: Channel{Type: TypeOpenAI, BaseURL: "http://up.test/v1", Config: Config{Headers: map[string]string{"X-Fixed": "channel"}}}, APIKey: "sk-channel"}
+	fill := map[string]string{"Session_id": "derived", "X-Fixed": "derived", "Authorization": "Bearer x"}
+	// Set when absent; channel config and credentials win.
+	req, _ := rt.NewRequest(context.Background(), protocol.OpenAIChat, []byte(`{}`), http.Header{}, "OmniGate/test", &RequestOverride{Fill: fill})
+	if h := req.Header; h.Get("Session_id") != "derived" || h.Get("X-Fixed") != "channel" || h.Get("Authorization") != "Bearer sk-channel" {
+		t.Errorf("fill: %v", h)
+	}
+	// A passed client header is never replaced.
+	client := http.Header{}
+	client.Set("Session_id", "client")
+	req, _ = rt.NewRequest(context.Background(), protocol.OpenAIChat, []byte(`{}`), client, "OmniGate/test",
+		&RequestOverride{Pass: &PassHeaders{Names: []string{"Session_id"}, KeepOrigin: true}, Fill: fill})
+	if v := req.Header.Values("Session_id"); len(v) != 1 || v[0] != "client" {
+		t.Errorf("client header replaced: %v", v)
+	}
+	// A plugin hook's header counts as present.
+	req, _ = rt.NewRequest(context.Background(), protocol.OpenAIChat, []byte(`{}`), client, "OmniGate/test",
+		&RequestOverride{Headers: map[string]string{"session_id": "hook"}, Fill: fill})
+	if req.Header.Get("Session_id") != "hook" {
+		t.Errorf("hook header replaced: %q", req.Header.Get("Session_id"))
+	}
+}

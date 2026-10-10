@@ -500,3 +500,28 @@ func TestClaudeCodeStyleRequest(t *testing.T) {
 		t.Fatal("unknown output_config keys must be rejected in strict mode")
 	}
 }
+
+func TestSetPromptCacheKey(t *testing.T) {
+	for name, tc := range map[string]struct{ in, want string }{
+		"absent":  {`{"model":"m","messages":[{"role":"user","content":"a  b"}],"stream":true}`, `{"prompt_cache_key":"og-1","model":"m","messages":[{"role":"user","content":"a  b"}],"stream":true}`},
+		"spaces":  {"  {\n \"model\": \"m\"\n}", "{\"prompt_cache_key\":\"og-1\",\n \"model\": \"m\"\n}"},
+		"empty":   {`{}`, `{"prompt_cache_key":"og-1"}`},
+		"blank":   {`{ }`, `{"prompt_cache_key":"og-1" }`},
+		"client":  {`{"model":"m","prompt_cache_key":"mine"}`, `{"model":"m","prompt_cache_key":"mine"}`},
+		"number":  {`{"prompt_cache_key":7}`, `{"prompt_cache_key":7}`},
+		"empty v": {`{"prompt_cache_key":"","model":"m"}`, `{"model":"m","prompt_cache_key":"og-1"}`},
+		"null":    {`{"prompt_cache_key":null}`, `{"prompt_cache_key":"og-1"}`},
+		"nested":  {`{"metadata":{"prompt_cache_key":"x"}}`, `{"prompt_cache_key":"og-1","metadata":{"prompt_cache_key":"x"}}`},
+	} {
+		out, err := SetPromptCacheKey([]byte(tc.in), "og-1")
+		if err != nil || string(out) != tc.want {
+			t.Errorf("%s: %s %v, want %s", name, out, err, tc.want)
+		}
+		if !json.Valid(out) {
+			t.Errorf("%s: invalid JSON %s", name, out)
+		}
+	}
+	if _, err := SetPromptCacheKey([]byte(`[1]`), "og-1"); err == nil {
+		t.Error("non-object accepted")
+	}
+}

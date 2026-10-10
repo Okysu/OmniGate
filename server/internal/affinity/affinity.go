@@ -36,6 +36,10 @@ const (
 const (
 	SourceGJSON  = "gjson"          // path into the JSON request body
 	SourceHeader = "request_header" // request header
+	// SourceAnchor (OmniGate extension) is the conversation fingerprint of
+	// the request body (Anchor): the last resort for clients that send no
+	// session identifier.
+	SourceAnchor = "anchor"
 )
 
 // OpPassHeaders is the only supported param_override_template operation.
@@ -61,6 +65,7 @@ type KeySource struct {
 	Type string `json:"type"`
 	Key  string `json:"key,omitempty"`  // request_header
 	Path string `json:"path,omitempty"` // gjson
+	// anchor takes neither.
 }
 
 // Operation is one param_override_template operation (pass_headers only).
@@ -90,6 +95,13 @@ type Rule struct {
 	IncludeUsingGroup     bool        `json:"include_using_group"`
 	IncludeModelName      bool        `json:"include_model_name"`
 	IncludeRuleName       bool        `json:"include_rule_name"`
+	// InjectPromptCacheKey and InjectSessionHeader (OmniGate extensions) give
+	// OpenAI-format upstream requests a stable per-conversation identity the
+	// upstream's account pool can recognise: prompt_cache_key in the body and
+	// the named header ("" = none), each only when the request has none yet
+	// (phase12-api.md §2.6).
+	InjectPromptCacheKey bool   `json:"inject_prompt_cache_key"`
+	InjectSessionHeader  string `json:"inject_session_header"`
 
 	model, path []*regexp.Regexp
 	value       *regexp.Regexp
@@ -158,10 +170,13 @@ var (
 		"Anthropic-Dangerous-Direct-Browser-Access", "Anthropic-Version", "X-Claude-Code-Session-Id"}
 )
 
-// Default is the default setting (compiled): enabled, with the Codex CLI and
-// Claude Code presets. They match any model (the key sources only exist for
-// those clients, so this also covers Codex / Claude Code used with other
-// models) and prefer the bound channel without giving up failover.
+// Default is the default setting (compiled): enabled, with the GPT session,
+// Codex CLI and Claude Code presets. "gpt session" comes first: GPT models get
+// affinity on every inbound protocol (falling back to the conversation
+// anchor) and their OpenAI-format upstream requests carry a stable
+// per-conversation prompt_cache_key and Session_id. The client presets match
+// any other model (their key sources only exist for those clients) and all
+// prefer the bound channel without giving up failover.
 func Default() Config {
 	raw, _ := json.Marshal(defaults())
 	c, msg := Decode(raw)
@@ -174,6 +189,11 @@ func Default() Config {
 func defaults() Config {
 	return Config{Enabled: true, SessionMode: ModePrefer, SwitchOnSuccess: true, MaxEntries: 100_000, DefaultTTLSeconds: 3600,
 		Rules: []Rule{
+			{Name: "gpt session", ModelRegex: []string{"^gpt-"}, PathRegex: []string{}, UserAgentInclude: []string{},
+				KeySources: []KeySource{{Type: SourceGJSON, Path: "prompt_cache_key"}, {Type: SourceHeader, Key: "Session_id"}, {Type: SourceHeader, Key: "Session-Id"},
+					{Type: SourceGJSON, Path: "metadata.user_id"}, {Type: SourceHeader, Key: "X-Claude-Code-Session-Id"}, {Type: SourceGJSON, Path: "user"}, {Type: SourceAnchor}},
+				ParamOverrideTemplate: passTemplate(codexHeaders...), SessionMode: ModePrefer, IncludeUsingGroup: true, IncludeRuleName: true,
+				InjectPromptCacheKey: true, InjectSessionHeader: "Session_id"},
 			{Name: "codex cli trace", ModelRegex: []string{".*"}, PathRegex: []string{"^/v1/responses"}, UserAgentInclude: []string{},
 				KeySources:            []KeySource{{Type: SourceGJSON, Path: "prompt_cache_key"}, {Type: SourceHeader, Key: "Session_id"}, {Type: SourceHeader, Key: "Session-Id"}},
 				ParamOverrideTemplate: passTemplate(codexHeaders...), SessionMode: ModePrefer, IncludeUsingGroup: true, IncludeRuleName: true},
@@ -311,10 +331,14 @@ func decodeRule(raw json.RawMessage, p string) (Rule, []string) {
 				fail(f+".key", "request_header 来源需要合法的请求头名称（字母、数字、- 和 _，最多 64 个字符）")
 			}
 			ks.Path = ""
+		case SourceAnchor:
+			if ks.Key != "" || ks.Path != "" {
+				fail(f, "anchor 来源不接受 key 或 path（对话锚点由请求体自动计算）")
+			}
 		case "context_int", "context_string":
-			fail(f+".type", "%s 是 new-api 内部上下文类型，OmniGate 不支持；请改用 gjson 或 request_header", ks.Type)
+			fail(f+".type", "%s 是 new-api 内部上下文类型，OmniGate 不支持；请改用 gjson、request_header 或 anchor", ks.Type)
 		default:
-			fail(f+".type", "只能是 gjson 或 request_header")
+			fail(f+".type", "只能是 gjson、request_header 或 anchor")
 		}
 		r.KeySources[i] = ks
 	}
@@ -332,6 +356,14 @@ func decodeRule(raw json.RawMessage, p string) (Rule, []string) {
 	case "", ModeInherit, ModeOff, ModePrefer, ModeStrict:
 	default:
 		fail(".session_mode", "只能是空、inherit、off、prefer、strict")
+	}
+	if r.InjectSessionHeader = strings.TrimSpace(r.InjectSessionHeader); r.InjectSessionHeader != "" {
+		switch h := r.InjectSessionHeader; {
+		case !channel.ValidHeaderName(h):
+			fail(".inject_session_header", "请求头名称格式无效（字母、数字、- 和 _，最多 64 个字符）")
+		case channel.ForbiddenHeader(h):
+			fail(".inject_session_header", "请求头 %q 由网关管理，不能补全", h)
+		}
 	}
 	tpl, terrs := decodeTemplate(in.ParamOverrideTemplate, p+".param_override_template")
 	errs = append(errs, terrs...)

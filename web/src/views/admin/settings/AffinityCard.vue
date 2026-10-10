@@ -7,6 +7,7 @@ import {
   Braces,
   Copy,
   Eraser,
+  Fingerprint,
   LayoutList,
   Link2,
   Link2Off,
@@ -37,10 +38,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  cloneRule,
   configEquals,
   defaultConfig,
   effectiveMode,
   errorLines,
+  injectBadges,
   keySourceLabel,
   LIMITS,
   mergeRules,
@@ -58,6 +61,7 @@ import {
   ttlLabel,
   uniqueName,
   validateConfig,
+  visibleSources,
 } from '@/lib/affinity'
 import { errorMessage, fieldErrors, isApiError, isVersionConflict } from '@/lib/api'
 import { affinityApi, settingsApi } from '@/lib/endpoints'
@@ -130,6 +134,11 @@ function ruleMode(r: AffinityRule): AffinityMode {
   return effectiveMode(r, config.value.session_mode)
 }
 const MODE_ICONS = { off: Link2Off, prefer: Link2, strict: Lock } as const
+const SOURCE_CLASSES: Record<string, string> = {
+  gjson: 'border-violet-500/50 text-violet-700 dark:text-violet-400',
+  header: 'border-emerald-500/50 text-emerald-700 dark:text-emerald-400',
+  anchor: 'border-amber-500/50 text-amber-700 dark:text-amber-400',
+}
 const MODE_CLASSES: Record<AffinityMode, string> = {
   off: 'text-muted-foreground',
   prefer: 'text-sky-700 dark:text-sky-400',
@@ -165,7 +174,7 @@ function duplicate(i: number) {
   const r = rules.value[i]
   if (!r || rules.value.length >= LIMITS.rules)
     return
-  const copy = { ...structuredClone(r), name: uniqueName(r.name, rules.value) }
+  const copy = { ...cloneRule(r), name: uniqueName(r.name, rules.value) }
   const list = [...config.value.rules]
   list.splice(i + 1, 0, copy)
   config.value = { ...config.value, rules: list }
@@ -196,7 +205,9 @@ function fillTemplate() {
   config.value = merged
   if (view.value === 'json')
     jsonText.value = stringifyConfig(merged)
-  toast.success('已填充内置预设', { description: `新增 ${added} 条${replaced ? `，替换同名 ${replaced} 条` : ''}；保存后生效。` })
+  const gptIndex = next.findIndex(r => r.name === 'gpt session')
+  const hint = gptIndex > 0 ? `「gpt session」当前排在第 ${gptIndex + 1} 位，前面的规则会先匹配 GPT 请求，需要时用「上移」把它移到最前。` : ''
+  toast.success('已填充内置预设', { description: `新增 ${added} 条${replaced ? `，替换同名 ${replaced} 条` : ''}；保存后生效。${hint}` })
 }
 
 // ---------- save ----------
@@ -323,7 +334,7 @@ function setGlobalMode(v: unknown) {
             </Badge>
           </CardTitle>
           <CardDescription>
-            按客户端自己的会话标识（Codex CLI 的 prompt_cache_key / Session_id、Claude Code 的 metadata.user_id 等）把同一会话固定到同一渠道，并透传会话请求头，提升上游提示词缓存与号池的命中率。规则格式与 new-api 的「渠道亲和」相同，可直接粘贴其 JSON。
+            按客户端自己的会话标识（Codex CLI 的 prompt_cache_key / Session_id、Claude Code 的 metadata.user_id 等，都没有时用对话锚点）把同一会话固定到同一渠道，并透传或补全会话标识，提升上游提示词缓存与号池的命中率。规则格式与 new-api 的「渠道亲和」相同，可直接粘贴其 JSON。
           </CardDescription>
         </div>
         <div v-if="supported" class="flex flex-wrap items-center gap-2">
@@ -339,7 +350,7 @@ function setGlobalMode(v: unknown) {
               </TabsTrigger>
             </TabsList>
           </Tabs>
-          <Button variant="outline" size="sm" :disabled="disabled" title="加入内置的 Codex CLI / Claude Code 预设（任意模型、优先保持）；同名规则会被替换，其他规则保留" data-testid="affinity-template" @click="fillTemplate">
+          <Button variant="outline" size="sm" :disabled="disabled" title="加入内置的 GPT 会话、Codex CLI、Claude Code 预设（优先保持）；同名规则会被替换，其他规则保留，新规则按预设顺序插入" data-testid="affinity-template" @click="fillTemplate">
             <Sparkles />
             填充模板
           </Button>
@@ -444,7 +455,7 @@ function setGlobalMode(v: unknown) {
             <TableBody>
               <TableRow v-if="!rules.length">
                 <TableCell colspan="8" class="text-muted-foreground py-6 text-center">
-                  还没有规则。点击「添加规则」，或用「填充模板」加入内置的 Codex CLI / Claude Code 预设。
+                  还没有规则。点击「添加规则」，或用「填充模板」加入内置的 GPT 会话、Codex CLI、Claude Code 预设。
                 </TableCell>
               </TableRow>
               <TableRow v-for="(r, i) in rules" :key="`${i}:${r.name}`" :data-affinity-rule="r.name" :class="validation[`rules[${i}].name`] || Object.keys(validation).some(k => k.startsWith(`rules[${i}].`)) ? 'bg-destructive/5' : ''">
@@ -464,13 +475,15 @@ function setGlobalMode(v: unknown) {
                 </TableCell>
                 <TableCell class="min-w-44">
                   <div class="flex flex-col gap-1">
-                    <div v-for="(ks, j) in r.key_sources.slice(0, 3)" :key="j" class="flex min-w-0 items-center gap-1.5">
-                      <Badge variant="outline" class="h-4 shrink-0 px-1 font-mono text-[10px]" :class="keySourceLabel(ks).type === 'gjson' ? 'border-violet-500/50 text-violet-700 dark:text-violet-400' : 'border-emerald-500/50 text-emerald-700 dark:text-emerald-400'">
+                    <div v-for="(ks, j) in visibleSources(r).shown" :key="j" class="flex min-w-0 items-center gap-1.5">
+                      <Badge variant="outline" class="h-4 shrink-0 px-1 font-mono text-[10px]" :class="SOURCE_CLASSES[keySourceLabel(ks).type] ?? 'text-muted-foreground'">
                         {{ keySourceLabel(ks).type }}
                       </Badge>
-                      <span class="truncate font-mono">{{ keySourceLabel(ks).value }}</span>
+                      <span class="truncate" :class="ks.type === 'anchor' ? 'text-muted-foreground' : 'font-mono'">{{ keySourceLabel(ks).value }}</span>
                     </div>
-                    <span v-if="r.key_sources.length > 3" class="text-muted-foreground text-[10px]">+{{ r.key_sources.length - 3 }}</span>
+                    <span v-if="visibleSources(r).hidden" class="text-muted-foreground text-[10px]" :title="r.key_sources.map(ks => `${keySourceLabel(ks).type} ${keySourceLabel(ks).value}`).join('\n')">
+                      另有 {{ visibleSources(r).hidden }} 个来源
+                    </span>
                   </div>
                 </TableCell>
                 <TableCell class="whitespace-nowrap">
@@ -494,6 +507,15 @@ function setGlobalMode(v: unknown) {
                   </div>
                   <p v-if="passHeaders(r).names.length" class="text-muted-foreground mt-0.5 text-[11px] whitespace-nowrap" :title="passHeaders(r).names.join(', ')">
                     透传 {{ passHeaders(r).names.length }} 个请求头
+                  </p>
+                  <p
+                    v-if="injectBadges(r).length"
+                    class="mt-0.5 flex items-center gap-1 text-[11px] whitespace-nowrap text-sky-700 dark:text-sky-400"
+                    :title="`OpenAI 格式上游请求缺少时补全：${injectBadges(r).join('、')}（按用户、按对话的哈希值）`"
+                    data-testid="affinity-inject"
+                  >
+                    <Fingerprint class="size-3" />
+                    补全 <span class="font-mono">{{ injectBadges(r).join(' · ') }}</span>
                   </p>
                 </TableCell>
                 <TableCell class="text-right tabular-nums">
@@ -563,7 +585,7 @@ function setGlobalMode(v: unknown) {
             </li>
           </ul>
           <p v-else class="text-muted-foreground text-xs">
-            与 new-api「渠道亲和」相同的 JSON 结构：可直接粘贴 new-api 的设置。Key 来源支持 gjson 与 request_header；param_override_template 只支持 pass_headers 操作；未知字段会被忽略。
+            与 new-api「渠道亲和」相同的 JSON 结构：可直接粘贴 new-api 的设置。Key 来源支持 gjson、request_header 与 OmniGate 扩展的 anchor（对话锚点）；规则可选 OmniGate 扩展 inject_prompt_cache_key、inject_session_header；param_override_template 只支持 pass_headers 操作；未知字段会被忽略。
           </p>
         </div>
       </CardContent>

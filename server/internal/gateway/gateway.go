@@ -689,7 +689,7 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 		models = append(models, rule.FallbackModels...)
 	}
 	st.affinity = g.opts.Affinity.Begin(r.Context(), affinity.Request{UserID: a.UserID, GroupID: a.GroupID, Model: info.Model,
-		Path: r.URL.Path, UserAgent: r.UserAgent(), Header: r.Header, Body: st.body})
+		Path: r.URL.Path, Dialect: st.dialect, UserAgent: r.UserAgent(), Header: r.Header, Body: st.body})
 
 	var lastErr *protocol.GatewayError
 	attempts := 0
@@ -960,6 +960,14 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 			return convertError(err), ""
 		}
 		st.warnings = warnings
+		if k := st.affinity.PromptCacheKey(); k != "" && openAIText(upDialect) {
+			// Session affinity's per-conversation prompt_cache_key (every
+			// attempt, before plugin hooks so they see and sign the final body).
+			if body, err = protocol.SetPromptCacheKey(body, k); err != nil {
+				g.reg.Breaker.Release(rt.ID)
+				return convertError(err), ""
+			}
+		}
 	}
 
 	ctx, cancel := context.WithCancelCause(r.Context())
@@ -999,6 +1007,14 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 			ov = &channel.RequestOverride{}
 		}
 		ov.Pass = p
+	}
+	if name, v := st.affinity.SessionHeader(); name != "" && openAIText(upDialect) {
+		// Session header of the applying affinity rule, unless the request
+		// already carries it (channel config, plugin hook, passed client header).
+		if ov == nil {
+			ov = &channel.RequestOverride{}
+		}
+		ov.Fill = map[string]string{name: v}
 	}
 	var req *http.Request
 	var err error
@@ -1063,6 +1079,12 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 		g.latency.Observe(rt.ID, st.info.Model, firstByte)
 	}
 	return gerr, class
+}
+
+// openAIText reports whether an upstream dialect is OpenAI Chat or Responses:
+// the requests session affinity's inject options apply to.
+func openAIText(dialect string) bool {
+	return dialect == protocol.OpenAIChat || dialect == protocol.OpenAIResponses
 }
 
 // classifyStatus maps an upstream error status to the gateway error, its retry

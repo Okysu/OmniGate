@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,8 +15,9 @@ import (
 	"time"
 )
 
-// recUpstream is an OpenAI Chat upstream that records what it receives and
-// reports prompt cache hits (80 of 100 prompt tokens).
+// recUpstream is an OpenAI Chat (and, on /v1/messages, Anthropic) upstream
+// that records what it receives and reports prompt cache hits (80 of 100
+// prompt tokens).
 type recUpstream struct {
 	srv  *httptest.Server
 	fail atomic.Bool
@@ -41,6 +43,11 @@ func newRecUpstream(t *testing.T) *recUpstream {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v1/messages" {
+			fmt.Fprint(w, `{"id":"msg_1","type":"message","role":"assistant","model":"up","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn",
+				"usage":{"input_tokens":20,"output_tokens":5,"cache_read_input_tokens":80}}`)
+			return
+		}
 		fmt.Fprint(w, `{"id":"c1","object":"chat.completion","created":1,"model":"up","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
 			"usage":{"prompt_tokens":100,"completion_tokens":5,"total_tokens":105,"prompt_tokens_details":{"cached_tokens":80}}}`)
 	}))
@@ -148,7 +155,7 @@ func TestSessionAffinityRouting(t *testing.T) {
 	// The default setting ships the presets (enabled, prefer).
 	st := a.mustDo(a.admin, http.MethodGet, "/api/admin/settings", nil, 200)
 	aff := st["settings"].(map[string]any)["gateway"].(map[string]any)["affinity"].(map[string]any)
-	if aff["enabled"] != true || aff["session_mode"] != "prefer" || len(aff["rules"].([]any)) != 2 || st["sources"].(map[string]any)["gateway.affinity"] != "default" {
+	if aff["enabled"] != true || aff["session_mode"] != "prefer" || len(aff["rules"].([]any)) != 3 || st["sources"].(map[string]any)["gateway.affinity"] != "default" {
 		t.Fatalf("default affinity = %v", aff)
 	}
 
@@ -236,7 +243,7 @@ func TestSessionAffinityRouting(t *testing.T) {
 	// Strict (rule session_mode): the bound channel's error is returned
 	// without trying the other channel.
 	rules := aff["rules"].([]any)
-	rules[0].(map[string]any)["session_mode"] = "strict"
+	rules[1].(map[string]any)["session_mode"] = "strict" // codex cli trace ("gpt session" only matches gpt-*)
 	a.setAffinity(map[string]any{"enabled": true, "session_mode": "prefer", "switch_on_success": true, "keep_on_channel_disabled": false,
 		"max_entries": 1000, "default_ttl_seconds": 600, "rules": rules})
 	time.Sleep(20 * time.Millisecond)
@@ -392,5 +399,221 @@ func TestSessionAffinityDisabled(t *testing.T) {
 	}
 	if out := a.mustDo(a.admin, http.MethodGet, "/api/logs?affinity=any", nil, 200); out["total"].(float64) != 0 {
 		t.Fatalf("logged while disabled: %v", out["total"])
+	}
+}
+
+// gptEnv: gpt-6 served by two OpenAI channels behind round robin (a.up), and
+// gpt-6-anth / claude-x served by an Anthropic channel (anth).
+type gptEnv struct {
+	*affinityEnv
+	anth *recUpstream
+}
+
+func setupGPTAffinity(t *testing.T) *gptEnv {
+	e := setupGateway(t)
+	a := &affinityEnv{gwEnv: e, up: map[string]*recUpstream{}, names: map[string]string{}}
+	for _, name := range []string{"gpt-a", "gpt-b"} {
+		u := newRecUpstream(t)
+		id := e.platformChannel(map[string]any{"name": name, "type": "openai", "baseUrl": u.srv.URL + "/v1", "models": models("gpt-6")})
+		a.up[id], a.names[id] = u, name
+	}
+	e.mustDo(e.admin, http.MethodPost, "/api/admin/routes", map[string]any{"name": "rr", "match": map[string]any{"models": []string{"gpt-6"}},
+		"strategy": "round_robin"}, 201)
+	g := &gptEnv{affinityEnv: a, anth: newRecUpstream(t)}
+	e.channel(e.admin, map[string]any{"name": "anth", "type": "anthropic", "baseUrl": g.anth.srv.URL, "models": models("gpt-6-anth", "claude-x")})
+	_, a.key = e.key(e.admin, map[string]any{"name": "k"})
+	return g
+}
+
+// post sends a gateway request; it returns the status, the gpt-6 channel that
+// received it ("" = none) and what that upstream (or the Anthropic one) got.
+func (g *gptEnv) post(path, body string, headers ...string) (int, string, recRequest) {
+	g.t.Helper()
+	before := map[string]int{}
+	for id, u := range g.up {
+		before[id] = u.count()
+	}
+	anthBefore := g.anth.count()
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, g.h.srv.URL+path, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+g.key)
+	req.Header.Set("Content-Type", "application/json")
+	for i := 0; i+1 < len(headers); i += 2 {
+		req.Header.Set(headers[i], headers[i+1])
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		g.t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		g.t.Fatalf("%s = %d %s", path, resp.StatusCode, raw)
+	}
+	for id, u := range g.up {
+		if u.count() > before[id] {
+			return resp.StatusCode, id, u.last()
+		}
+	}
+	if g.anth.count() > anthBefore {
+		return resp.StatusCode, "", g.anth.last()
+	}
+	g.t.Fatalf("%s reached no upstream", path)
+	return 0, "", recRequest{}
+}
+
+var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+// upstreamIdentity checks the injected prompt_cache_key and Session_id.
+func upstreamIdentity(t *testing.T, got recRequest) (string, string) {
+	t.Helper()
+	key, _ := got.body["prompt_cache_key"].(string)
+	sid := got.header.Get("Session_id")
+	if !strings.HasPrefix(key, "og-") || len(key) != 35 || !uuidRE.MatchString(sid) {
+		t.Fatalf("upstream identity = %q / %q", key, sid)
+	}
+	return key, sid
+}
+
+func chatTurns(first string, turns int) string {
+	msgs := []map[string]any{{"role": "system", "content": "You are a travel agent."}, {"role": "user", "content": first}}
+	for i := 1; i < turns; i++ {
+		msgs = append(msgs, map[string]any{"role": "assistant", "content": fmt.Sprintf("answer %d", i)}, map[string]any{"role": "user", "content": fmt.Sprintf("follow-up %d", i)})
+	}
+	b, _ := json.Marshal(map[string]any{"model": "gpt-6", "messages": msgs})
+	return string(b)
+}
+
+func anthropicTurns(model, userID string, turns int) string {
+	msgs := []map[string]any{{"role": "user", "content": []map[string]any{{"type": "text", "text": "Fix the failing test"}}}}
+	for i := 1; i < turns; i++ {
+		msgs = append(msgs, map[string]any{"role": "assistant", "content": fmt.Sprintf("step %d", i)}, map[string]any{"role": "user", "content": fmt.Sprintf("continue %d", i)})
+	}
+	b, _ := json.Marshal(map[string]any{"model": model, "max_tokens": 256, "metadata": map[string]any{"user_id": userID},
+		"system": []map[string]any{{"type": "text", "text": "You are Claude Code."}}, "messages": msgs})
+	return string(b)
+}
+
+// GPT models get session affinity on every inbound protocol ("gpt session"),
+// and OpenAI-format upstream requests carry a stable per-conversation
+// prompt_cache_key and Session_id.
+func TestGPTSessionAffinity(t *testing.T) {
+	g := setupGPTAffinity(t)
+
+	// OpenAI Chat without any session identifier: the conversation anchor
+	// keeps all turns on one channel with one upstream identity.
+	_, rome, got := g.post("/v1/chat/completions", chatTurns("Plan a trip to Rome", 1))
+	romeKey, romeSID := upstreamIdentity(t, got)
+	for turns := 2; turns <= 4; turns++ {
+		_, ch, got := g.post("/v1/chat/completions", chatTurns("Plan a trip to Rome", turns))
+		if ch != rome {
+			t.Fatalf("turn %d moved from %s to %s", turns, g.names[rome], g.names[ch])
+		}
+		if k, sid := upstreamIdentity(t, got); k != romeKey || sid != romeSID {
+			t.Fatalf("turn %d identity changed: %s %s", turns, k, sid)
+		}
+		if len(got.body["messages"].([]any)) != 2*turns {
+			t.Fatalf("messages lost: %v", got.body)
+		}
+	}
+	// Another conversation gets another identity (and spreads by round robin).
+	spread := map[string]string{"Rome": rome}
+	for _, trip := range []string{"Paris", "Oslo", "Lima"} {
+		_, ch, got := g.post("/v1/chat/completions", chatTurns("Plan a trip to "+trip, 1))
+		spread[trip] = ch
+		if k, sid := upstreamIdentity(t, got); k == romeKey || sid == romeSID {
+			t.Fatalf("%s shares Rome's identity", trip)
+		}
+	}
+	channels := map[string]bool{}
+	for trip, ch := range spread {
+		channels[ch] = true
+		if _, again, _ := g.post("/v1/chat/completions", chatTurns("Plan a trip to "+trip, 2)); again != ch {
+			t.Fatalf("%s moved", trip)
+		}
+	}
+	if len(channels) != 2 {
+		t.Fatal("conversations did not spread over both channels")
+	}
+
+	// The client's prompt_cache_key is forwarded unchanged (and is the session).
+	_, pinned, got := g.post("/v1/chat/completions", `{"model":"gpt-6","prompt_cache_key":"client-pck","messages":[{"role":"user","content":"a"}]}`)
+	if got.body["prompt_cache_key"] != "client-pck" || !uuidRE.MatchString(got.header.Get("Session_id")) {
+		t.Fatalf("client prompt_cache_key: %v / %q", got.body["prompt_cache_key"], got.header.Get("Session_id"))
+	}
+	if _, ch, _ := g.post("/v1/chat/completions", `{"model":"gpt-6","prompt_cache_key":"client-pck","messages":[{"role":"user","content":"b"}]}`); ch != pinned {
+		t.Fatal("client prompt_cache_key session moved")
+	}
+
+	// Claude Code calling a gpt model: Anthropic → Chat conversion; the
+	// session comes from metadata.user_id.
+	cc := "user_0123abcd_account__session_6f1c2d3e-0000-4000-8000-000000000001"
+	_, ccCh, got := g.post("/v1/messages", anthropicTurns("gpt-6", cc, 1), "User-Agent", "claude-cli/2.1.0 (external, cli)")
+	ccKey, ccSID := upstreamIdentity(t, got)
+	if ccKey == romeKey || got.header.Get("User-Agent") != "claude-cli/2.1.0 (external, cli)" {
+		t.Fatalf("claude code → gpt: %q, UA %q", ccKey, got.header.Get("User-Agent"))
+	}
+	for turns := 2; turns <= 3; turns++ {
+		_, ch, got := g.post("/v1/messages", anthropicTurns("gpt-6", cc, turns))
+		if k, sid := upstreamIdentity(t, got); ch != ccCh || k != ccKey || sid != ccSID {
+			t.Fatalf("claude code turn %d: %s %s %s", turns, g.names[ch], k, sid)
+		}
+	}
+
+	// Codex on /v1/responses with its own prompt_cache_key and Session_id:
+	// both reach the upstream unchanged (Responses → Chat conversion).
+	_, cx, got := g.post("/v1/responses", `{"model":"gpt-6","input":"hi","prompt_cache_key":"codex-thread-1"}`, "Session_id", "codex-thread-1",
+		"Originator", "codex_cli_rs", "X-Codex-Turn-Metadata", `{"turn":1}`)
+	if got.body["prompt_cache_key"] != "codex-thread-1" || got.header.Get("Session_id") != "codex-thread-1" || got.header.Get("Originator") != "codex_cli_rs" ||
+		got.header.Get("X-Codex-Turn-Metadata") != `{"turn":1}` {
+		t.Fatalf("codex: %v / %v", got.body["prompt_cache_key"], got.header)
+	}
+	if v := got.header.Values("Session_id"); len(v) != 1 {
+		t.Fatalf("Session_id values = %v", v)
+	}
+	if _, ch, _ := g.post("/v1/responses", `{"model":"gpt-6","input":"again","prompt_cache_key":"codex-thread-1"}`, "Session_id", "codex-thread-1"); ch != cx {
+		t.Fatal("codex session moved")
+	}
+
+	// Anthropic-format upstreams get nothing injected: a gpt model ("gpt
+	// session" applies) and a Claude model ("claude cli trace").
+	for _, model := range []string{"gpt-6-anth", "claude-x"} {
+		_, ch, got := g.post("/v1/messages", anthropicTurns(model, cc, 1), "X-Claude-Code-Session-Id", "6f1c2d3e")
+		if ch != "" {
+			t.Fatalf("%s served by %s", model, g.names[ch])
+		}
+		if _, ok := got.body["prompt_cache_key"]; ok || got.header.Get("Session_id") != "" {
+			t.Fatalf("%s: injected into an Anthropic upstream: %v / %v", model, got.body, got.header)
+		}
+		// "claude cli trace" passes Claude Code's headers ("gpt session" Codex's).
+		if passed := got.header.Get("X-Claude-Code-Session-Id") == "6f1c2d3e"; passed != (model == "claude-x") {
+			t.Fatalf("%s: X-Claude-Code-Session-Id passed = %v", model, passed)
+		}
+	}
+
+	// Request logs name the rule; never the session values or derived ids.
+	if err := g.app.FlushLogs(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	out := g.mustDo(g.admin, http.MethodGet, "/api/logs?pageSize=200", nil, 200)
+	rules := map[string]string{}
+	for _, it := range out["items"].([]any) {
+		l := it.(map[string]any)
+		rule, _ := l["affinityRule"].(string)
+		if prev, ok := rules[l["model"].(string)]; ok && prev != rule {
+			t.Fatalf("%s logged with %q and %q", l["model"], prev, rule)
+		}
+		rules[l["model"].(string)] = rule
+	}
+	if rules["gpt-6"] != "gpt session" || rules["gpt-6-anth"] != "gpt session" || rules["claude-x"] != "claude cli trace" {
+		t.Fatalf("logged rules = %v", rules)
+	}
+	var leaked int
+	if err := g.pool.QueryRow(context.Background(), `SELECT count(*) FROM request_logs WHERE affinity_rule LIKE '%og-%' OR affinity_rule LIKE '%session_6f1c%'
+		OR affinity_rule LIKE '%codex-thread%'`).Scan(&leaked); err != nil || leaked != 0 {
+		t.Fatalf("session value logged: %d %v", leaked, err)
+	}
+	stats := g.mustDo(g.admin, http.MethodGet, "/api/admin/affinity/stats", nil, 200)
+	if stats["rules"].(map[string]any)["gpt session"].(float64) < 6 {
+		t.Fatalf("stats = %v", stats)
 	}
 }

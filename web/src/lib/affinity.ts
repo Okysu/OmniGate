@@ -58,9 +58,32 @@ function passTemplate(headers: string[]) {
   return { operations: [{ mode: 'pass_headers' as const, value: [...headers], keep_origin: true }] }
 }
 
-/** OmniGate's presets (the server default): any model, prefer, also matching the session headers. */
+/**
+ * OmniGate's presets (the server default), in order: "gpt session" first (GPT models on every
+ * protocol, falling back to the conversation anchor, with upstream identity injection), then the
+ * Codex CLI / Claude Code rules for other models (any model, prefer, also matching the session headers).
+ */
 export function omnigatePresets(): AffinityRule[] {
   return [
+    {
+      ...emptyRule(),
+      name: 'gpt session',
+      model_regex: ['^gpt-'],
+      path_regex: [],
+      key_sources: [
+        { type: 'gjson', path: 'prompt_cache_key' },
+        { type: 'request_header', key: 'Session_id' },
+        { type: 'request_header', key: 'Session-Id' },
+        { type: 'gjson', path: 'metadata.user_id' },
+        { type: 'request_header', key: 'X-Claude-Code-Session-Id' },
+        { type: 'gjson', path: 'user' },
+        { type: 'anchor' },
+      ],
+      param_override_template: passTemplate(CODEX_HEADERS),
+      session_mode: 'prefer',
+      inject_prompt_cache_key: true,
+      inject_session_header: 'Session_id',
+    },
     {
       ...emptyRule(),
       name: 'codex cli trace',
@@ -97,6 +120,8 @@ export function emptyRule(): AffinityRule {
     include_using_group: true,
     include_model_name: false,
     include_rule_name: true,
+    inject_prompt_cache_key: false,
+    inject_session_header: '',
   }
 }
 
@@ -159,7 +184,35 @@ export function scopeBadges(rule: AffinityRule): string[] {
 }
 
 export function keySourceLabel(ks: AffinityKeySource): { type: string, value: string } {
-  return ks.type === 'gjson' ? { type: 'gjson', value: ks.path ?? '' } : ks.type === 'request_header' ? { type: 'header', value: ks.key ?? '' } : { type: ks.type, value: ks.key ?? ks.path ?? '' }
+  switch (ks.type) {
+    case 'gjson':
+      return { type: 'gjson', value: ks.path ?? '' }
+    case 'request_header':
+      return { type: 'header', value: ks.key ?? '' }
+    case 'anchor':
+      return { type: 'anchor', value: '对话锚点' }
+    default:
+      return { type: ks.type, value: ks.key ?? ks.path ?? '' }
+  }
+}
+
+/** Key sources shown in the table: the first `max`, plus an anchor further down (it is the notable fallback). */
+export function visibleSources(rule: AffinityRule, max = 3): { shown: AffinityKeySource[], hidden: number } {
+  const shown = rule.key_sources.slice(0, max)
+  const anchor = rule.key_sources.slice(max).find(ks => ks.type === 'anchor')
+  if (anchor)
+    shown.push(anchor)
+  return { shown, hidden: rule.key_sources.length - shown.length }
+}
+
+/** Upstream identity markers of a rule (inject_prompt_cache_key / inject_session_header). */
+export function injectBadges(rule: AffinityRule): string[] {
+  const out: string[] = []
+  if (rule.inject_prompt_cache_key)
+    out.push('prompt_cache_key')
+  if (rule.inject_session_header)
+    out.push(rule.inject_session_header)
+  return out
 }
 
 /** A name not used by any rule: "x (副本)", "x (副本 2)", … */
@@ -171,22 +224,32 @@ export function uniqueName(base: string, rules: readonly AffinityRule[]): string
   return name.slice(0, LIMITS.name)
 }
 
-/** Adds template rules: a rule with the same name is replaced in place, others are appended. */
+/** A deep copy of a rule; also works on Vue reactive proxies (structuredClone throws on them). */
+export function cloneRule(r: AffinityRule): AffinityRule {
+  return JSON.parse(JSON.stringify(r)) as AffinityRule
+}
+
+/**
+ * Adds template rules: a rule with the same name is replaced in place. A new one is inserted
+ * before the first existing rule that follows it in the template (so "gpt session" lands above
+ * the Codex / Claude Code rules it must precede), otherwise appended.
+ */
 export function mergeRules(current: readonly AffinityRule[], add: readonly AffinityRule[]): { rules: AffinityRule[], replaced: number, added: number } {
-  const rules = current.map(r => structuredClone(r))
+  const rules = current.map(cloneRule)
   let replaced = 0
   let added = 0
-  for (const r of add) {
+  add.forEach((r, k) => {
     const i = rules.findIndex(x => x.name === r.name)
     if (i >= 0) {
-      rules[i] = structuredClone(r)
+      rules[i] = cloneRule(r)
       replaced++
+      return
     }
-    else {
-      rules.push(structuredClone(r))
-      added++
-    }
-  }
+    const later = new Set(add.slice(k + 1).map(x => x.name))
+    const at = rules.findIndex(x => later.has(x.name))
+    rules.splice(at >= 0 ? at : rules.length, 0, cloneRule(r))
+    added++
+  })
   return { rules, replaced, added }
 }
 
@@ -232,6 +295,8 @@ function normalizeRule(raw: unknown): AffinityRule {
     include_using_group: r.include_using_group === true,
     include_model_name: r.include_model_name === true,
     include_rule_name: r.include_rule_name === true,
+    inject_prompt_cache_key: r.inject_prompt_cache_key === true,
+    inject_session_header: str(r.inject_session_header).trim(),
   }
 }
 
@@ -324,13 +389,24 @@ export function validateRule(r: AffinityRule, p = ''): Record<string, string> {
       if (!isValidHeaderName(ks.key?.trim() ?? ''))
         e[`${f}.key`] = 'request_header 来源需要合法的请求头名称'
     }
+    else if (ks.type === 'anchor') {
+      if (ks.key?.trim() || ks.path?.trim())
+        e[f] = 'anchor 来源不接受 key 或 path（对话锚点由请求体自动计算）'
+    }
     else if (ks.type === 'context_int' || ks.type === 'context_string') {
-      e[`${f}.type`] = `${ks.type} 是 new-api 内部上下文类型，OmniGate 不支持；请改用 gjson 或 request_header`
+      e[`${f}.type`] = `${ks.type} 是 new-api 内部上下文类型，OmniGate 不支持；请改用 gjson、request_header 或 anchor`
     }
     else {
-      e[`${f}.type`] = '只能是 gjson 或 request_header'
+      e[`${f}.type`] = '只能是 gjson、request_header 或 anchor'
     }
   })
+  if (r.inject_session_header) {
+    const h = r.inject_session_header.trim()
+    if (!isValidHeaderName(h))
+      e[`${p}inject_session_header`] = '请求头名称格式无效（字母、数字、- 和 _，最多 64 个字符）'
+    else if (isForbiddenHeader(h))
+      e[`${p}inject_session_header`] = `请求头 ${JSON.stringify(h)} 由网关管理，不能补全`
+  }
   if (r.value_regex) {
     const msg = regexError(r.value_regex)
     if (msg)
@@ -399,7 +475,8 @@ export interface RuleForm {
   modelRegex: string
   pathRegex: string
   userAgent: string[]
-  keySources: { type: 'gjson' | 'request_header', value: string }[]
+  /** anchor sources have no value. */
+  keySources: { type: KeySourceType, value: string }[]
   valueRegex: string
   ttl: string
   headers: string[]
@@ -409,7 +486,12 @@ export interface RuleForm {
   includeGroup: boolean
   includeModel: boolean
   includeRule: boolean
+  injectCacheKey: boolean
+  /** '' = off. */
+  injectHeader: string
 }
+
+export type KeySourceType = 'gjson' | 'request_header' | 'anchor'
 
 const lines = (s: string) => s.split('\n').map(x => x.trim()).filter(Boolean)
 
@@ -420,7 +502,9 @@ export function ruleToForm(r: AffinityRule): RuleForm {
     modelRegex: r.model_regex.join('\n'),
     pathRegex: r.path_regex.join('\n'),
     userAgent: [...r.user_agent_include],
-    keySources: r.key_sources.map(ks => ks.type === 'request_header' ? { type: 'request_header' as const, value: ks.key ?? '' } : { type: 'gjson' as const, value: ks.path ?? ks.key ?? '' }),
+    keySources: r.key_sources.map(ks => ks.type === 'request_header'
+      ? { type: 'request_header' as const, value: ks.key ?? '' }
+      : ks.type === 'anchor' ? { type: 'anchor' as const, value: '' } : { type: 'gjson' as const, value: ks.path ?? ks.key ?? '' }),
     valueRegex: r.value_regex,
     ttl: String(r.ttl_seconds || ''),
     headers: pass.names,
@@ -430,6 +514,8 @@ export function ruleToForm(r: AffinityRule): RuleForm {
     includeGroup: r.include_using_group,
     includeModel: r.include_model_name,
     includeRule: r.include_rule_name,
+    injectCacheKey: r.inject_prompt_cache_key,
+    injectHeader: r.inject_session_header,
   }
 }
 
@@ -440,7 +526,9 @@ export function formToRule(f: RuleForm): AffinityRule {
     model_regex: lines(f.modelRegex),
     path_regex: lines(f.pathRegex),
     user_agent_include: f.userAgent.map(s => s.trim()).filter(Boolean),
-    key_sources: f.keySources.map(ks => ks.type === 'gjson' ? { type: 'gjson', path: ks.value.trim() } : { type: 'request_header', key: ks.value.trim() }),
+    key_sources: f.keySources.map(ks => ks.type === 'gjson'
+      ? { type: 'gjson', path: ks.value.trim() }
+      : ks.type === 'anchor' ? { type: 'anchor' } : { type: 'request_header', key: ks.value.trim() }),
     value_regex: f.valueRegex.trim(),
     ttl_seconds: ttl,
     param_override_template: null,
@@ -450,6 +538,8 @@ export function formToRule(f: RuleForm): AffinityRule {
     include_using_group: f.includeGroup,
     include_model_name: f.includeModel,
     include_rule_name: f.includeRule,
+    inject_prompt_cache_key: f.injectCacheKey,
+    inject_session_header: f.injectHeader.trim(),
   }, f.headers, f.keepOrigin)
 }
 

@@ -2,6 +2,9 @@ package affinity
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,10 +74,36 @@ func (s *Service) Begin(ctx context.Context, req Request) *Session {
 	ss := &Session{store: s.store, Rule: m.Rule.Name, Mode: m.Rule.Mode(cfg.SessionMode), pass: m.Rule.Pass(),
 		key: m.bindingKey(req), ttl: time.Duration(ttl) * time.Second, capacity: cfg.MaxEntries,
 		switchOnSuccess: cfg.SwitchOnSuccess, keepOnDisabled: cfg.KeepOnChannelDisabled}
+	if m.Rule.InjectPromptCacheKey || m.Rule.InjectSessionHeader != "" {
+		id := upstreamID(ss.key)
+		if m.Rule.InjectPromptCacheKey {
+			ss.cacheKey = "og-" + hex.EncodeToString(id[:16])
+		}
+		if m.Rule.InjectSessionHeader != "" {
+			ss.header = [2]string{m.Rule.InjectSessionHeader, uuidV8(id)}
+		}
+	}
 	if ss.Mode != ModeOff {
 		ss.bound, ss.hasBound = s.store.Get(ss.key)
 	}
 	return ss
+}
+
+// upstreamID derives the identity sent upstream from the binding key (the
+// same material: user, include_* parts, session value), domain-separated so
+// the in-memory key itself never leaves the process and the raw session
+// value is never sent.
+func upstreamID(key [32]byte) [32]byte {
+	return sha256.Sum256(append([]byte("omnigate-affinity/upstream\x00"), key[:]...))
+}
+
+// uuidV8 formats the first 16 bytes of id as an RFC 9562 UUIDv8 (version
+// nibble 8, RFC 4122 variant), lowercase 8-4-4-4-12.
+func uuidV8(id [32]byte) string {
+	b := id[:16]
+	b[6] = b[6]&0x0f | 0x80
+	b[8] = b[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // Session is one request's affinity state. A nil *Session is valid: every
@@ -86,6 +115,8 @@ type Session struct {
 	Mode string
 
 	pass                            *channel.PassHeaders
+	cacheKey                        string    // inject_prompt_cache_key ("" = off)
+	header                          [2]string // inject_session_header: name, value ("" = off)
 	key                             [32]byte
 	ttl                             time.Duration
 	capacity                        int
@@ -105,6 +136,24 @@ func (s *Session) PassHeaders() *channel.PassHeaders {
 		return nil
 	}
 	return s.pass
+}
+
+// PromptCacheKey returns the prompt_cache_key to add to OpenAI-format
+// upstream bodies without one ("" = none): "og-" and 32 hex characters.
+func (s *Session) PromptCacheKey() string {
+	if s == nil {
+		return ""
+	}
+	return s.cacheKey
+}
+
+// SessionHeader returns the header to add to OpenAI-format upstream requests
+// that do not carry it yet, with its UUID value (name "" = none).
+func (s *Session) SessionHeader() (name, value string) {
+	if s == nil {
+		return "", ""
+	}
+	return s.header[0], s.header[1]
 }
 
 // Bound returns the channel the session is bound to, if it pins at all.

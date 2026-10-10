@@ -41,7 +41,7 @@ const errors = ref<Record<string, string>>({})
 
 function blank(): RuleForm {
   return { name: '', modelRegex: '', pathRegex: '', userAgent: [], keySources: [{ type: 'gjson', value: '' }], valueRegex: '', ttl: '', headers: [], keepOrigin: true,
-    mode: 'inherit', skipRetry: false, includeGroup: true, includeModel: false, includeRule: true }
+    mode: 'inherit', skipRetry: false, includeGroup: true, includeModel: false, includeRule: true, injectCacheKey: false, injectHeader: '' }
 }
 
 watch(open, (v) => {
@@ -66,7 +66,7 @@ function removeSource(i: number) {
   form.keySources.splice(i, 1)
 }
 function setSourceType(i: number, v: unknown) {
-  if (v === 'gjson' || v === 'request_header')
+  if (v === 'gjson' || v === 'request_header' || v === 'anchor')
     form.keySources[i]!.type = v
 }
 
@@ -133,6 +133,10 @@ function submit() {
           <p class="text-muted-foreground text-xs">
             按顺序取第一个非空值作为会话标识（去除首尾空白）；都取不到时本规则不生效，继续匹配下一条规则。原始值只在内存中参与哈希，不写入日志。
           </p>
+          <p class="text-muted-foreground text-xs">
+            「对话锚点」（OmniGate 扩展）适合放在最后兜底：客户端不发送任何会话标识时，用开头的 system / developer 指令加第一条用户消息计算指纹。
+            同一段对话后续轮次只是追加消息，指纹不变；不同对话的第一条用户消息不同，指纹也不同。支持 Chat、Responses 与 Anthropic Messages，multipart 请求取不到。
+          </p>
           <p v-if="errors.key_sources" class="text-destructive text-xs" role="alert">
             {{ errors.key_sources }}
           </p>
@@ -149,9 +153,16 @@ function submit() {
                   <SelectItem value="request_header">
                     请求头
                   </SelectItem>
+                  <SelectItem value="anchor">
+                    对话锚点
+                  </SelectItem>
                 </SelectContent>
               </Select>
+              <p v-if="ks.type === 'anchor'" class="text-muted-foreground bg-muted/40 flex min-h-9 min-w-0 flex-1 items-center rounded-md border border-dashed px-3 text-xs">
+                由请求体自动计算，无需填写
+              </p>
               <Input
+                v-else
                 v-model="ks.value"
                 class="min-w-0 font-mono text-xs"
                 :placeholder="ks.type === 'gjson' ? 'prompt_cache_key / metadata.user_id' : 'Session_id'"
@@ -232,6 +243,36 @@ function submit() {
             </div>
             <Switch id="aff-keep" v-model="form.keepOrigin" />
           </div>
+        </section>
+
+        <Separator />
+
+        <section class="space-y-4">
+          <div class="space-y-1">
+            <h3 class="text-sm font-semibold">
+              上游会话标识
+            </h3>
+            <p class="text-muted-foreground text-xs">
+              OmniGate 扩展：让上游号池也能认出同一段对话，把它留在同一个上游账号上。只作用于 OpenAI 格式（Chat / Responses，含协议转换后）的上游请求；
+              值由绑定键派生（按用户、按对话哈希），从不发送原始会话标识；客户端已带上的值永远不会被覆盖。
+            </p>
+          </div>
+          <div class="flex items-start justify-between gap-4 rounded-lg border p-3">
+            <div class="space-y-1">
+              <Label for="aff-inject-pck">补全 prompt_cache_key</Label>
+              <p class="text-muted-foreground text-xs">
+                请求体没有非空的 prompt_cache_key 时加入 <code class="font-mono">og-</code> 开头的稳定值（OpenAI 标准字段，上游据此复用提示词缓存）。
+              </p>
+            </div>
+            <Switch id="aff-inject-pck" v-model="form.injectCacheKey" data-testid="aff-inject-pck" />
+          </div>
+          <FormField label="补全会话请求头" for="aff-inject-header" :error="errors.inject_session_header">
+            <Input id="aff-inject-header" v-model="form.injectHeader" class="font-mono text-xs sm:w-80" placeholder="Session_id" :maxlength="64" :aria-invalid="!!errors.inject_session_header" data-testid="aff-inject-header" />
+            <template #hint>
+              上游请求没有这个请求头（客户端未透传、渠道未配置）时，设置为该对话稳定的 UUID。Codex 的 <code class="font-mono">Session_id</code>
+              是 OpenAI 格式号池默认识别的会话标识，填它即可让普通 Chat 客户端、Claude Code 调用 GPT 等请求在上游也保持会话；留空 = 不补全。
+            </template>
+          </FormField>
         </section>
 
         <Separator />

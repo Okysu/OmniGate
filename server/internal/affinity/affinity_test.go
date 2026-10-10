@@ -94,19 +94,81 @@ func TestDecodeNewAPITemplate(t *testing.T) {
 
 func TestDefault(t *testing.T) {
 	c := Default()
-	if !c.Enabled || c.SessionMode != ModePrefer || len(c.Rules) != 2 {
+	if !c.Enabled || c.SessionMode != ModePrefer || len(c.Rules) != 3 {
 		t.Fatalf("default = %+v", c)
+	}
+	if c.Rules[0].Name != "gpt session" || c.Rules[1].Name != "codex cli trace" || c.Rules[2].Name != "claude cli trace" {
+		t.Fatalf("preset order = %s, %s, %s", c.Rules[0].Name, c.Rules[1].Name, c.Rules[2].Name)
 	}
 	for _, r := range c.Rules {
 		if r.Mode(c.SessionMode) != ModePrefer || !r.IncludeUsingGroup || !r.IncludeRuleName || r.IncludeModelName {
 			t.Errorf("%s: %+v", r.Name, r)
 		}
 	}
-	if got := c.Rules[0].Pass().Names; len(got) != 16 || got[1] != "Session_id" {
+	gpt := c.Rules[0]
+	var sources []string
+	for _, ks := range gpt.KeySources {
+		sources = append(sources, ks.Type+":"+ks.Key+ks.Path)
+	}
+	if strings.Join(sources, ",") != "gjson:prompt_cache_key,request_header:Session_id,request_header:Session-Id,gjson:metadata.user_id,"+
+		"request_header:X-Claude-Code-Session-Id,gjson:user,anchor:" || !gpt.InjectPromptCacheKey || gpt.InjectSessionHeader != "Session_id" ||
+		strings.Join(gpt.ModelRegex, ",") != "^gpt-" || len(gpt.PathRegex) != 0 {
+		t.Errorf("gpt session = %+v (%v)", gpt, sources)
+	}
+	if got := gpt.Pass().Names; strings.Join(got, ",") != strings.Join(codexHeaders, ",") {
+		t.Errorf("gpt session headers = %v", got)
+	}
+	if got := c.Rules[1].Pass().Names; len(got) != 16 || got[1] != "Session_id" {
 		t.Errorf("codex headers = %v", got)
 	}
-	if got := c.Rules[1].Pass().Names; len(got) != 14 || got[len(got)-1] != "X-Claude-Code-Session-Id" {
+	if got := c.Rules[2].Pass().Names; len(got) != 14 || got[len(got)-1] != "X-Claude-Code-Session-Id" {
 		t.Errorf("claude headers = %v", got)
+	}
+	for _, r := range c.Rules[1:] {
+		if r.InjectPromptCacheKey || r.InjectSessionHeader != "" {
+			t.Errorf("%s must not inject", r.Name)
+		}
+	}
+}
+
+func TestDecodeExtensions(t *testing.T) {
+	// new-api documents have none of the extensions: they decode to off.
+	for _, r := range mustDecode(t, newAPIJSON).Rules {
+		if r.InjectPromptCacheKey || r.InjectSessionHeader != "" {
+			t.Errorf("%s: extensions on by default", r.Name)
+		}
+	}
+	c := mustDecode(t, `{"rules":[{"name":"a","key_sources":[{"type":"gjson","path":"user"},{"type":"anchor"}],
+		"inject_prompt_cache_key":true,"inject_session_header":" Session_id "}]}`)
+	r := c.Rules[0]
+	if r.KeySources[1] != (KeySource{Type: SourceAnchor}) || !r.InjectPromptCacheKey || r.InjectSessionHeader != "Session_id" {
+		t.Fatalf("rule = %+v", r)
+	}
+	// The canonical form carries the new fields and round-trips.
+	b, _ := json.Marshal(c)
+	if !strings.Contains(string(b), `{"type":"anchor"}`) || !strings.Contains(string(b), `"inject_prompt_cache_key":true`) ||
+		!strings.Contains(string(b), `"inject_session_header":"Session_id"`) {
+		t.Fatalf("canonical = %s", b)
+	}
+	b2, _ := json.Marshal(mustDecode(t, string(b)))
+	if string(b) != string(b2) {
+		t.Fatalf("not canonical:\n%s\n%s", b, b2)
+	}
+	b, _ = json.Marshal(Default())
+	b2, _ = json.Marshal(mustDecode(t, string(b)))
+	if string(b) != string(b2) {
+		t.Fatalf("default not canonical:\n%s\n%s", b, b2)
+	}
+	for name, tc := range map[string]struct{ raw, want string }{
+		"anchor key":       {`{"rules":[{"name":"r","key_sources":[{"type":"anchor","key":"x"}]}]}`, "rules[0].key_sources[0]：anchor 来源不接受 key 或 path"},
+		"anchor path":      {`{"rules":[{"name":"r","key_sources":[{"type":"anchor","path":"messages"}]}]}`, "anchor 来源不接受"},
+		"bad inject hdr":   {`{"rules":[{"name":"r","key_sources":[{"type":"anchor"}],"inject_session_header":"a b"}]}`, "rules[0].inject_session_header：请求头名称格式无效"},
+		"forbidden inject": {`{"rules":[{"name":"r","key_sources":[{"type":"anchor"}],"inject_session_header":"Authorization"}]}`, "inject_session_header：请求头 \"Authorization\" 由网关管理"},
+		"inject type":      {`{"rules":[{"name":"r","key_sources":[{"type":"anchor"}],"inject_prompt_cache_key":"yes"}]}`, "rules[0]：格式错误"},
+	} {
+		if _, msg := Decode(json.RawMessage(tc.raw)); !strings.Contains(msg, tc.want) {
+			t.Errorf("%s: message %q does not contain %q", name, msg, tc.want)
+		}
 	}
 }
 
@@ -126,7 +188,7 @@ func TestDecodeRejects(t *testing.T) {
 		"not object":     {`[]`, "JSON 对象"},
 		"context_int":    {`{"rules":[{"name":"r","key_sources":[{"type":"context_int","key":"user_id"}]}]}`, "rules[0].key_sources[0].type：context_int 是 new-api 内部上下文类型"},
 		"context_string": {`{"rules":[{"name":"r","key_sources":[{"type":"context_string","key":"x"}]}]}`, "context_string"},
-		"unknown type":   {`{"rules":[{"name":"r","key_sources":[{"type":"cookie","key":"x"}]}]}`, "只能是 gjson 或 request_header"},
+		"unknown type":   {`{"rules":[{"name":"r","key_sources":[{"type":"cookie","key":"x"}]}]}`, "只能是 gjson、request_header 或 anchor"},
 		"no sources":     {`{"rules":[{"name":"r"}]}`, "至少需要一个 Key 来源"},
 		"gjson no path":  {`{"rules":[{"name":"r","key_sources":[{"type":"gjson"}]}]}`, "需要 path"},
 		"bad header key": {`{"rules":[{"name":"r","key_sources":[{"type":"request_header","key":"a b"}]}]}`, "合法的请求头名称"},

@@ -9,6 +9,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/tidwall/gjson"
 )
 
 // Compat controls what happens to request fields that cannot be converted.
@@ -110,6 +112,40 @@ func RewriteForPassthrough(dialect string, body []byte, upstreamModel string, st
 		m["stream_options"], _ = json.Marshal(so)
 	}
 	return json.Marshal(m)
+}
+
+// SetPromptCacheKey sets prompt_cache_key on an OpenAI Chat / Responses
+// request body that has no non-empty one (session affinity's
+// inject_prompt_cache_key, phase12-api.md §2.6); a value the client sent is
+// never replaced. Without the field the key is inserted as the first member
+// and the rest of the body is kept byte for byte; an empty or null field is
+// replaced through a re-encode like RewriteForPassthrough.
+func SetPromptCacheKey(body []byte, key string) ([]byte, error) {
+	cur := gjson.GetBytes(body, "prompt_cache_key")
+	if cur.Exists() && cur.Type != gjson.Null && !(cur.Type == gjson.String && cur.Str == "") {
+		return body, nil
+	}
+	kb, _ := json.Marshal(key)
+	if cur.Exists() {
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(body, &m); err != nil {
+			return nil, invalid("请求体不是合法的 JSON：%v", err)
+		}
+		m["prompt_cache_key"] = kb
+		return json.Marshal(m)
+	}
+	rest := bytes.TrimLeft(body, " \t\r\n")
+	if len(rest) == 0 || rest[0] != '{' {
+		return nil, invalid("请求体必须是 JSON 对象")
+	}
+	rest = rest[1:]
+	out := make([]byte, 0, len(body)+len(kb)+24)
+	out = append(out, `{"prompt_cache_key":`...)
+	out = append(out, kb...)
+	if t := bytes.TrimLeft(rest, " \t\r\n"); len(t) > 0 && t[0] != '}' {
+		out = append(out, ',')
+	}
+	return append(out, rest...), nil
 }
 
 // fieldPolicy classifies top-level fields during conversion.
