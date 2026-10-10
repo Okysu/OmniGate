@@ -44,7 +44,7 @@ type Window =
 | --- | --- | --- |
 | calendar | 时区内自然日/周/月边界 | 距下一个边界 |
 | rolling | 连续滑动；按桶过期 | 最早一个“使累计降到上限以下”的桶过期时刻 |
-| session | 窗口开始后 duration；窗口过期后的第一次请求开启新窗口 | 当前窗口结束时刻 |
+| session | 窗口开始后 duration；窗口过期后的第一次请求开启新窗口；管理员重置或使用重置卡时从重置时刻重新开始（[phase11 §1](phase11-api.md#1-锚定式重置anchored-reset)） | 当前窗口结束时刻 |
 | period | 订阅起点 + n × every | 下一个周期起点 |
 | lifetime | 不重置 | 无（返回 `quota_exhausted`） |
 
@@ -133,6 +133,9 @@ interface RedeemBatch {
 | GET | `/api/billing/ledger` | 账本分页 |
 | GET | `/api/billing/subscriptions` | 我的订阅与各规则当前用量、重置时间 |
 | POST | `/api/billing/redeem` | `{code}` → `{kind, wallet?, subscription?}` |
+| GET | `/api/billing/reset-cards` | 我的额度重置卡（[phase11 §2.3](phase11-api.md#23-用户端billingown挂在-api)） |
+| GET | `/api/billing/reset-cards/{id}/preview` | 这张卡可用的订阅及会被重置的规则 |
+| POST | `/api/billing/reset-cards/{id}/use` | `{subscriptionId}`：使用重置卡（单事务；不匹配时不消耗） |
 | GET | `/api/billing/usage` | 按日/模型聚合的用量与费用 |
 
 管理（需要 `billing.manage`）：
@@ -146,11 +149,15 @@ interface RedeemBatch {
 | PATCH | `/api/admin/billing/redeem-batches/{id}` | 停用批次 |
 | POST | `/api/admin/billing/wallets/{userId}/adjust` | 手动调整余额（必填原因，写审计） |
 | POST | `/api/admin/billing/subscriptions` | 手动给用户开通套餐 |
+| GET/POST | `/api/admin/billing/reset-cards/batches` | 重置卡批次列表 / 发放（支持 `?dryRun=true`，[phase11 §2.2](phase11-api.md#22-管理端billingmanage挂在-apiadmin)） |
+| POST | `/api/admin/billing/reset-cards/batches/{id}/revoke` | 作废批次中未使用的卡 |
+| GET | `/api/admin/billing/reset-cards` | 按用户 / 批次列出重置卡 |
 | GET/POST | `/api/admin/billing/prices` | 售价版本 |
 | GET/POST | `/api/admin/billing/fx-rates` | 汇率版本 |
 
 错误码：`quota_exceeded`、`quota_exhausted`、`insufficient_balance`、`redeem_invalid`、`redeem_expired`、
-`redeem_not_started`、`redeem_used_up`、`redeem_user_limit`、`redeem_batch_disabled`、`plan_archived`、`version_conflict`。
+`redeem_not_started`、`redeem_used_up`、`redeem_user_limit`、`redeem_batch_disabled`、`plan_archived`、`version_conflict`；
+重置卡（Round 11）：`card_used`、`card_expired`、`card_revoked`、`card_not_applicable`、`card_plan_not_allowed`、`card_batch_revoked`。
 码不存在或格式错误时统一返回 `redeem_invalid`；只有码确实存在时才返回其他细分错误码，避免通过错误码批量探测。
 
 ## 8. 请求生命周期中的计费

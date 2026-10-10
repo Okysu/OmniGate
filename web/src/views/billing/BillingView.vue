@@ -26,6 +26,7 @@ import { amountSign } from '@/lib/money'
 import { isAbortError, queryInt } from '@/lib/query'
 import { formatDuration, isQuotaOverflow, modelsSummary, PLAN_ERROR_MESSAGES, QUOTA_OVERFLOW_OPTIONS, QUOTA_OVERFLOW_SHORT, rulesSummary, sortSubscriptions } from '@/lib/quota'
 import { normalizeRedeemCode, REDEEM_ERROR_MESSAGES } from '@/lib/redeem'
+import ResetCardsSection from './reset-cards/ResetCardsSection.vue'
 import UsageLimitsCard from './UsageLimitsCard.vue'
 
 const PAGE_SIZE = 20
@@ -175,8 +176,10 @@ async function setOverflow(value: QuotaOverflow) {
 }
 
 const limitsCard = ref<InstanceType<typeof UsageLimitsCard> | null>(null)
+const cardsSection = ref<InstanceType<typeof ResetCardsSection> | null>(null)
 function refresh() {
   void limitsCard.value?.load()
+  void cardsSection.value?.load()
   void loadWallet()
   void loadLedger()
   void loadSubscriptions()
@@ -239,7 +242,7 @@ function amountClass(v: string): string {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="钱包与订阅" description="账户余额、套餐订阅与额度、兑换码兑换与资金流水。金额以系统结算币种计。">
+    <PageHeader title="钱包与订阅" description="账户余额、套餐订阅与额度、重置卡、兑换码兑换与资金流水。金额以系统结算币种计。">
       <template #actions>
         <Button variant="outline" size="sm" :disabled="walletLoading || ledgerLoading || subsLoading" @click="refresh">
           <RefreshCw :class="walletLoading || ledgerLoading || subsLoading ? 'animate-spin' : ''" />
@@ -406,6 +409,8 @@ function amountClass(v: string): string {
         </Collapsible>
       </template>
     </section>
+
+    <ResetCardsSection ref="cardsSection" :now="now.getTime()" @used="loadSubscriptions" />
 
     <Card>
       <CardHeader>

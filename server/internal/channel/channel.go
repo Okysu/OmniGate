@@ -426,6 +426,16 @@ func normalizeBaseURL(raw string) (string, error) {
 	return u.String(), nil
 }
 
+// ValidHeaderName reports whether s is an acceptable header name for channel
+// configuration and session affinity pass_headers: 1–64 characters of
+// letters, digits, '-' and '_'.
+func ValidHeaderName(s string) bool { return validHeaderName(s) }
+
+// ForbiddenHeader reports whether a header may never be set from
+// configuration or copied from a client (credentials, cookies, hop-by-hop and
+// framing headers).
+func ForbiddenHeader(name string) bool { return forbiddenHeaders[strings.ToLower(name)] }
+
 func validHeaderName(s string) bool {
 	if s == "" || len(s) > 64 {
 		return false

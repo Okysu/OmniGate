@@ -54,6 +54,7 @@ import RetryOnPicker from '@/components/RetryOnPicker.vue'
 import DomainTagsInput from './settings/DomainTagsInput.vue'
 import SettingField from './settings/SettingField.vue'
 import SmtpTestDialog from './settings/SmtpTestDialog.vue'
+import AffinityCard from './settings/AffinityCard.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const system = useSystemStore()
@@ -113,7 +114,12 @@ const dirty = computed<Record<SettingsSection, boolean>>(() => {
     out[s] = isSectionDirty(s, f[s], d.settings)
   return out
 })
-const anyDirty = computed(() => SECTIONS.some(s => dirty.value[s]))
+/** 「会话亲和」 is saved on its own (AffinityCard). */
+const affinityDirty = ref(false)
+const anyDirty = computed(() => SECTIONS.some(s => dirty.value[s]) || affinityDirty.value)
+async function onAffinitySaved(res: SettingsResponse) {
+  await adopt(res)
+}
 
 function setSection<S extends SettingsSection>(f: SettingsForm, s: S, v: SettingsForm[S]) {
   f[s] = v
@@ -238,7 +244,7 @@ useEventListener(window, 'beforeunload', (e: BeforeUnloadEvent) => {
 
 // ---------- display ----------
 const readonly = computed(() => readonlyEntries(data.value?.readonly))
-const dirtySections = computed(() => SECTIONS.filter(s => dirty.value[s]).map(s => SECTION_TITLES[s]))
+const dirtySections = computed(() => [...SECTIONS.filter(s => dirty.value[s]).map(s => SECTION_TITLES[s]), ...(affinityDirty.value ? ['会话亲和'] : [])])
 const creditPreview = computed(() => {
   const v = form.value.billing.signupCredit.trim()
   return isValidAmount(v) ? money(v) : null
@@ -564,6 +570,8 @@ const restrictedWithoutDomains = computed(() => form.value.auth.registrationMode
           </Button>
         </CardFooter>
       </Card>
+
+      <AffinityCard v-if="data" :data="data" :busy="busy" :conflict="conflict" @saved="onAffinitySaved" @conflict="conflict = true" @dirty="(v: boolean) => (affinityDirty = v)" />
 
       <!-- 邮件（SMTP） -->
       <Card data-section="notifications">

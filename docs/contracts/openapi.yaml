@@ -211,15 +211,16 @@ info:
     - `previous_response_id`（依赖上游保存的会话状态）在转换时**无论兼容模式如何**都返回 `400 unsupported_parameter`，提示在请求中携带完整的 `input`；
       Responses 直通时原样转发。
     - Responses → Chat：可转换字段 `model, input, instructions, max_output_tokens, temperature, top_p, tools, tool_choice, parallel_tool_calls, stream,
-      reasoning, text, user`（`instructions` 变为 system 消息，`developer` 角色按 system 处理，`text.format` 映射为 `response_format`，
+      reasoning, text, user, prompt_cache_key, safety_identifier`（`prompt_cache_key` / `safety_identifier` 原样保留，Round 12；`instructions` 变为 system 消息，`developer` 角色按 system 处理，`text.format` 映射为 `response_format`，
       `reasoning.effort` 映射为 `reasoning_effort`）；中性字段 `store`（任意值）、`metadata` 为空、`truncation="disabled"`、`background=false`、
-      `include` 为空；提示类字段 `service_tier`、`prompt_cache_key`、`safety_identifier`、`max_tool_calls`、`input` 中的 `reasoning` 项
+      `include` 为空；提示类字段 `service_tier`、`max_tool_calls`、`input` 中的 `reasoning` 项
       （告警 `input[].reasoning`）与 `reasoning.summary`；无法转换：非 `function` 工具（`tools[].type=<type>`）、`input_image` 只给 `file_id`、
       其他输入项 / 内容类型等。
     - Chat → Responses：可转换字段 `model, messages, max_tokens, max_completion_tokens, temperature, top_p, stream, stream_options, tools, tool_choice,
-      parallel_tool_calls, user, reasoning_effort, response_format`（`reasoning_effort` 变为 `reasoning: {effort, summary: "auto"}`）；
+      parallel_tool_calls, user, reasoning_effort, response_format, prompt_cache_key, safety_identifier`（`reasoning_effort` 变为
+      `reasoning: {effort, summary: "auto"}`；`prompt_cache_key` / `safety_identifier` 原样保留，Round 12）；
       **`stop` 在 Responses 中没有对应参数，按无法转换处理**（strict → 400，lenient → 丢弃并告警）；中性字段 `n=1`、`presence_penalty=0`、
-      `frequency_penalty=0`、`logprobs=false`、`store=false`、`metadata` 为空；提示类字段 `service_tier`、`prompt_cache_key`、`safety_identifier`、
+      `frequency_penalty=0`、`logprobs=false`、`store=false`、`metadata` 为空；提示类字段 `service_tier`、
       历史中的 `messages[].reasoning_content`。转换到 Responses 的请求**总是带 `store: false`**，避免上游保存对话。
     - 响应方向：Responses 的 `reasoning` 输出项（摘要）↔ Chat 的 `reasoning_content` ↔ Anthropic `thinking`；`status: "incomplete"` 且原因为
       `max_output_tokens` ↔ `finish_reason: "length"`。转换生成的 Responses 流式事件序列为 `response.created` → `response.in_progress` → …
@@ -362,6 +363,10 @@ tags:
     description: 路由规则（Round 5，`docs/contracts/phase4-api.md` §2）：改变某些模型的渠道选择方式、重试与回退模型。需要 `routes.manage`。
   - name: settings
     description: 系统设置（Round 5，`docs/contracts/phase4-api.md` §3）：可在运行时修改的全局设置。需要 `settings.write`。
+  - name: affinity
+    description: |
+      会话亲和（Round 12，`docs/contracts/phase12-api.md`）：规则是系统设置 `gateway.affinity`；这里是内存中的会话绑定缓存
+      （统计 `settings.read`，清空 `settings.write`）。
   - name: notifications
     description: |
       通知（Round 6，`docs/contracts/phase6-api.md`）：站内通知、邮件（SMTP）与 Webhook 投递、用户偏好、
@@ -2581,6 +2586,7 @@ paths:
         - $ref: "#/components/parameters/LogKeyId"
         - $ref: "#/components/parameters/LogModel"
         - $ref: "#/components/parameters/LogStatus"
+        - $ref: "#/components/parameters/LogAffinity"
       responses:
         "200":
           description: 分页请求日志
@@ -2609,6 +2615,7 @@ paths:
         过滤条件与可见性同 `GET /api/logs`（同样支持 `model`、`channelId`、`keyId`、`status`）。日期按 UTC 聚合。
         `byModel`、`byChannel` 各按请求数倒序最多 50 项。`totals.cost` 仅持有 `stats.all` 时返回，否则为 `null`。
         `inputTokens` 含缓存读写 token。延迟分位数在无数据时为 `null`。
+        Round 12（`phase12-api.md` §5）：`cacheHitRate` = 缓存读取 ÷ `inputTokens`（无输入时为 null），`affinity` 为各会话亲和结果的请求数。
       x-required-permission: stats.own
       parameters:
         - $ref: "#/components/parameters/LogFrom"
@@ -2835,6 +2842,133 @@ paths:
           $ref: "#/components/responses/Unauthenticated"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/billing/reset-cards:
+    get:
+      tags: [billing]
+      operationId: listMyResetCards
+      summary: 我的额度重置卡（Round 11）
+      description: |
+        当前用户的重置卡（`docs/contracts/phase11-api.md` §2.3）：可用的在前（先过期的在前，永不过期的在后），其余按发放时间倒序，最多 500 张。
+        `available` 统计全部可用的卡（按卡类型，三种类型都会出现）。`expired` 为派生状态（未使用且 `expiresAt` 已过）。
+      x-required-permission: billing.own
+      responses:
+        "200":
+          description: 卡片列表
+          headers:
+            X-OmniGate-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyResetCards"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/billing/reset-cards/{id}/preview:
+    get:
+      tags: [billing]
+      operationId: previewResetCard
+      summary: 预览重置卡可用的订阅（Round 11）
+      description: |
+        这张卡可用的有效订阅（未取消、已开始且未到期，在限定套餐内，且至少有一条匹配的规则），以及每份订阅会被重置的规则的当前用量。
+        卡已使用 / 过期 / 作废时 `subscriptions` 为空。别人的卡或不存在 → `404`。
+      x-required-permission: billing.own
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 预览
+          headers:
+            X-OmniGate-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetCardPreview"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/billing/reset-cards/{id}/use:
+    post:
+      tags: [billing]
+      operationId: useResetCard
+      summary: 使用重置卡（Round 11）
+      description: |
+        在一个事务内（`docs/contracts/phase11-api.md` §2.3）：以条件更新认领卡（可用、属于调用者、未过期；并发使用同一张卡只有一个成功）→ 锁定并校验订阅
+        （属于调用者、有效、在限定套餐内）→ 找出窗口时长匹配的 session / rolling 规则 → 锚定式重置（session 从现在起重新计时，rolling 清空分桶）→
+        记录使用的订阅并写审计 `reset_card.use`。任何一步失败整体回滚，卡不会被消耗。
+      x-required-permission: billing.own
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XRequestedWith"
+        - $ref: "#/components/parameters/Origin"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [subscriptionId]
+              properties:
+                subscriptionId:
+                  type: string
+                  format: uuid
+      responses:
+        "200":
+          description: 使用成功；`subscription` 为重置后的订阅视图
+          headers:
+            X-OmniGate-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetCardUseResult"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/ForbiddenOrCsrf"
+        "404":
+          description: "`not_found`：卡或订阅不存在，或属于别人"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "`card_used` / `card_expired` / `card_revoked` / `subscription_not_active`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: "`validation_failed`（缺少 `subscriptionId`）/ `card_not_applicable`（订阅没有匹配的规则）/ `card_plan_not_allowed`（不在限定套餐内）；卡未被消耗"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -3587,7 +3721,8 @@ paths:
         - `rules`：只重置这些规则 ID（1–50 个）；null 或省略 = 全部规则。`includeLifetime` 为 false（默认）时 `lifetime` 规则不重置。
           一份订阅至少有一条被选中且可重置的规则时才计入 `affected`。
         - 每条选中规则删除当前窗口起点之后（含）的全部用量记录：`calendar` / `period` 清除当前窗口计数；`rolling` 清除窗口内的全部分桶；
-          `session` 结束当前会话（下一个请求开启新窗口）；`lifetime`（仅 `includeLifetime`）清除全部用量。网关每次请求都读取计数，
+          `session` 从重置时刻 A 重新开始一个空的会话（写入 `window_start = A`（截断到秒）、`used = 0` 的锚点行，`resetsAt = A + duration`，
+          之后的用量计入该会话，见 `docs/contracts/phase11-api.md` §1）；`lifetime`（仅 `includeLifetime`）清除全部用量。网关每次请求都读取计数，
           被配额阻断的用户立即恢复可用。
         - `?dryRun=true`：同样校验并统计，返回将受影响的数量与 ID，不做修改、不写审计、不发通知。
 
@@ -3689,6 +3824,177 @@ paths:
           $ref: "#/components/responses/ForbiddenOrCsrf"
         "404":
           $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/admin/billing/reset-cards/batches:
+    get:
+      tags: [billing]
+      operationId: listResetCardBatches
+      summary: 重置卡批次列表（Round 11）
+      description: 发放批次，最新在前，含各状态的卡数（`docs/contracts/phase11-api.md` §2.2）。
+      x-required-permission: billing.manage
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 批次列表
+          headers:
+            X-OmniGate-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetCardBatchList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [billing]
+      operationId: issueResetCards
+      summary: 发放重置卡（Round 11）
+      description: |
+        向目标用户每人发放 `quantity` 张重置卡（`docs/contracts/phase11-api.md` §2.2）。收件人在发放时确定（“全部用户”为当时已存在的用户），
+        只包括状态正常且拥有 `billing.own` 的用户；`cards = recipients × quantity`，单批最多 200 000 张。
+        `?dryRun=true`：同样校验，只返回人数与张数（`batch: null`，状态码 200），不写数据、不写审计、不发通知。
+        正式发放写审计 `reset_card.issue` 并给每位收件人发送通知 `reset_card.issued`。
+        错误：`422`（`details` 键 `kind`、`quantity`、`expiresAt`、`planIds`、`note`、`target`；正式发放时没有收件人 → `target`）；
+        `target.groupId` / `target.planId` 不存在 → `404 not_found`。
+      x-required-permission: billing.manage
+      parameters:
+        - $ref: "#/components/parameters/DryRun"
+        - $ref: "#/components/parameters/XRequestedWith"
+        - $ref: "#/components/parameters/Origin"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetCardIssueRequest"
+            example:
+              kind: both
+              quantity: 2
+              expiresAt: "2026-11-01T00:00:00Z"
+              planIds: null
+              note: 国庆福利
+              target: { type: plan, planId: 0192f0c5-1000-7abc-8def-0123456789ab }
+      responses:
+        "200":
+          description: dryRun：将发放的人数与张数
+          headers:
+            X-OmniGate-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetCardIssueResult"
+              example:
+                recipients: 12
+                cards: 24
+                batch: null
+        "201":
+          description: 已发放
+          headers:
+            X-OmniGate-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetCardIssueResult"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/ForbiddenOrCsrf"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/admin/billing/reset-cards/batches/{id}/revoke:
+    post:
+      tags: [billing]
+      operationId: revokeResetCardBatch
+      summary: 作废重置卡批次（Round 11）
+      description: |
+        批次中所有未使用的卡（含已过期的）变为 `revoked`，已使用的卡不变；写审计 `reset_card.revoke`。无请求体。
+        已作废 → `409 card_batch_revoked`；不存在 → `404`。
+      x-required-permission: billing.manage
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XRequestedWith"
+        - $ref: "#/components/parameters/Origin"
+      responses:
+        "200":
+          description: 作废后的批次
+          headers:
+            X-OmniGate-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetCardBatch"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/ForbiddenOrCsrf"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "`card_batch_revoked`：批次已作废"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/admin/billing/reset-cards:
+    get:
+      tags: [billing]
+      operationId: listResetCards
+      summary: 重置卡列表（Round 11）
+      description: 按用户（用户管理）或批次列出重置卡，最新在前；两个过滤条件都可省略。ID 不合法 → `422`。
+      x-required-permission: billing.manage
+      parameters:
+        - name: userId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: batchId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: 卡片列表
+          headers:
+            X-OmniGate-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetCardList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/ValidationFailed"
         "500":
@@ -4005,6 +4311,65 @@ paths:
           $ref: "#/components/responses/ValidationFailed"
         "500":
           $ref: "#/components/responses/InternalError"
+
+  /api/admin/affinity/stats:
+    get:
+      tags: [affinity]
+      operationId: getAffinityStats
+      summary: 会话绑定缓存统计
+      description: 当前有效的会话绑定数（先清除过期的）、容量（`max_entries`）与按规则名称的条目数（`phase12-api.md` §3）。
+      x-required-permission: settings.read
+      responses:
+        "200":
+          description: 统计
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AffinityStats"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/admin/affinity/clear:
+    post:
+      tags: [affinity]
+      operationId: clearAffinity
+      summary: 清空会话绑定
+      description: |
+        请求体可省略；`rule` 省略或为空时清空全部绑定，否则只清空该规则建立的绑定。写审计 `affinity.clear`
+        （`resourceId: "gateway.affinity"`、`metadata: { cleared, rule? }`）。
+      x-required-permission: settings.write
+      parameters:
+        - $ref: "#/components/parameters/XRequestedWith"
+        - $ref: "#/components/parameters/Origin"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                rule: { type: string, maxLength: 64 }
+      responses:
+        "200":
+          description: 已清空
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cleared, stats]
+                properties:
+                  cleared: { type: integer }
+                  stats:
+                    $ref: "#/components/schemas/AffinityStats"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/ForbiddenOrCsrf"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
 
   /api/admin/settings/smtp-test:
     post:
@@ -6194,6 +6559,14 @@ components:
       schema:
         type: string
         enum: [success, error]
+    LogAffinity:
+      name: affinity
+      in: query
+      required: false
+      description: "会话亲和结果（Round 12，`phase12-api.md` §4）：其中一个值，或 `any` = 有规则生效的请求；其他值 → 422。"
+      schema:
+        type: string
+        enum: [any, hit, new, miss, rebound, failover, broken, strict_failed, "off"]
     DryRun:
       name: dryRun
       in: query
@@ -7663,6 +8036,9 @@ components:
         - user.auto_enable
         - subscription.quota_reset
         - subscription.extend
+        - reset_card.issue
+        - reset_card.revoke
+        - reset_card.use
 
     AuditEntry:
       type: object
@@ -9803,6 +10179,13 @@ components:
         usageEstimated:
           type: boolean
           description: 同 `usage.estimated`。音频接口上为 true 表示上游没有报告用量，只收了 `perRequest`
+        affinity:
+          type: [string, "null"]
+          enum: [hit, new, miss, rebound, failover, broken, strict_failed, "off", null]
+          description: 会话亲和结果（Round 12，`phase12-api.md` §4）；没有规则生效时为 null
+        affinityRule:
+          type: [string, "null"]
+          description: 生效的会话亲和规则名称；从不记录会话值
 
     RequestLogList:
       allOf:
@@ -9865,6 +10248,17 @@ components:
               type: [integer, "null"]
             ttftP50Ms:
               type: [integer, "null"]
+            cacheReadTokens:
+              type: integer
+              format: int64
+            cacheWriteTokens:
+              type: integer
+              format: int64
+            cacheHitRate:
+              type: [number, "null"]
+              minimum: 0
+              maximum: 1
+              description: cacheReadTokens / inputTokens（输入 + 缓存读 + 缓存写）；没有输入 token 时为 null
         daily:
           type: array
           items:
@@ -9923,6 +10317,18 @@ components:
                 type: integer
               latencyP95Ms:
                 type: [integer, "null"]
+              inputTokens:
+                type: integer
+                description: 输入 + 缓存读 + 缓存写 token
+              cacheReadTokens:
+                type: integer
+              cacheHitRate:
+                type: [number, "null"]
+                description: cacheReadTokens / inputTokens；没有输入 token 时为 null
+        affinity:
+          type: object
+          description: 各会话亲和结果的请求数（只含出现过的结果）
+          additionalProperties: { type: integer }
 
     Wallet:
       type: object
@@ -10803,6 +11209,249 @@ components:
             type: string
             format: uuid
 
+    IdNameRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+
+    ResetCardKind:
+      type: string
+      enum: ["5h", weekly, both]
+      description: |
+        `5h`：session / rolling 窗口、时长恰为 5 小时的规则；`weekly`：时长恰为 7 天；`both`：两者（同一时刻一起重置）。按窗口时长匹配，与规则 id 无关。
+
+    ResetCardTarget:
+      description: 发放对象。响应中 `groupName` / `planName` 为发放时的名称快照。
+      oneOf:
+        - type: object
+          title: 指定用户
+          required: [type, userIds]
+          properties:
+            type: { type: string, const: users }
+            userIds:
+              type: array
+              minItems: 1
+              maxItems: 1000
+              items: { type: string, format: uuid }
+        - type: object
+          title: 用户组
+          required: [type, groupId]
+          properties:
+            type: { type: string, const: group }
+            groupId: { type: string, format: uuid }
+            groupName: { type: string, readOnly: true }
+        - type: object
+          title: 套餐有效订阅用户
+          required: [type, planId]
+          properties:
+            type: { type: string, const: plan }
+            planId: { type: string, format: uuid }
+            planName: { type: string, readOnly: true }
+        - type: object
+          title: 全部用户
+          required: [type]
+          properties:
+            type: { type: string, const: all }
+
+    ResetCardIssueRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, quantity, target]
+      properties:
+        kind:
+          $ref: "#/components/schemas/ResetCardKind"
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: 每人张数
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+          description: 过期时间（必须晚于当前时间）；null / 省略 = 永不过期
+        planIds:
+          type: [array, "null"]
+          maxItems: 50
+          description: 限定套餐：卡只能用于这些套餐的订阅；null / 省略 / [] = 不限
+          items: { type: string, format: uuid }
+        note:
+          type: string
+          maxLength: 200
+          default: ""
+        target:
+          $ref: "#/components/schemas/ResetCardTarget"
+
+    ResetCardCounts:
+      type: object
+      required: [issued, used, available, expired, revoked]
+      description: 各状态互斥，之和等于 `issued`
+      properties:
+        issued: { type: integer }
+        used: { type: integer }
+        available: { type: integer }
+        expired: { type: integer, description: 未使用、未作废且已过期 }
+        revoked: { type: integer }
+
+    ResetCardBatch:
+      type: object
+      required: [id, kind, quantity, recipients, target, plans, expiresAt, note, status, counts, createdBy, createdAt, revokedAt]
+      properties:
+        id: { type: string, format: uuid }
+        kind:
+          $ref: "#/components/schemas/ResetCardKind"
+        quantity: { type: integer }
+        recipients: { type: integer }
+        target:
+          $ref: "#/components/schemas/ResetCardTarget"
+        plans:
+          type: array
+          description: 限定套餐（当前名称）；[] = 不限
+          items:
+            $ref: "#/components/schemas/IdNameRef"
+        expiresAt: { type: [string, "null"], format: date-time }
+        note: { type: string }
+        status: { type: string, enum: [active, revoked] }
+        counts:
+          $ref: "#/components/schemas/ResetCardCounts"
+        createdBy:
+          type: object
+          required: [id, displayName]
+          properties:
+            id: { type: string, format: uuid }
+            displayName: { type: string }
+        createdAt: { type: string, format: date-time }
+        revokedAt: { type: [string, "null"], format: date-time }
+
+    ResetCardBatchList:
+      allOf:
+        - $ref: "#/components/schemas/ListMeta"
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/ResetCardBatch"
+
+    ResetCardIssueResult:
+      type: object
+      required: [recipients, cards, batch]
+      properties:
+        recipients: { type: integer, minimum: 0 }
+        cards: { type: integer, minimum: 0, description: recipients × quantity }
+        batch:
+          description: 新批次；dryRun 时为 null
+          oneOf:
+            - $ref: "#/components/schemas/ResetCardBatch"
+            - type: "null"
+
+    ResetCard:
+      type: object
+      required: [id, batchId, user, kind, status, expiresAt, plans, note, createdAt, usedAt, subscription, revokedAt]
+      properties:
+        id: { type: string, format: uuid }
+        batchId: { type: string, format: uuid }
+        user:
+          type: object
+          required: [id, displayName]
+          properties:
+            id: { type: string, format: uuid }
+            displayName: { type: string }
+        kind:
+          $ref: "#/components/schemas/ResetCardKind"
+        status:
+          type: string
+          enum: [available, used, expired, revoked]
+          description: "`expired` 为派生状态：未使用且 `expiresAt` 已过"
+        expiresAt: { type: [string, "null"], format: date-time }
+        plans:
+          type: array
+          description: 限定套餐；[] = 不限
+          items:
+            $ref: "#/components/schemas/IdNameRef"
+        note: { type: string }
+        createdAt: { type: string, format: date-time }
+        usedAt: { type: [string, "null"], format: date-time }
+        subscription:
+          description: 使用在哪份订阅
+          oneOf:
+            - type: object
+              required: [id, planName]
+              properties:
+                id: { type: string, format: uuid }
+                planName: { type: string }
+            - type: "null"
+        revokedAt: { type: [string, "null"], format: date-time }
+
+    ResetCardList:
+      allOf:
+        - $ref: "#/components/schemas/ListMeta"
+        - type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/ResetCard"
+
+    MyResetCards:
+      type: object
+      required: [items, available]
+      properties:
+        items:
+          type: array
+          maxItems: 500
+          items:
+            $ref: "#/components/schemas/ResetCard"
+        available:
+          type: object
+          description: 可用的卡数（按卡类型）
+          required: ["5h", weekly, both]
+          properties:
+            "5h": { type: integer }
+            weekly: { type: integer }
+            both: { type: integer }
+
+    ResetCardPreview:
+      type: object
+      required: [card, now, subscriptions]
+      properties:
+        card:
+          $ref: "#/components/schemas/ResetCard"
+        now: { type: string, format: date-time, description: 服务器时间 }
+        subscriptions:
+          type: array
+          description: 这张卡可用的有效订阅（卡不可用时为空）
+          items:
+            type: object
+            required: [id, plan, endsAt, rules, hasUsage]
+            properties:
+              id: { type: string, format: uuid }
+              plan:
+                $ref: "#/components/schemas/IdNameRef"
+              endsAt: { type: string, format: date-time }
+              rules:
+                type: array
+                description: 会被重置的规则及当前用量
+                items:
+                  $ref: "#/components/schemas/SubscriptionRule"
+              hasUsage: { type: boolean, description: 其中任一窗口有用量 }
+
+    ResetCardUseResult:
+      type: object
+      required: [card, subscription, rules]
+      properties:
+        card:
+          $ref: "#/components/schemas/ResetCard"
+        subscription:
+          $ref: "#/components/schemas/Subscription"
+        rules:
+          type: array
+          description: 被重置的规则 ID
+          items: { type: string }
+
     CompatibleRequestBody:
       type: object
       additionalProperties: true
@@ -11200,8 +11849,87 @@ components:
               maximum: 3650
               default: 90
               description: 请求日志保留天数，0 = 永久。每天执行一次（启动时也执行）：删除整月早于截止时间的分区，并删除边界分区中更早的行
+            affinity:
+              $ref: "#/components/schemas/AffinitySettings"
         notifications:
           $ref: "#/components/schemas/NotificationSettings"
+
+    AffinitySettings:
+      type: object
+      description: |
+        会话亲和（Round 12，`phase12-api.md` §1）。字段名与 new-api 的“渠道亲和”相同（snake_case），new-api 的 JSON 可直接写入：
+        未知字段忽略、`null` 数组视为空、缺少的全局字段取默认值。默认值为内置的 Codex CLI / Claude Code 两条规则（§1.1）。
+        校验失败 → 422，`details["gateway.affinity"]` 列出字段路径（如 `rules[0].key_sources[0].type`）。
+      required: [enabled, session_mode, switch_on_success, keep_on_channel_disabled, max_entries, default_ttl_seconds, rules]
+      properties:
+        enabled: { type: boolean, default: true }
+        session_mode: { type: string, enum: ["off", prefer, strict], default: prefer }
+        switch_on_success: { type: boolean, default: true }
+        keep_on_channel_disabled: { type: boolean, default: false }
+        max_entries: { type: integer, minimum: 1, maximum: 1000000, default: 100000 }
+        default_ttl_seconds: { type: integer, minimum: 1, maximum: 2592000, default: 3600 }
+        rules:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/AffinityRule"
+
+    AffinityRule:
+      type: object
+      required: [name, key_sources]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64, description: 唯一 }
+        model_regex: { type: array, maxItems: 32, items: { type: string, maxLength: 512 }, description: 逻辑模型，任一匹配；空 = 任意 }
+        path_regex: { type: array, maxItems: 32, items: { type: string, maxLength: 512 }, description: 请求路径，任一匹配；空 = 任意 }
+        user_agent_include: { type: array, maxItems: 32, items: { type: string }, description: 不区分大小写的子串，任一包含；空 = 不限 }
+        key_sources:
+          type: array
+          minItems: 1
+          maxItems: 16
+          description: 按顺序取第一个非空值；`context_int` / `context_string`（new-api 内部类型）被拒绝
+          items:
+            type: object
+            required: [type]
+            properties:
+              type: { type: string, enum: [gjson, request_header] }
+              path: { type: string, maxLength: 256, description: gjson 路径 }
+              key: { type: string, maxLength: 64, description: 请求头名称 }
+        value_regex: { type: string }
+        ttl_seconds: { type: integer, minimum: 0, maximum: 2592000, description: 0 = default_ttl_seconds }
+        param_override_template:
+          type: [object, "null"]
+          description: 只支持 `pass_headers` 操作；禁止透传的请求头见 `phase12-api.md` §1
+          properties:
+            operations:
+              type: array
+              maxItems: 8
+              items:
+                type: object
+                required: [mode, value]
+                properties:
+                  mode: { type: string, enum: [pass_headers] }
+                  value:
+                    description: 1–64 个请求头名称（或逗号分隔的字符串）
+                    oneOf:
+                      - { type: array, items: { type: string } }
+                      - { type: string }
+                  keep_origin: { type: boolean, description: true = 渠道显式配置的同名请求头保持渠道的值 }
+        skip_retry_on_failure: { type: boolean, description: new-api 旧字段：session_mode 为空时 true = strict }
+        session_mode: { type: string, enum: ["", inherit, "off", prefer, strict] }
+        include_using_group: { type: boolean }
+        include_model_name: { type: boolean }
+        include_rule_name: { type: boolean }
+
+    AffinityStats:
+      type: object
+      required: [entries, maxEntries, rules]
+      properties:
+        entries: { type: integer }
+        maxEntries: { type: integer }
+        rules:
+          type: object
+          description: 按规则名称的有效绑定数
+          additionalProperties: { type: integer }
 
     SystemSettingsPatch:
       type: object
@@ -11237,6 +11965,11 @@ components:
           properties:
             maxAttempts: { type: [integer, "null"] }
             logRetentionDays: { type: [integer, "null"] }
+            affinity:
+              description: 整体替换；`null` 恢复默认值（内置预设）
+              oneOf:
+                - $ref: "#/components/schemas/AffinitySettings"
+                - type: "null"
         notifications:
           type: object
           additionalProperties: false
@@ -11347,8 +12080,11 @@ components:
         - `channel.share_invited`：类别“渠道共享”（所有用户都有资格接收），`info`、非告警，默认仅站内开启。有人把渠道共享给你（新邀请或重新邀请）时产生，
           同一渠道对同一用户 1 小时内最多一次；链接 `/console/channels?tab=shared`；`data` 为 `{channelId, channelName, owner: {id, displayName}, models}`。
           不计入渠道告警摘要。
+        Round 11（`docs/contracts/phase11-api.md` §3）新增：
+        - `reset_card.issued`：钱包 / 套餐类（需要 `billing.own`），`info`、非告警，默认邮件 + 站内开启、Webhook 关闭。管理员发放重置卡后每位收件人一条
+          （同一批次每 500 位收件人合并为一个事件）；链接 `/console/billing`；`data` 为 `{batchId, kind, quantity, plans, note, expiresAt?}`。
       enum: [account.status_changed, account.group_changed, wallet.balance_low, wallet.credited, subscription.expiring, subscription.expired, subscription.quota_reset,
-        subscription.extended, quota.near_limit, quota.exhausted, limit.spend_near, limit.spend_reached, model.price_changed, model.removed, model.added, key.expiring, channel.unhealthy,
+        subscription.extended, reset_card.issued, quota.near_limit, quota.exhausted, limit.spend_near, limit.spend_reached, model.price_changed, model.removed, model.added, key.expiring, channel.unhealthy,
         channel.recovered, channel.auth_failed, upstream.balance_low, channel.share_invited, plugin.pending_approval]
 
     EventSwitches:

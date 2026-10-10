@@ -684,6 +684,9 @@ export interface RequestLog {
   priceMultiplier?: string | null
   /** phase10 §1: `aboveInputTokens` of the sell-price tier applied; null = base prices / not priced / older rows. */
   priceTier?: number | null
+  /** phase12 §4: session affinity outcome and rule; null when no rule applied / older backends. */
+  affinity?: AffinityOutcome | null
+  affinityRule?: string | null
   /** NOT in the contract: shown in the tooltip when the backend splits the multiplier. */
   groupMultiplier?: string | null
   scheduleMultiplier?: string | null
@@ -702,6 +705,10 @@ export interface StatsTotals {
   latencyP95Ms: number | null
   latencyP99Ms: number | null
   ttftP50Ms: number | null
+  /** phase12 §5: prompt cache reads / writes; `cacheHitRate` = cacheRead / inputTokens (null without input). Absent on older backends. */
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  cacheHitRate?: number | null
 }
 
 export interface StatsDaily {
@@ -728,6 +735,10 @@ export interface StatsByChannel {
   requests: number
   errors: number
   latencyP95Ms: number | null
+  /** phase12 §5: prompt tokens (input + cache), cache reads and their ratio; absent on older backends. */
+  inputTokens?: number
+  cacheReadTokens?: number
+  cacheHitRate?: number | null
 }
 
 export interface StatsSummary {
@@ -737,6 +748,8 @@ export interface StatsSummary {
   daily: StatsDaily[]
   byModel: StatsByModel[]
   byChannel: StatsByChannel[]
+  /** phase12 §4: requests per session affinity outcome; absent on older backends. */
+  affinity?: Partial<Record<AffinityOutcome, number>>
 }
 
 export interface Wallet {
@@ -996,6 +1009,120 @@ export interface BulkSubscriptionResult {
   affected: number
   /** At most the first 500 ids. */
   subscriptions: string[]
+}
+
+// ---------------------------------------------------------------------------
+// Round 11: quota reset cards (phase11-api.md §2)
+// ---------------------------------------------------------------------------
+
+/** `5h`: 5-hour windows; `weekly`: 7-day windows; `both`: both at once. */
+export type ResetCardKind = '5h' | 'weekly' | 'both'
+/** `expired` is derived (available and `expiresAt` passed). */
+export type ResetCardStatus = 'available' | 'used' | 'expired' | 'revoked'
+
+/** Recipients of a batch; name snapshots are filled by the server. */
+export type ResetCardTarget =
+  | { type: 'users', userIds: string[] }
+  | { type: 'group', groupId: string, groupName?: string }
+  | { type: 'plan', planId: string, planName?: string }
+  | { type: 'all' }
+
+export interface ResetCardCounts {
+  issued: number
+  used: number
+  available: number
+  expired: number
+  revoked: number
+}
+
+export interface ResetCardBatch {
+  id: string
+  kind: ResetCardKind
+  /** Cards per recipient. */
+  quantity: number
+  recipients: number
+  target: ResetCardTarget
+  /** Plan restriction; [] = every plan. */
+  plans: { id: string, name: string }[]
+  expiresAt: string | null
+  note: string
+  status: 'active' | 'revoked'
+  counts: ResetCardCounts
+  createdBy: { id: string, displayName: string }
+  createdAt: string
+  revokedAt: string | null
+}
+
+export interface ResetCard {
+  id: string
+  batchId: string
+  user: { id: string, displayName: string }
+  kind: ResetCardKind
+  status: ResetCardStatus | string
+  expiresAt: string | null
+  /** Plan restriction; [] = every plan. */
+  plans: { id: string, name: string }[]
+  note: string
+  createdAt: string
+  usedAt: string | null
+  /** The subscription the card was used on. */
+  subscription: { id: string, planName: string } | null
+  revokedAt: string | null
+}
+
+/** `GET /api/billing/reset-cards`. */
+export interface MyResetCards {
+  /** Usable cards first (soonest to expire first), then the rest; at most 500. */
+  items: ResetCard[]
+  /** Usable cards by kind. */
+  available: Record<ResetCardKind, number>
+}
+
+/** `POST /api/admin/billing/reset-cards/batches` body. */
+export interface ResetCardIssueInput {
+  kind: ResetCardKind
+  /** 1–100 per recipient. */
+  quantity: number
+  expiresAt: string | null
+  /** Plan restriction; [] = every plan. */
+  planIds: string[]
+  /** ≤200. */
+  note: string
+  target: ResetCardTarget
+}
+
+/** Issue result (dry run: `batch` null). */
+export interface ResetCardIssueResult {
+  recipients: number
+  cards: number
+  batch: ResetCardBatch | null
+}
+
+/** A subscription a card can be used on, with the rules it would reset. */
+export interface ResetCardTargetSubscription {
+  id: string
+  plan: { id: string, name: string }
+  endsAt: string
+  rules: RuleUsage[]
+  /** Some affected window has usage. */
+  hasUsage: boolean
+}
+
+/** `GET /api/billing/reset-cards/{id}/preview`. */
+export interface ResetCardPreview {
+  card: ResetCard
+  /** Server time of the preview. */
+  now: string
+  /** Applicable live subscriptions only (empty for unusable cards). */
+  subscriptions: ResetCardTargetSubscription[]
+}
+
+/** `POST /api/billing/reset-cards/{id}/use`. */
+export interface ResetCardUseResult {
+  card: ResetCard
+  subscription: Subscription
+  /** Ids of the rules that were reset. */
+  rules: string[]
 }
 
 // ---------------------------------------------------------------------------
@@ -1468,6 +1595,8 @@ export interface SystemSettings {
     logRetentionDays: number
     /** Retry classes for requests no route rule matches (absent on older backends → default). */
     retryOn: RetryOn[]
+    /** Session affinity (phase12-api.md §1); absent on older backends. */
+    affinity?: AffinityConfig
   }
   /** Round 6 (phase6-api.md §1); absent on older backends. */
   notifications?: NotificationSettings
@@ -1489,6 +1618,65 @@ export interface NotificationSettings {
   enabled: boolean
   emailRateLimitPerHour: number
 }
+
+// ---------------------------------------------------------------------------
+// Round 12: session affinity (phase12-api.md). Field names follow new-api.
+// ---------------------------------------------------------------------------
+
+export type AffinityMode = 'off' | 'prefer' | 'strict'
+/** '' = new-api's legacy form (skip_retry_on_failure decides: true = strict, else the global mode). */
+export type AffinityRuleMode = '' | 'inherit' | AffinityMode
+
+export interface AffinityKeySource {
+  /** 'gjson' (path into the JSON body) | 'request_header' (key); other values are rejected. */
+  type: 'gjson' | 'request_header' | string
+  key?: string
+  path?: string
+}
+
+export interface AffinityOperation {
+  mode: 'pass_headers'
+  value: string[]
+  keep_origin: boolean
+}
+
+export interface AffinityRule {
+  name: string
+  model_regex: string[]
+  path_regex: string[]
+  user_agent_include: string[]
+  key_sources: AffinityKeySource[]
+  value_regex: string
+  /** 0 = default_ttl_seconds. */
+  ttl_seconds: number
+  param_override_template: { operations: AffinityOperation[] } | null
+  skip_retry_on_failure: boolean
+  session_mode: AffinityRuleMode
+  include_using_group: boolean
+  include_model_name: boolean
+  include_rule_name: boolean
+}
+
+export interface AffinityConfig {
+  enabled: boolean
+  session_mode: AffinityMode
+  switch_on_success: boolean
+  keep_on_channel_disabled: boolean
+  max_entries: number
+  default_ttl_seconds: number
+  rules: AffinityRule[]
+}
+
+/** GET /api/admin/affinity/stats. */
+export interface AffinityStats {
+  entries: number
+  maxEntries: number
+  /** Live bindings per rule name. */
+  rules: Record<string, number>
+}
+
+/** request_logs.affinity (phase12-api.md §4). */
+export type AffinityOutcome = 'hit' | 'new' | 'miss' | 'rebound' | 'failover' | 'broken' | 'strict_failed' | 'off'
 
 export type SettingsSection = keyof SystemSettings
 export type SettingSource = 'db' | 'env' | 'default'
@@ -1701,6 +1889,7 @@ export type NotificationEventType
     | 'limit.spend_near'
     | 'limit.spend_reached'
     | 'channel.share_invited'
+    | 'reset_card.issued'
 
 export type NotificationSeverity = 'info' | 'warning' | 'critical'
 

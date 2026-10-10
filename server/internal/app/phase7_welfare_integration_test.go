@@ -147,16 +147,21 @@ func TestQuotaResetAndExtend(t *testing.T) {
 			t.Fatalf("reset = %v", res)
 		}
 		rules := e.expectUsed(e.admin, aliceW1, map[string]string{"cal": "0", "roll": "0", "sess": "0", "per": "0", "life": "2"})
-		// The session window ended: the next request opens a new one.
-		if rules["sess"]["windowStart"] != nil || rules["cal"]["windowStart"] != before["cal"]["windowStart"] {
-			t.Fatalf("after reset: sess=%v cal=%v", rules["sess"], rules["cal"])
+		// The session window restarted at the reset (phase11-api.md §1): empty,
+		// refreshing 5 hours after the reset; rolling windows have no refresh time.
+		anchor, _ := rules["sess"]["windowStart"].(string)
+		start, err := time.Parse(time.RFC3339Nano, anchor)
+		if err != nil || rules["sess"]["resetsAt"] != start.Add(5*time.Hour).Format(time.RFC3339) ||
+			time.Since(start) > time.Minute || rules["roll"]["resetsAt"] != nil ||
+			rules["cal"]["windowStart"] != before["cal"]["windowStart"] {
+			t.Fatalf("after reset: sess=%v roll=%v cal=%v", rules["sess"], rules["roll"], rules["cal"])
 		}
 		if code := call(aliceKey, "w1"); code != 200 {
 			t.Fatalf("w1 after reset = %d", code)
 		}
 		rules = e.expectUsed(e.admin, aliceW1, map[string]string{"cal": "1", "roll": "1", "sess": "1", "per": "1", "life": "3"})
-		if rules["sess"]["windowStart"] == nil {
-			t.Fatal("no new session window")
+		if rules["sess"]["windowStart"] != anchor {
+			t.Fatalf("usage went to another session: %v (anchor %s)", rules["sess"], anchor)
 		}
 		// Lifetime only with includeLifetime.
 		reset(map[string]any{"target": map[string]any{"ids": []string{aliceW1}}, "rules": []string{"life"}, "includeLifetime": true}, "", 200)

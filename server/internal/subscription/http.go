@@ -16,8 +16,9 @@ import (
 	"omnigate/internal/platform/httpx"
 )
 
-// Handler serves /api/plans and /api/billing/subscriptions (Routes) and
-// /api/admin/billing/{plans,subscriptions} (AdminRoutes).
+// Handler serves /api/plans and /api/billing/{subscriptions,reset-cards}
+// (Routes) and /api/admin/billing/{plans,subscriptions,reset-cards}
+// (AdminRoutes).
 type Handler struct {
 	svc *Service
 }
@@ -30,6 +31,7 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(auth.Require(authz.BillingOwn)).Get("/billing/subscriptions", h.mine)
 	r.With(auth.Require(authz.BillingOwn)).Get("/billing/preferences", h.getPrefs)
 	r.With(auth.Require(authz.BillingOwn)).Put("/billing/preferences", h.putPrefs)
+	h.cardRoutes(r)
 }
 
 func (h *Handler) getPrefs(w http.ResponseWriter, r *http.Request) {
@@ -67,6 +69,7 @@ func (h *Handler) AdminRoutes(r chi.Router) {
 	m.Post("/billing/subscriptions/{id}/cancel", h.cancel)
 	m.Post("/billing/subscriptions/reset-quota", h.resetQuota)
 	m.Post("/billing/subscriptions/extend", h.extend)
+	h.cardAdminRoutes(r)
 }
 
 // ---- JSON views ----

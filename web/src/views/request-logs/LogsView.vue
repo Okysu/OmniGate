@@ -31,6 +31,7 @@ import { logMultiplier } from '@/lib/groups'
 import PriceTierLogBadge from '@/components/pricing/PriceTierLogBadge.vue'
 import { tierLabel } from '@/lib/priceTiers'
 import { ERROR_CLASS_HINTS, INBOUND_LABELS } from '@/lib/labels'
+import { isOutcome, OUTCOME_CLASSES, OUTCOME_HINTS, OUTCOME_LABELS, OUTCOMES } from '@/lib/affinity'
 import { isAbortError, queryInt, queryStr } from '@/lib/query'
 import { useAuthStore } from '@/stores/auth'
 
@@ -97,6 +98,11 @@ const model = computed(() => queryStr(route.query.model))
 const status = computed(() => queryStr(route.query.status) || ALL)
 const keyId = computed(() => queryStr(route.query.keyId) || ALL)
 const userId = computed(() => (seeAll.value ? queryStr(route.query.userId) : ''))
+/** phase12 §4: session affinity outcome filter ('any' = an affinity rule applied). */
+const affinity = computed(() => {
+  const v = queryStr(route.query.affinity)
+  return v === 'any' || isOutcome(v) ? v : ALL
+})
 const modelInput = ref(model.value)
 watch(model, v => (modelInput.value = v))
 
@@ -134,6 +140,7 @@ async function load(opts: { silent?: boolean } = {}) {
       status: status.value === ALL ? undefined : status.value as 'success' | 'error',
       keyId: keyId.value === ALL ? undefined : keyId.value,
       userId: userId.value || undefined,
+      affinity: affinity.value === ALL ? undefined : affinity.value,
     }, ctrl.signal)
     items.value = res.items
     total.value = res.total
@@ -187,9 +194,9 @@ function onUserPicked(u: User | null) {
 }
 watch(userPick, v => setQuery({ userId: v[0], page: undefined }))
 
-const hasFilters = computed(() => !!model.value || status.value !== ALL || keyId.value !== ALL || !!userId.value)
+const hasFilters = computed(() => !!model.value || status.value !== ALL || keyId.value !== ALL || !!userId.value || affinity.value !== ALL)
 function clearFilters() {
-  setQuery({ model: undefined, status: undefined, keyId: undefined, userId: undefined, page: undefined })
+  setQuery({ model: undefined, status: undefined, keyId: undefined, userId: undefined, affinity: undefined, page: undefined })
 }
 
 // ---------- rows ----------
@@ -274,6 +281,22 @@ const colCount = computed(() => 12 + (seeAll.value ? 2 : 0))
                 </SelectItem>
                 <SelectItem v-if="keyId !== ALL && !keys.some(k => k.id === keyId)" :value="keyId">
                   {{ keyId.slice(0, 8) }}…
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <Select :model-value="affinity" @update:model-value="(v) => setQuery({ affinity: String(v), page: undefined })">
+              <SelectTrigger class="w-full sm:w-36" aria-label="按会话亲和过滤" data-testid="affinity-filter">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem :value="ALL">
+                  全部会话
+                </SelectItem>
+                <SelectItem value="any">
+                  会话亲和生效
+                </SelectItem>
+                <SelectItem v-for="o in OUTCOMES" :key="o" :value="o">
+                  亲和：{{ OUTCOME_LABELS[o] }}
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -382,6 +405,16 @@ const colCount = computed(() => 12 + (seeAll.value ? 2 : 0))
                       </Badge>
                       <Badge v-if="l.attempts > 1" variant="outline" class="h-4 shrink-0 px-1 text-[10px]" :title="`共尝试 ${l.attempts} 次`">
                         ×{{ l.attempts }}
+                      </Badge>
+                      <Badge
+                        v-if="isOutcome(l.affinity)"
+                        variant="outline"
+                        class="h-4 shrink-0 px-1 text-[10px]"
+                        :class="OUTCOME_CLASSES[l.affinity]"
+                        :title="`会话亲和（${l.affinityRule ?? '—'}）：${OUTCOME_HINTS[l.affinity]}`"
+                        data-testid="affinity-badge"
+                      >
+                        亲和·{{ OUTCOME_LABELS[l.affinity] }}
                       </Badge>
                     </div>
                   </TableCell>
@@ -568,6 +601,16 @@ const colCount = computed(() => 12 + (seeAll.value ? 2 : 0))
                           </dt>
                           <dd data-testid="price-multiplier-detail">
                             {{ logMultiplier(l)!.detail }}
+                          </dd>
+                        </template>
+                        <template v-if="isOutcome(l.affinity)">
+                          <dt class="text-muted-foreground">
+                            会话亲和
+                          </dt>
+                          <dd data-testid="affinity-detail">
+                            <span class="font-medium">{{ OUTCOME_LABELS[l.affinity] }}</span>
+                            <span class="text-muted-foreground"> · 规则 <span class="font-mono">{{ l.affinityRule ?? '—' }}</span></span>
+                            <span class="text-muted-foreground block">{{ OUTCOME_HINTS[l.affinity] }}</span>
                           </dd>
                         </template>
                         <dt class="text-muted-foreground">

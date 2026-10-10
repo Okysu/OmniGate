@@ -133,6 +133,9 @@ func (g *Gateway) attemptCustom(w http.ResponseWriter, r *http.Request, st *reqS
 			req.Header.Set(k, v)
 		}
 	}
+	// Session headers of the applying affinity rule; keep_origin keeps the
+	// channel's and the plugin's explicit headers.
+	st.affinity.PassHeaders().Apply(req.Header, r.Header, rt.Config.Headers, spec.Headers)
 	if req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", g.opts.UserAgent)
 	}

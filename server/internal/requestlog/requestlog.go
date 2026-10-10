@@ -75,6 +75,11 @@ type Entry struct {
 	// PriceTier is the aboveInputTokens of the sell-price context-length tier
 	// that priced the request (phase10-api.md §1); nil = base prices.
 	PriceTier *int64
+	// Affinity is the session affinity outcome (affinity.Outcome*) and
+	// AffinityRule the applying rule's name (phase12-api.md §4); nil when no
+	// rule applied. The session value itself is never recorded.
+	Affinity     *string
+	AffinityRule *string
 }
 
 var (
@@ -285,7 +290,8 @@ var columns = []string{"id", "started_at", "request_id", "user_id", "key_id", "k
 	"channel_name", "upstream_model", "stream", "status_code", "error_class", "error_message", "attempts", "fallback_path",
 	"ttft_ms", "duration_ms", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens",
 	"usage_estimated", "cost_nano", "charge_nano", "sell_price_id", "cost_price_id", "ip_prefix", "subscription_id", "quota_charge_nano", "served_model", "channel_tier",
-	"image_count", "image_input_tokens", "price_multiplier", "audio_seconds", "audio_input_tokens", "audio_output_tokens", "input_characters", "price_tier"}
+	"image_count", "image_input_tokens", "price_multiplier", "audio_seconds", "audio_input_tokens", "audio_output_tokens", "input_characters", "price_tier",
+	"affinity", "affinity_rule"}
 
 func row(e *Entry) []any {
 	path, _ := json.Marshal(e.Attempts)
@@ -297,7 +303,7 @@ func row(e *Entry) []any {
 		e.TTFTMs, e.DurationMs, e.Usage.Input, e.Usage.Output, e.Usage.CacheRead, e.Usage.CacheWrite, e.Usage.Reasoning,
 		e.Usage.Estimated, int64(e.Cost), int64(e.Charge), e.SellPriceID, e.CostPriceID, e.IPPrefix, e.SubscriptionID, int64(e.QuotaCharge),
 		servedModel(e), channelTier(e), e.Usage.Images, e.Usage.ImageInput, e.PriceMultiplier, e.Usage.AudioSeconds, e.Usage.AudioInput,
-		e.Usage.AudioOutput, e.Usage.Characters, e.PriceTier}
+		e.Usage.AudioOutput, e.Usage.Characters, e.PriceTier, e.Affinity, e.AffinityRule}
 }
 
 func (w *Writer) insert(ctx context.Context, batch []*Entry) error {

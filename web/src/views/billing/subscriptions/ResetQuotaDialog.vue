@@ -118,7 +118,7 @@ async function submit() {
       <DialogHeader>
         <DialogTitle>重置套餐额度</DialogTitle>
         <DialogDescription>
-          清空所选订阅在<strong>当前窗口</strong>内的用量（会话窗口直接结束），被阻断的用户立即恢复可用。操作写入审计，并通知受影响的用户。
+          清空所选订阅在<strong>当前窗口</strong>内的用量（会话窗口从现在起重新计时，例如 5 小时窗口在 5 小时后刷新），被阻断的用户立即恢复可用。操作写入审计，并通知受影响的用户。
         </DialogDescription>
       </DialogHeader>
 

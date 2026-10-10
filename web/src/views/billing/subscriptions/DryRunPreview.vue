@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { affectedText } from '@/lib/subscriptionBulk'
 
 /** "将影响 N 份订阅" from the dry run (phase7-api.md §3.3). */
-defineProps<{
+const props = defineProps<{
   loading: boolean
   error: string | null
   /** Preview matches the current request. */
@@ -12,6 +12,8 @@ defineProps<{
   affected: number | null
   /** Request invalid / incomplete: nothing to preview. */
   idle?: boolean
+  /** Result text (default: "将影响 N 份订阅"); reset cards count recipients. */
+  format?: (affected: number) => string
 }>()
 defineEmits<{ retry: [] }>()
 </script>
@@ -35,7 +37,7 @@ defineEmits<{ retry: [] }>()
     </template>
     <template v-else>
       <Users class="size-4 shrink-0" :class="affected > 0 ? 'text-primary' : 'text-muted-foreground'" />
-      <span :class="affected > 0 ? 'font-medium' : 'text-muted-foreground'" data-testid="dry-run-text">{{ affectedText(affected) }}</span>
+      <span :class="affected > 0 ? 'font-medium' : 'text-muted-foreground'" data-testid="dry-run-text">{{ (props.format ?? affectedText)(affected) }}</span>
     </template>
   </div>
 </template>

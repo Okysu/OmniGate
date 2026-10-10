@@ -16,3 +16,16 @@ func TestNumericString(t *testing.T) {
 		t.Error("nil must be 0")
 	}
 }
+
+func TestCacheHitRate(t *testing.T) {
+	if cacheHitRate(0, 0) != nil || cacheHitRate(5, 0) != nil {
+		t.Error("no prompt tokens: nil")
+	}
+	// prompt = input 600 + cache read 300 + cache write 100.
+	if r := cacheHitRate(300, 1000); r == nil || *r != 0.3 {
+		t.Errorf("rate = %v", r)
+	}
+	if r := cacheHitRate(1000, 1000); r == nil || *r != 1 {
+		t.Errorf("rate = %v", r)
+	}
+}

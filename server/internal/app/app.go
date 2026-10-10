@@ -188,7 +188,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *db.DB,
 		return nil, err
 	}
 	gw := gateway.New(keySvc, reg, prices, gatewayBilling(bill, opts), subs, logs, log, gateway.Options{UserAgent: ua, Limits: r5.settings, Routes: r5.routes,
-		Usage: r7.limits, Journal: jrn})
+		Usage: r7.limits, Journal: jrn, Affinity: r5.affinity})
 	handleJournal(jrn, gw, logs)
 	r5.routesH = routing.NewHandler(r5.routes, users, gw)
 	var web http.Handler
@@ -348,6 +348,7 @@ func (a *App) Handler() http.Handler {
 				a.subsH.AdminRoutes(r)
 				a.r5.settingsH.AdminRoutes(r)
 				a.r5.routesH.AdminRoutes(r)
+				a.r5.affinityH.AdminRoutes(r)
 				a.plazaH.AdminRoutes(r)
 			})
 		})

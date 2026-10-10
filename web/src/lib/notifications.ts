@@ -44,6 +44,7 @@ export const EVENT_CATALOG: EventMeta[] = [
   { type: 'subscription.expired', category: 'plan', label: '订阅已结束', description: '订阅到期或被取消。', defaults: d(true, true), alert: false },
   { type: 'subscription.quota_reset', category: 'plan', label: '套餐额度已重置', description: '管理员重置了你订阅的套餐额度（含备注）。', defaults: d(true, true), alert: false },
   { type: 'subscription.extended', category: 'plan', label: '订阅已延期', description: '管理员延长了你订阅的有效期（含备注）。', defaults: d(true, true), alert: false },
+  { type: 'reset_card.issued', category: 'plan', label: '获得额度重置卡', description: '管理员向你发放了 5 小时 / 周 / 双重置卡（含数量、有效期与备注），可在「钱包与订阅」中使用。', defaults: d(true, true), alert: false },
   { type: 'quota.near_limit', category: 'plan', label: '套餐额度即将用完', description: '某条配额规则在当前窗口的用量达到 80%（每个窗口一次）。', defaults: d(false, true), alert: false },
   { type: 'quota.exhausted', category: 'plan', label: '套餐额度已用完', description: '某条配额规则在当前窗口用完（每个窗口一次）。', defaults: d(true, true), alert: true },
   { type: 'limit.spend_near', category: 'limit', label: '消费限额即将用完', description: '用户组的每日 / 每月消费限额或 API Key 的消费上限用到 80%（每个窗口一次）。', defaults: d(false, true), alert: false },
@@ -90,7 +91,8 @@ export function categoryOf(type: string): NotificationCategory | null {
     case 'account': return 'account'
     case 'wallet': return 'wallet'
     case 'subscription':
-    case 'quota': return 'plan'
+    case 'quota':
+    case 'reset_card': return 'plan'
     case 'limit': return 'limit'
     case 'model': return 'model'
     case 'key': return 'key'

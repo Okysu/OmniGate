@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { BookOpen, Search } from '@lucide/vue'
-import { onKeyStroke } from '@vueuse/core'
-import { toast } from 'vue-sonner'
+import { BookOpen } from '@lucide/vue'
 import ThemeToggle from './ThemeToggle.vue'
 import UserMenu from './UserMenu.vue'
 import AppLogo from '@/components/AppLogo.vue'
@@ -13,19 +11,6 @@ import { useSite } from '@/composables/useSite'
 import { CONSOLE_BASE } from '@/lib/paths'
 
 const { docsUrl, landingEnabled } = useSite()
-
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
-
-function openCommandPalette() {
-  toast.info('命令面板尚未实现', { description: '占位功能，计划在后续阶段提供全局搜索与快速跳转。' })
-}
-
-onKeyStroke('k', (e) => {
-  if (e.metaKey || e.ctrlKey) {
-    e.preventDefault()
-    openCommandPalette()
-  }
-})
 </script>
 
 <template>
@@ -42,24 +27,9 @@ onKeyStroke('k', (e) => {
       <TooltipContent>{{ landingEnabled ? '返回首页' : '返回概览' }}</TooltipContent>
     </Tooltip>
 
-    <div class="flex min-w-0 flex-1 justify-center sm:px-2">
-      <Button
-        variant="outline"
-        class="text-muted-foreground hidden w-full max-w-sm justify-start gap-2 font-normal md:flex"
-        @click="openCommandPalette"
-      >
-        <Search />
-        <span class="flex-1 text-left">搜索或跳转…</span>
-        <kbd class="bg-muted pointer-events-none rounded border px-1.5 font-mono text-[10px] font-medium">
-          {{ isMac ? '⌘' : 'Ctrl' }} K
-        </kbd>
-      </Button>
-    </div>
+    <div class="flex-1" />
 
     <div class="flex shrink-0 items-center gap-0.5 sm:gap-1">
-      <Button variant="ghost" size="icon-sm" class="md:hidden" aria-label="搜索" @click="openCommandPalette">
-        <Search />
-      </Button>
       <Tooltip>
         <TooltipTrigger as-child>
           <Button v-if="docsUrl" variant="ghost" size="icon-sm" class="hidden sm:inline-flex" as-child>

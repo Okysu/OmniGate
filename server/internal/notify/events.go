@@ -39,6 +39,8 @@ const (
 	TypeLimitSpendReached   = "limit.spend_reached"
 	// phase5-api.md §5.5.
 	TypeChannelShareInvited = "channel.share_invited"
+	// phase11-api.md §2.1.
+	TypeResetCardIssued = "reset_card.issued"
 )
 
 // Severities of notifications (§4).
@@ -52,7 +54,7 @@ const (
 type category int
 
 const (
-	catBilling  category = iota // wallet.*, subscription.*, quota.*, limit.*: billing.own
+	catBilling  category = iota // wallet.*, subscription.*, quota.*, limit.*, reset_card.*: billing.own
 	catKeys                     // key.*: keys.own
 	catModels                   // model.*: everyone
 	catChannels                 // channel.*, upstream.*: channel owners and channels.manage
@@ -83,6 +85,7 @@ var Catalog = []EventMeta{
 	{TypeSubscriptionExpired, catBilling, true, true, false, SeverityInfo, false},
 	{TypeSubscriptionQuotaReset, catBilling, true, true, false, SeverityInfo, false},
 	{TypeSubscriptionExtended, catBilling, true, true, false, SeverityInfo, false},
+	{TypeResetCardIssued, catBilling, true, true, false, SeverityInfo, false},
 	{TypeQuotaNearLimit, catBilling, false, true, false, SeverityInfo, false},
 	{TypeQuotaExhausted, catBilling, true, true, true, SeverityWarn, false},
 	{TypeLimitSpendNear, catBilling, false, true, false, SeverityInfo, false},

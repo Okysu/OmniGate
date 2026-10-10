@@ -310,7 +310,8 @@ func TestSystemSettings(t *testing.T) {
 		st["version"].(float64) != 1 {
 		t.Fatalf("defaults = %v", st)
 	}
-	if src["site.name"] != "default" || src["auth.registrationMode"] != "env" || len(src) != 20 || src["notifications.smtp.host"] != "default" ||
+	if src["site.name"] != "default" || src["auth.registrationMode"] != "env" || len(src) != 21 || src["notifications.smtp.host"] != "default" ||
+		src["gateway.affinity"] != "default" ||
 		src["site.publicModelPlaza"] != "default" || s["site"].(map[string]any)["publicModelPlaza"] != true {
 		t.Fatalf("sources = %v", src)
 	}

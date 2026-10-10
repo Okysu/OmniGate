@@ -1,4 +1,6 @@
 import type {
+  AffinityOutcome,
+  AffinityStats,
   AdminUserDetail,
   AlertsSummary,
   BulkSubscriptionResult,
@@ -60,6 +62,13 @@ import type {
   RedeemBatchInput,
   RedeemResult,
   RequestLog,
+  ResetCard,
+  ResetCardBatch,
+  ResetCardIssueInput,
+  ResetCardIssueResult,
+  ResetCardPreview,
+  ResetCardUseResult,
+  MyResetCards,
   RevokeOthersResponse,
   RoutePreview,
   RoutePreviewInput,
@@ -275,6 +284,8 @@ export interface LogsFilter {
   keyId?: string
   userId?: string
   status?: 'success' | 'error'
+  /** phase12 §4: one session affinity outcome, or 'any' (an affinity rule applied). */
+  affinity?: AffinityOutcome | 'any'
 }
 
 export const logsApi = {
@@ -368,6 +379,31 @@ export const adminBillingApi = {
     api.post<WalletAdjusted>(`/api/admin/billing/wallets/${enc(userId)}/adjust`, input),
 }
 
+// ---------------------------------------------------------------------------
+// Round 11: quota reset cards (phase11-api.md §2)
+// ---------------------------------------------------------------------------
+
+export const resetCardsApi = {
+  /** Own cards, usable first (billing.own). */
+  mine: (signal?: AbortSignal) => api.get<MyResetCards>('/api/billing/reset-cards', { signal }),
+  /** The live subscriptions the card applies to, with the rules it would reset. */
+  preview: (id: string, signal?: AbortSignal) => api.get<ResetCardPreview>(`/api/billing/reset-cards/${enc(id)}/preview`, { signal }),
+  /** Spends the card (409 card_used / card_expired / card_revoked; 422 card_not_applicable / card_plan_not_allowed). */
+  use: (id: string, subscriptionId: string) => api.post<ResetCardUseResult>(`/api/billing/reset-cards/${enc(id)}/use`, { subscriptionId }),
+}
+
+export const adminResetCardsApi = {
+  listBatches: (params: { page: number, pageSize: number }, signal?: AbortSignal) =>
+    api.get<Paginated<ResetCardBatch>>('/api/admin/billing/reset-cards/batches', { query: { ...params }, signal }),
+  /** `dryRun` validates and only counts the recipients (`batch: null`). */
+  issue: (input: ResetCardIssueInput, opts: { dryRun?: boolean } = {}) =>
+    api.post<ResetCardIssueResult>('/api/admin/billing/reset-cards/batches', input, { query: opts.dryRun ? { dryRun: true } : undefined }),
+  /** Revokes the unused cards of a batch (409 card_batch_revoked when already revoked). */
+  revoke: (id: string) => api.post<ResetCardBatch>(`/api/admin/billing/reset-cards/batches/${enc(id)}/revoke`),
+  listCards: (params: { page: number, pageSize: number, userId?: string, batchId?: string }, signal?: AbortSignal) =>
+    api.get<Paginated<ResetCard>>('/api/admin/billing/reset-cards', { query: { ...params }, signal }),
+}
+
 /** Fetches every visible channel (pages of 200, capped at 2000 entries). */
 export async function fetchAllChannels(signal?: AbortSignal): Promise<ChannelView[]> {
   const out: ChannelView[] = []
@@ -404,6 +440,13 @@ export const settingsApi = {
   update: (body: SettingsPatch) => api.patch<SettingsResponse>('/api/admin/settings', body),
   /** Sends a test email with the saved SMTP settings (phase6-api.md §1); errors never contain the password. */
   smtpTest: (to: string) => api.post<SmtpTestResult>('/api/admin/settings/smtp-test', { to }),
+}
+
+/** phase12-api.md §3: session affinity bindings (the rules are `settings.gateway.affinity`). */
+export const affinityApi = {
+  stats: (signal?: AbortSignal) => api.get<AffinityStats>('/api/admin/affinity/stats', { signal }),
+  /** Clears every binding, or only those of `rule`. */
+  clear: (rule?: string) => api.post<{ cleared: number, stats: AffinityStats }>('/api/admin/affinity/clear', rule ? { rule } : {}),
 }
 
 // ---------------------------------------------------------------------------

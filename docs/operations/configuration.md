@@ -432,6 +432,9 @@ OMNIGATE_CURRENCY=USD                       # 首次启动后锁定
   `/v1/audio/translations`）为 64 MiB，控制面 1 MiB。代理的 `client_max_body_size` 建议设为 `32m`，提供图片编辑或语音转写接口时设为 `64m`，
   否则大图片 / 大音频 / 长上下文请求会先被代理拒绝（见 [8.9](#89-图片接口)、[8.10](#810-音频接口)）。语音合成（`/v1/audio/speech`）的音频边收边发，
   代理同样需要关闭缓冲（`proxy_buffering off`），否则客户端要等整段音频生成完才开始播放。
+- **带下划线的请求头**：Codex CLI 用 `Session_id`、`Thread_id` 等带下划线的请求头标识会话。nginx 默认丢弃这类请求头，需要
+  `underscores_in_headers on;`（放在 `server` 块中），否则会话亲和与上游号池只能依靠请求体中的 `prompt_cache_key`（见 [18](#18-会话亲和与上游号池缓存命中)）。
+  Caddy 默认原样转发。
 - **指标端口**：不要把 9090 端口暴露到公网。
 
 完整、可直接使用的配置见 `deploy/nginx/omnigate.conf`（含 HTTP 跳转、certbot、HSTS）与 `deploy/Caddyfile`（自动 HTTPS），
@@ -446,6 +449,7 @@ server {
     add_header Strict-Transport-Security "max-age=31536000" always;
 
     client_max_body_size 64m;   # 图片编辑、语音转写的上限；其余数据面接口 32 MiB 由 OmniGate 自己返回 413
+    underscores_in_headers on;  # 转发 Codex CLI 的 Session_id 等会话请求头
 
     location / {
         proxy_pass http://127.0.0.1:8080;
@@ -1132,7 +1136,7 @@ curl -sS https://gateway.example.com/api/admin/billing/redeem-batches \
 |---|---|
 | `calendar` / `period` | 删除当前窗口的计数，窗口边界不变 |
 | `rolling` | 删除窗口内的全部分桶 |
-| `session` | 结束当前会话，下一个计量的请求开启新会话（新的 `duration` 窗口） |
+| `session` | 从重置时刻 A 重新开始一个空的会话：用量为 0，下一次刷新为 A + `duration`（如 5 小时窗口在 5 小时后刷新），与原来的刷新时间无关；之后的用量计入这一会话（锚定式重置，`docs/contracts/phase11-api.md` §1） |
 | `lifetime` | 仅在 `includeLifetime: true` 时清零全部用量 |
 
 网关每次请求都从数据库读取用量，因此被 `429 quota_exceeded` / `quota_exhausted` 阻断的用户**立即恢复可用**，多实例同样立即生效。
@@ -1154,8 +1158,31 @@ curl -sS https://gateway.example.com/api/admin/billing/redeem-batches \
 注意：
 
 - 重置只删除当前窗口的计数，**请求日志中的历史用量与费用不受影响**，对账照常以请求日志为准；被删除的计数无法恢复。
-- `quota.near_limit` / `quota.exhausted` 通知按窗口去重：calendar / period / lifetime 规则重置后窗口不变，同一窗口内不会再次提醒；session 规则开启新窗口后会。
+- `quota.near_limit` / `quota.exhausted` 通知按窗口去重：calendar / period / lifetime 规则重置后窗口不变，同一窗口内不会再次提醒；session 规则重置后是从重置时刻开始的新窗口，会再次提醒。
 - 延期不会让已过期或已取消的订阅恢复；需要恢复时请重新开通（见 [11.4](#114-开通续期与取消)）。
+
+### 11.6.1 额度重置卡
+
+除了管理员直接重置，还可以给用户发放**重置卡**，由用户在需要时自己使用（契约见 `docs/contracts/phase11-api.md`）。在控制台「计费 → 重置卡」发放与作废，
+或调用 `POST /api/admin/billing/reset-cards/batches`（支持 `?dryRun=true` 预览人数）：
+
+```json
+{"kind": "5h", "quantity": 2, "expiresAt": "2026-11-01T00:00:00Z", "planIds": null, "note": "国庆福利",
+ "target": {"type": "plan", "planId": "<套餐 ID>"}}
+```
+
+| 卡类型 | 重置的规则 |
+|---|---|
+| `5h`（5小时重置卡） | session / rolling 窗口、时长恰为 5 小时的规则 |
+| `weekly`（周重置卡） | session / rolling 窗口、时长恰为 7 天的规则 |
+| `both`（双重置卡） | 以上两类，同一时刻一起重置 |
+
+- 发放对象：指定用户（`userIds`，最多 1000 个）、用户组（`groupId`）、某个套餐的有效订阅用户（`planId`）或全部用户（`all`）；只发给状态正常的普通用户 / 管理员
+  （审计员、停用用户不会收到），“全部用户”是发放时已存在的用户。每人 1–100 张，单批最多 20 万张；可设置过期时间与限定套餐。
+- 用户在「钱包与订阅 → 我的重置卡」中选择订阅使用，界面会显示每条额度“使用前 → 使用后”。使用时按 §11.6 的锚定式重置：session 窗口从使用时起重新计时，
+  rolling 窗口清空。订阅没有匹配的规则、不在限定套餐内、订阅已结束时会被拒绝，**卡不会被消耗**；同一张卡并发使用只会成功一次。
+- 作废批次后，其中未使用的卡（含已过期的）无法再使用，已使用的卡不受影响。
+- 审计：`reset_card.issue`、`reset_card.revoke`、`reset_card.use`；收件人收到通知 `reset_card.issued`（默认站内 + 邮件）。在「用户」详情中可以查看某位用户的卡。
 
 ### 11.7 注意事项与限制
 
@@ -1406,6 +1433,7 @@ curl -fsS http://127.0.0.1:8080/readyz
 | `wallet.credited` | 兑换码充值、管理员正向调整、新用户赠送 | 用户本人 |
 | `subscription.expiring` / `subscription.expired` | 后台扫描（每 10 分钟）：到期前 3 天；到期或被取消（最长约 10 分钟延迟） | 订阅所有者 |
 | `subscription.quota_reset` / `subscription.extended` | 管理员批量重置额度 / 批量延期（[11.6](#116-发福利额度重置与批量延期)），dry run 不发送；每次操作每位用户一条，列出涉及的订阅与备注 | 受影响订阅的所有者 |
+| `reset_card.issued` | 管理员发放重置卡（[11.6.1](#1161-额度重置卡)），dry run 不发送；每批每位收件人一条（数量、卡类型、限定套餐、有效期与备注） | 收件人 |
 | `quota.near_limit` / `quota.exhausted` | 每次记账后：某条规则在当前窗口达到 80% / 100%，每个窗口一次 | 订阅所有者 |
 | `model.price_changed` | 新增售价版本（含未来生效）且金额变化 | 近 30 天通过平台渠道成功调用过该模型的用户 |
 | `model.removed` / `model.added` | 渠道快照变化时（以及每 10 分钟）比对：近 30 天调用过的模型不再可用；平台广场新增模型（默认关闭，需用户开启） | 调用过的用户 / 全部用户 |
@@ -1428,6 +1456,7 @@ Round 6（续）新增的三个事件：
 | `account.status_changed` | 账户（新类别，所有用户都有资格接收） | 邮件 + 站内开，Webhook 关 | 告警类（不进入每日摘要）；**站内开关锁定为开启**（保存偏好时强制 `inApp=true`），邮件 / Webhook 可关闭。停用、强制下线为 warning 级别，启用为 info；链接 `/console`。这是唯一会投递给已停用用户的事件（站内、邮件与 Webhook 都会发送），用户因此能知道账户被停用的原因 |
 | `subscription.quota_reset` | 计费（需要 `billing.own`） | 邮件 + 站内开，Webhook 关 | 非告警类，可合并进每日摘要；链接 `/console/billing` |
 | `subscription.extended` | 计费（需要 `billing.own`） | 邮件 + 站内开，Webhook 关 | 同上 |
+| `reset_card.issued` | 计费（需要 `billing.own`） | 邮件 + 站内开，Webhook 关 | 同上 |
 
 Round 6 新增的事件（见[第 17 节](#17-用户组价格倍率限额与分时价格)）：
 
@@ -1614,3 +1643,49 @@ curl -sS https://gateway.example.com/api/admin/prices \
 
 300 000 输入 token、1 000 输出 token 的请求按 300 000 × 20 / 1M + 1 000 × 75 / 1M = 6.075 计费；272 000 输入 token 的请求按基础价
 272 000 × 10 / 1M + 1 000 × 50 / 1M = 2.77 计费。
+
+## 18. 会话亲和与上游号池缓存命中
+
+契约见 [phase12-api.md](../contracts/phase12-api.md)。
+
+### 18.1 作用
+
+提示词缓存（prompt cache）只在**同一个上游账号**上生效。OmniGate 在多个渠道间轮询、加权随机或故障切换时，同一段对话的请求会落到不同渠道，
+上游缓存命中率随之下降。会话亲和按客户端**自己的**会话标识把同一会话固定到上次成功处理它的渠道：
+
+- Codex CLI：请求体 `prompt_cache_key`（会话 id），或请求头 `Session_id` / `Session-Id`；
+- Claude Code：请求体 `metadata.user_id`（含会话 id），或请求头 `X-Claude-Code-Session-Id`。
+
+默认开启，内置上面两条规则（“优先保持”：绑定的渠道失败时仍按正常重试规则换渠道，可用性优先）。规则命中时还会把会话相关的客户端请求头
+（`Session_id`、`X-Codex-Turn-Metadata`、`X-Stainless-*`、`Anthropic-Beta`、客户端的 `User-Agent` 等）转发给上游。
+
+### 18.2 上游号池缓存命中
+
+AxonHub 等上游网关 / 账号池同样是根据客户端原生的请求头和字段（`Session_id`、`prompt_cache_key`、`metadata.user_id` 等）识别会话，
+并把同一会话留在同一个上游账号上。以前 OmniGate 只向 OpenAI 类渠道转发极少的客户端请求头，上游因此认不出会话；现在内置规则默认透传这些
+标识，`prompt_cache_key` / `safety_identifier` 在 Responses ⇄ Chat 转换时也会保留，**不需要任何针对具体上游的配置**。
+如果渠道本身配置了同名请求头（渠道 `config.headers` 或插件），默认保留渠道的值（`keep_origin`）。
+
+部署在 nginx 后面时，务必开启 `underscores_in_headers on;`（见 [7. 反向代理](#7-反向代理)），否则 `Session_id` 这类请求头在到达 OmniGate 前就被丢弃。
+
+### 18.3 配置
+
+在“系统设置 → 会话亲和”中编辑（需要 `settings.write`），也可以通过 `PATCH /api/admin/settings` 的 `gateway.affinity` 修改；保存后立即生效（其他实例 5 秒内）。
+
+- 规则格式与 new-api 的“渠道亲和”相同，new-api 的 JSON 可以直接粘贴到 JSON 编辑器。Key 来源只支持 `gjson`（请求体路径）与 `request_header`；
+  `param_override_template` 只支持 `pass_headers`；`Authorization`、`x-api-key`、`Cookie`、`Host`、`Content-Length` 等不能透传。
+- 会话保持模式：`off`（只透传请求头）、`prefer`（默认）、`strict`（绑定渠道失败直接返回错误，缓存优先、可用性较低）。规则可单独设置，
+  也可继承全局；new-api 的 `skip_retry_on_failure: true` 等同于 `strict`。
+- 绑定键总是包含用户本身（不同用户的会话互不影响），并按规则勾选的作用域加入用户组、模型、规则名称；内存中只保存其 SHA-256，日志不记录原始值。
+- “填充模板”恢复内置预设（同名规则被替换，其他规则保留）；“恢复默认”删除数据库中的值，回到内置预设。
+
+### 18.4 运维
+
+- 绑定保存在进程内存中（LRU，默认最多 100 000 条，每次命中续期，默认 TTL 3600 秒），**重启后清空**；只支持单实例部署
+  （多实例时各实例各自绑定，彼此不共享）。设置页底部显示当前条目数，可清空全部或某条规则的绑定（写审计日志 `affinity.clear`）。
+- 绑定只影响同一层级内的顺序：自有 → 共享 → 平台的层级顺序（计费边界）不变；权限、模型、熔断等筛选照常生效。绑定的渠道被停用、熔断或不再可用时
+  按正常路由处理（默认丢弃绑定；开启“渠道不可用时保留绑定”则保留，渠道恢复后会话回到原渠道）。
+- 请求日志记录每个请求的结果（`hit` 命中、`new` 新绑定、`rebound` 改绑、`failover` 未命中、`broken` 绑定失效、`strict_failed` 严格失败、
+  `miss` 未绑定、`off` 仅透传）与规则名称，可在请求日志页按结果过滤。统计页显示提示词缓存命中率（缓存读取 ÷ 输入 token，含缓存读写），
+  按渠道细分，以及会话亲和命中率，用来确认效果。
+

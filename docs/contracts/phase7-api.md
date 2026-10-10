@@ -90,7 +90,7 @@
 语义：清空每份订阅所选规则的**当前窗口**用量——
 - `calendar` / `period`：删除当前窗口的计数；
 - `rolling`：删除窗口内的全部分桶；
-- `session`：结束当前会话窗口（下一个请求开启新的 5 小时窗口）；
+- `session`：从重置时刻 A 重新开始一个空的会话窗口（锚定式重置，[phase11-api.md §1](phase11-api.md#1-锚定式重置anchored-reset)）：用量为 0，下一次刷新为 A + 窗口时长（如 5 小时窗口在 A + 5h 刷新），与原来的刷新时间无关；之后的用量计入这一窗口；
 - `lifetime`：仅在 `includeLifetime` 时清零。
 被阻断的用户立即恢复可用。审计 `subscription.quota_reset`（记录目标、规则与数量），每位受影响用户收到通知 `subscription.quota_reset`（站内 + 邮件，默认开启）。
 
@@ -142,7 +142,7 @@
 | 13 | §2.3 批量 | 逐个应用保护规则 | 批量操作不做乐观锁；`ids` 中重复的只处理一次，非法 UUID 记为 `not_found`；启用已启用的用户算成功（不写审计、不发通知）；`failed[].message` 为中文说明。缺少 `reason`、`until` 已过、`ids` 数量不在 1–200、`action` 非法时整体返回 422（`details` 键 `reason` / `until` / `ids` / `action`）。`last_admin` 只在被操作的系统管理员是最后一位“启用状态”的系统管理员时出现（操作人本身也是启用的系统管理员，正常情况下不会触发） | — |
 | 14 | §2 通知 | `account.status_changed` | 停用用户也会收到（站内 + 邮件 + Webhook，是唯一会投递给停用用户的事件）；严重程度：停用 / 强制下线为 `warning`，启用为 `info`；`data` 为 `{action: disabled \| enabled \| logout, auto, reason?, until?}` | 让用户知道被停用的原因 |
 | 15 | §3.1 / §3.2 目标 | `{ids}` 或 `{planId, status: 'active'}` | 只作用于状态为 active 且 `endsAt` 晚于当前时间的订阅（`ids` 中已取消、已过期的订阅被忽略，不报错）；`ids` 1–1000 个；`planId` 不存在返回 404；返回的 `subscriptions` 按订阅创建时间升序 | 防止误操作已结束的订阅 |
-| 16 | §3.1 重置 | 清空当前窗口用量 | 统一实现为：删除所选规则中 `window_start` 不早于“当前窗口起点”的计数行（calendar / period：当前窗口；rolling：窗口内全部分桶；session：当前会话行，下一个请求开启新窗口；lifetime：全部）。`rules` 为 `null` 或 1–50 个规则 ID（空数组返回 422）。审计 `subscription.quota_reset` 一条（`resourceId` 为空，metadata 含 `target`、`rules`、`includeLifetime`、`note`、`affected` 与前 500 个 ID） | — |
+| 16 | §3.1 重置 | 清空当前窗口用量 | 统一实现为：删除所选规则中 `window_start` 不早于“当前窗口起点”的计数行（calendar / period：当前窗口；rolling：窗口内全部分桶；session：当前会话行，随后写入 `window_start` = 重置时刻（截断到秒）、`used = 0` 的锚点行作为新的当前会话（Round 11 起，见 phase11-api.md §1；此前为“下一个请求开启新窗口”）；lifetime：全部）。`rules` 为 `null` 或 1–50 个规则 ID（空数组返回 422）。审计 `subscription.quota_reset` 一条（`resourceId` 为空，metadata 含 `target`、`rules`、`includeLifetime`、`note`、`affected` 与前 500 个 ID） | — |
 | 17 | §3 通知 | 每位受影响用户收到通知 | 每次操作每位用户一条（多份订阅合并在一条里），`data` 为 `{subscriptions: [{subscriptionId, planName, endsAt, rules?}], note, duration?}` | 避免批量操作刷屏 |
 | 18 | §3.2 时长 | `1h–366d` | 与套餐时长同一解析器：`<正整数><m\|h\|d>`，范围 1h–366d（因此也接受不少于 60 分钟的 `m`，如 `90m`），422 `details.duration` | 复用现有校验 |
 | 19 | §3.3 预览 | `?dryRun=true` | 也接受 `?dryRun=1`；预览同样做完整校验（422 / 404），不写审计、不发通知 | — |

@@ -160,8 +160,8 @@ docker compose exec -T omnigate omnigate seed - < catalog.json
 { "name": "Go 启航者", "description": "…", "listPrice": "3", "duration": "30d",
   "models": [], "stackable": false, "status": "active",
   "rules": [
-    { "id": "5h",      "label": "5 小时滚动限额", "meter": "charge", "window": { "kind": "rolling", "duration": "5h" }, "limit": "6" },
-    { "id": "weekly",  "label": "每周滚动限额",   "meter": "charge", "window": { "kind": "rolling", "duration": "7d" }, "limit": "12" },
+    { "id": "5h",      "label": "5 小时会话限额", "meter": "charge", "window": { "kind": "session", "duration": "5h" }, "limit": "6" },
+    { "id": "weekly",  "label": "每周会话限额",   "meter": "charge", "window": { "kind": "session", "duration": "7d" }, "limit": "12" },
     { "id": "monthly", "label": "月度总额度",     "meter": "charge", "window": { "kind": "period",  "every": "30d" },   "limit": "24" }
   ] }
 ```
@@ -204,7 +204,7 @@ go run ./cmd/omnigate seed export --prices --model-info --no-cost > /tmp/catalog
 
 以下内容与内置目录中的套餐一致，可直接用作宣传文案。
 
-| 套餐名称 | 价格 | 5 小时滚动限额 | 每周滚动限额（7 天） | 月度总额度 | 适合谁 |
+| 套餐名称 | 价格 | 5 小时会话限额 | 每周会话限额（7 天） | 月度总额度 | 适合谁 |
 |---|---|---|---|---|---|
 | Go 启航者 | $3 / 月 | $6 | $12 | $24 | 轻量体验、偶尔调用 |
 | Plus 进阶者 | $10 / 月 | $20 | $40 | $80 | 个人日常开发与写作 |
@@ -217,7 +217,7 @@ go run ./cmd/omnigate seed export --prices --model-info --no-cost > /tmp/catalog
 
 **套餐规则**
 
-1. **三重限额并行生效**：5 小时滚动、7 天滚动、月度（按购买日起算的 30 天）同时管控，任意一项触达上限即限流——滚动窗口随较早用量过期逐步恢复，月度额度在下一个订阅月开始时重置。
+1. **三重限额并行生效**：5 小时会话、7 天会话、月度（按购买日起算的 30 天）同时管控，任意一项触达上限即限流——会话窗口从窗口内第一次调用开始计时，到期后整体刷新，月度额度在下一个订阅月开始时重置。
 2. **Token 按官方原价计费**：模型消耗按官方原生定价计算，平台不加收额外费用。
 3. **月度额度当月有效**：未使用额度不结转至下月。
 
@@ -225,8 +225,8 @@ go run ./cmd/omnigate seed export --prices --model-info --no-cost > /tmp/catalog
 
 | 限额 | 规则 | 含义 |
 |---|---|---|
-| 5 小时滚动限额 | `rolling 5h` | 统计「最近 5 小时」的用量；较早的用量满 5 小时后自动移出窗口，额度随之逐步恢复（按 5 分钟粒度） |
-| 每周滚动限额 | `rolling 7d` | 统计「最近 7×24 小时」的用量，以用户自己的用量时间线滑动，不按自然周、也不按开通日重置 |
+| 5 小时会话限额 | `session 5h` | 窗口内第一次调用时开启一个 5 小时窗口，窗口内的用量累计计算；到期后整体刷新，下一次调用再开启新窗口 |
+| 每周会话限额 | `session 7d` | 同上，窗口长度为 7×24 小时；从用户自己的第一次调用开始计时，不按自然周、也不按开通日重置。重置卡或管理员重置会从重置时刻重新开启窗口 |
 | 月度总额度 | `period 30d` | 从开通时刻起每 30 天为一个订阅月，每个订阅月独立计算、到期清零 |
 
 - 套餐有效期 `duration: "30d"` 与月度窗口等长：**每买一个月，恰好对应一个独立的月度额度**，与在哪一天购买无关，

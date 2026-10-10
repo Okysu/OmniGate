@@ -116,11 +116,61 @@ func (r *Runtime) DefaultPath(dialect string) string {
 	return "/"
 }
 
-// RequestOverride lets plugin hooks replace path/headers and take over auth.
+// RequestOverride lets plugin hooks replace path/headers and take over auth,
+// and carries the client headers a session affinity rule passes through.
 type RequestOverride struct {
 	Path     string
 	Headers  map[string]string
 	SkipAuth bool
+	// Pass copies client headers to the upstream request (nil = none).
+	Pass *PassHeaders
+}
+
+// PassHeaders are client headers a session affinity rule copies to the
+// upstream request (pass_headers, docs/contracts/phase12-api.md §3).
+type PassHeaders struct {
+	Names []string
+	// KeepOrigin keeps the value of a header the channel configuration sets
+	// explicitly (config.headers, plugin hook headers); otherwise the client
+	// value replaces it.
+	KeepOrigin bool
+}
+
+// Apply copies the listed client headers into h. Forbidden headers
+// (credentials, cookies, framing) are never copied; with KeepOrigin a header
+// named in one of explicit (case-insensitive) keeps its value. Defaults the
+// gateway sets on its own (User-Agent, anthropic-version) are not explicit
+// configuration and are replaced. Header names are written in Go's canonical
+// form ("Session_id", "X-Codex-Turn-Metadata"): HTTP header names are
+// case-insensitive and underscores are kept.
+func (p *PassHeaders) Apply(h, client http.Header, explicit ...map[string]string) {
+	if p == nil || client == nil {
+		return
+	}
+	for _, name := range p.Names {
+		if !validHeaderName(name) || forbiddenHeaders[strings.ToLower(name)] {
+			continue
+		}
+		vals := client.Values(name)
+		if len(vals) == 0 {
+			continue
+		}
+		if p.KeepOrigin && setExplicitly(name, explicit) {
+			continue
+		}
+		h[http.CanonicalHeaderKey(name)] = slices.Clone(vals)
+	}
+}
+
+func setExplicitly(name string, explicit []map[string]string) bool {
+	for _, m := range explicit {
+		for k := range m {
+			if strings.EqualFold(k, name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // SharedUsers returns the users a shared channel is shared with: users who
@@ -252,6 +302,9 @@ func (r *Runtime) NewRequestBody(ctx context.Context, dialect string, body io.Re
 		}
 	} else if o == nil || !o.SkipAuth {
 		req.Header.Set("Authorization", "Bearer "+r.APIKey)
+	}
+	if o != nil && o.Pass != nil {
+		o.Pass.Apply(req.Header, clientHeader, r.Config.Headers, o.Headers)
 	}
 	return req, nil
 }

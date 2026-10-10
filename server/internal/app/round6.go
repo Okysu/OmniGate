@@ -24,8 +24,8 @@ type round6 struct {
 
 // newRound6 creates the notification service and connects the event
 // producers: wallet ledger, plan quotas, sell prices, plugin approvals,
-// channel health (breaker, 401/403), upstream balances, registry reloads and
-// channel share invitations.
+// channel health (breaker, 401/403), upstream balances, registry reloads,
+// channel share invitations and reset card batches.
 func newRound6(cfg *config.Config, log *slog.Logger, pool *db.DB, rec *audit.Recorder, keys []secretbox.Key, cur Currency,
 	st *settings.Service, reg *channel.Registry, chSvc *channel.Service, bill *billing.Service, subs *subscription.Service,
 	prices *pricing.Service, plugins *plugin.Service, opts Options) (*round6, error) {
@@ -40,6 +40,7 @@ func newRound6(cfg *config.Config, log *slog.Logger, pool *db.DB, rec *audit.Rec
 	bill.OnLedger = n.WalletChanged
 	subs.OnQuota = n.QuotaReached
 	subs.OnBulk = n.SubscriptionBulk
+	subs.OnCards = n.ResetCardsIssued
 	prices.OnSellPrice = n.SellPriceChanged
 	plugins.OnPendingApproval = n.PluginPending
 	reg.Breaker.OnTransition = n.ChannelTransition

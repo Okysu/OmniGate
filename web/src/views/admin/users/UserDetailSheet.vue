@@ -25,11 +25,12 @@ import { sortSubscriptions } from '@/lib/quota'
 import { useAuthStore } from '@/stores/auth'
 import { useGroupsStore } from '@/stores/groups'
 import AdjustWalletDialog from '@/views/billing/AdjustWalletDialog.vue'
+import UserResetCards from '@/views/billing/reset-cards/UserResetCards.vue'
 import GrantDialog from '@/views/billing/subscriptions/GrantDialog.vue'
 import UserChangeDialogs from './UserChangeDialogs.vue'
 import UserGroupDialog from './UserGroupDialog.vue'
 
-/** Admin user detail (phase7-api.md §2.2): profile, controls, wallet, subscriptions, keys, sessions. */
+/** Admin user detail (phase7-api.md §2.2): profile, controls, wallet, subscriptions, reset cards, keys, sessions. */
 const props = defineProps<{
   userId: string | null
   /** List row shown while the detail loads. */
@@ -447,6 +448,9 @@ function onGranted(s: Subscription, renewed: boolean) {
               没有订阅。
             </p>
           </section>
+
+          <!-- 重置卡 (phase11 §2) -->
+          <UserResetCards v-if="canBilling" :user-id="detail.user.id" />
 
           <!-- API Keys -->
           <section class="space-y-3" aria-labelledby="ud-keys">

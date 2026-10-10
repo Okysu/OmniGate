@@ -46,8 +46,8 @@ function prefs(over: Partial<NotificationPreferences> = {}): NotificationPrefere
 
 describe('event catalog', () => {
   it('covers every contract event once with categories', () => {
-    expect(EVENT_CATALOG).toHaveLength(22)
-    expect(new Set(EVENT_CATALOG.map(e => e.type)).size).toBe(22)
+    expect(EVENT_CATALOG).toHaveLength(23)
+    expect(new Set(EVENT_CATALOG.map(e => e.type)).size).toBe(23)
     expect(categoryOf('upstream.balance_low')).toBe('channel')
     expect(categoryOf('quota.exhausted')).toBe('plan')
     expect(categoryOf('subscription.future_thing')).toBe('plan')
@@ -171,7 +171,7 @@ describe('preferences form', () => {
   })
 
   it('has defaults for every event', () => {
-    expect(Object.keys(defaultEvents())).toHaveLength(22)
+    expect(Object.keys(defaultEvents())).toHaveLength(23)
   })
 })
 
@@ -227,6 +227,16 @@ describe('phase7 events', () => {
     expect(CATEGORY_LABELS.account).toBe('账户')
     for (const t of ['account.status_changed', 'subscription.quota_reset', 'subscription.extended'])
       expect(eventMeta(t)!.defaults).toEqual({ email: true, webhook: false, inApp: true })
+  })
+
+  it('registers reset_card.issued in the plan category (phase11 §2.1)', () => {
+    expect(categoryOf('reset_card.issued')).toBe('plan')
+    expect(categoryOf('reset_card.future')).toBe('plan')
+    expect(eventLabel('reset_card.issued')).toBe('获得额度重置卡')
+    expect(eventMeta('reset_card.issued')!.defaults).toEqual({ email: true, webhook: false, inApp: true })
+    expect(typesParam('plan')!.split(',')).toContain('reset_card.issued')
+    expect(eligibleEvents(USER).map(e => e.type)).toContain('reset_card.issued')
+    expect(eligibleEvents(AUDITOR).map(e => e.type)).not.toContain('reset_card.issued')
   })
 
   it('is eligible for every signed-in user (account) and billing users (plan)', () => {

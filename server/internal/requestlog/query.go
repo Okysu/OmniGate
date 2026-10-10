@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"omnigate/internal/affinity"
 	"omnigate/internal/apperr"
 	"omnigate/internal/auth"
 	"omnigate/internal/authz"
@@ -86,6 +88,17 @@ func parseFilter(r *http.Request, maxDays int) (*filter, error) {
 	if v := q.Get("model"); v != "" {
 		f.add("l.model = ?", v)
 	}
+	// Session affinity outcome (phase12-api.md §4): one outcome, or "any"
+	// for every request an affinity rule applied to.
+	switch v := q.Get("affinity"); {
+	case v == "":
+	case v == "any":
+		f.where = append(f.where, "l.affinity IS NOT NULL")
+	case slices.Contains(affinity.Outcomes, v):
+		f.add("l.affinity = ?", v)
+	default:
+		return nil, apperr.Validation("affinity 只能是 any、"+strings.Join(affinity.Outcomes, "、"), nil)
+	}
 	switch q.Get("status") {
 	case "success":
 		f.where = append(f.where, "l.status_code < 400")
@@ -160,6 +173,10 @@ type logView struct {
 	// usage and only perRequest was charged (phase9-api.md §1.1).
 	AudioSeconds   int64 `json:"audioSeconds"`
 	UsageEstimated bool  `json:"usageEstimated"`
+	// Affinity is the session affinity outcome and AffinityRule the applying
+	// rule (phase12-api.md §4); null when no rule applied.
+	Affinity     *string `json:"affinity"`
+	AffinityRule *string `json:"affinityRule"`
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
@@ -181,7 +198,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		l.fallback_path, l.ttft_ms, l.duration_ms, l.input_tokens, l.output_tokens, l.cache_read_tokens, l.cache_write_tokens,
 		l.reasoning_tokens, l.usage_estimated, l.cost_nano, l.charge_nano, l.subscription_id, l.quota_charge_nano,
 		COALESCE(l.served_model, l.model), l.channel_tier, l.image_count, l.image_input_tokens, l.price_multiplier,
-		l.audio_seconds, l.audio_input_tokens, l.audio_output_tokens, l.input_characters, l.price_tier
+		l.audio_seconds, l.audio_input_tokens, l.audio_output_tokens, l.input_characters, l.price_tier, l.affinity, l.affinity_rule
 		FROM request_logs l LEFT JOIN users u ON u.id = l.user_id`+f.sql()+
 		` ORDER BY l.started_at DESC LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
@@ -202,7 +219,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 			&ttft, &dur, &v.Usage.Input, &v.Usage.Output, &v.Usage.CacheRead, &v.Usage.CacheWrite, &v.Usage.Reasoning,
 			&v.Usage.Estimated, &cost, &charge, &v.SubscriptionID, &quota, &v.ServedModel, &v.ChannelTier, &v.ImageCount,
 			&v.Usage.ImageInputTokens, &v.PriceMultiplier, &v.AudioSeconds, &v.Usage.AudioInputTokens, &v.Usage.AudioOutputTokens,
-			&v.Usage.InputCharacters, &v.PriceTier); err != nil {
+			&v.Usage.InputCharacters, &v.PriceTier, &v.Affinity, &v.AffinityRule); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
@@ -257,6 +274,17 @@ func numericString(s *string) string {
 	return out
 }
 
+// cacheHitRate is the prompt cache hit ratio: cache-read tokens / prompt
+// tokens, where prompt = input + cache read + cache write (protocol.Usage
+// counts input without cache tokens). nil without prompt tokens.
+func cacheHitRate(read, prompt int64) *float64 {
+	if prompt <= 0 {
+		return nil
+	}
+	r := float64(read) / float64(prompt)
+	return &r
+}
+
 func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
 	f, err := parseFilter(r, 92)
 	if err != nil {
@@ -275,15 +303,16 @@ func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) buildSummary(ctx context.Context, f *filter) (map[string]any, error) {
 	where := f.sql()
 	dl := h.pool.Dialect()
-	var reqs, ok, errs, in, outTok int64
+	var reqs, ok, errs, in, outTok, cacheRead, cacheWrite int64
 	var cost, charge *string
 	var p50, p95, p99, ttft *float64
 	err := h.pool.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE status_code < 400), count(*) FILTER (WHERE status_code >= 400),
 		coalesce(sum(input_tokens + cache_read_tokens + cache_write_tokens), 0), coalesce(sum(output_tokens), 0),
+		coalesce(sum(cache_read_tokens), 0), coalesce(sum(cache_write_tokens), 0),
 		`+dl.SumText("cost_nano")+`, `+dl.SumText("charge_nano")+`,
 		`+dl.Percentile(0.5, "duration_ms")+`, `+dl.Percentile(0.95, "duration_ms")+`,
 		`+dl.Percentile(0.99, "duration_ms")+`, `+dl.Percentile(0.5, "ttft_ms")+`
-		FROM request_logs l`+where, f.args...).Scan(&reqs, &ok, &errs, &in, &outTok, &cost, &charge, &p50, &p95, &p99, &ttft)
+		FROM request_logs l`+where, f.args...).Scan(&reqs, &ok, &errs, &in, &outTok, &cacheRead, &cacheWrite, &cost, &charge, &p50, &p95, &p99, &ttft)
 	if err != nil {
 		return nil, err
 	}
@@ -302,6 +331,8 @@ func (h *Handler) buildSummary(ctx context.Context, f *filter) (map[string]any, 
 		"requests": reqs, "success": ok, "errors": errs, "successRate": rate, "inputTokens": in, "outputTokens": outTok,
 		"cost": nil, "charge": numericString(charge),
 		"latencyP50Ms": round(p50), "latencyP95Ms": round(p95), "latencyP99Ms": round(p99), "ttftP50Ms": round(ttft),
+		// Prompt cache hits (phase12-api.md §5): inputTokens is the prompt.
+		"cacheReadTokens": cacheRead, "cacheWriteTokens": cacheWrite, "cacheHitRate": cacheHitRate(cacheRead, in),
 	}
 	if f.seeAll {
 		totals["cost"] = numericString(cost)
@@ -348,7 +379,8 @@ func (h *Handler) buildSummary(ctx context.Context, f *filter) (map[string]any, 
 
 	byChannel := []map[string]any{}
 	rows, err = h.pool.Query(ctx, `SELECT channel_id, max(channel_name), count(*), count(*) FILTER (WHERE status_code >= 400),
-		`+dl.Percentile(0.95, "duration_ms")+`
+		`+dl.Percentile(0.95, "duration_ms")+`, coalesce(sum(input_tokens + cache_read_tokens + cache_write_tokens), 0),
+		coalesce(sum(cache_read_tokens), 0)
 		FROM request_logs l`+where+` GROUP BY channel_id ORDER BY count(*) DESC, max(channel_name), channel_id LIMIT 50`, f.args...)
 	if err != nil {
 		return nil, err
@@ -356,14 +388,36 @@ func (h *Handler) buildSummary(ctx context.Context, f *filter) (map[string]any, 
 	for rows.Next() {
 		var id *uuid.UUID
 		var name *string
-		var n, e int64
+		var n, e, prompt, read int64
 		var p *float64
-		if err := rows.Scan(&id, &name, &n, &e, &p); err != nil {
+		if err := rows.Scan(&id, &name, &n, &e, &p, &prompt, &read); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		byChannel = append(byChannel, map[string]any{"channelId": id, "channelName": name, "requests": n, "errors": e, "latencyP95Ms": round(p)})
+		byChannel = append(byChannel, map[string]any{"channelId": id, "channelName": name, "requests": n, "errors": e, "latencyP95Ms": round(p),
+			"inputTokens": prompt, "cacheReadTokens": read, "cacheHitRate": cacheHitRate(read, prompt)})
 	}
 	rows.Close()
-	return map[string]any{"from": f.from, "to": f.to, "totals": totals, "daily": daily, "byModel": byModel, "byChannel": byChannel}, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Session affinity outcomes (phase12-api.md §4); empty without rules.
+	aff := map[string]int64{}
+	rows, err = h.pool.Query(ctx, `SELECT affinity, count(*) FROM request_logs l`+where+` AND l.affinity IS NOT NULL GROUP BY affinity`, f.args...)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var o string
+		var n int64
+		if err := rows.Scan(&o, &n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		aff[o] = n
+	}
+	rows.Close()
+	return map[string]any{"from": f.from, "to": f.to, "totals": totals, "daily": daily, "byModel": byModel, "byChannel": byChannel,
+		"affinity": aff}, rows.Err()
 }

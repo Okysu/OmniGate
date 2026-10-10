@@ -21,6 +21,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"omnigate/internal/affinity"
 	"omnigate/internal/apperr"
 	"omnigate/internal/channel"
 	"omnigate/internal/identity"
@@ -81,6 +82,9 @@ type Options struct {
 	// Journal receives settlements that keep failing (ADR-0010; nil: they
 	// are logged as errors and lost).
 	Journal *journal.Journal
+	// Affinity pins client sessions to channels and passes session headers
+	// through (phase12-api.md; nil = off).
+	Affinity *affinity.Service
 }
 
 type Gateway struct {
@@ -534,6 +538,8 @@ type reqState struct {
 	// abort is set when a committed binary response broke off: the connection
 	// is aborted after the request was settled and logged (audio.go).
 	abort bool
+	// affinity is the request's session affinity state (nil = no rule applied).
+	affinity *affinity.Session
 }
 
 // groupMultiplier is the sell-price multiplier of the request's user group.
@@ -682,6 +688,8 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 		retry = rule.Retry
 		models = append(models, rule.FallbackModels...)
 	}
+	st.affinity = g.opts.Affinity.Begin(r.Context(), affinity.Request{UserID: a.UserID, GroupID: a.GroupID, Model: info.Model,
+		Path: r.URL.Path, UserAgent: r.UserAgent(), Header: r.Header, Body: st.body})
 
 	var lastErr *protocol.GatewayError
 	attempts := 0
@@ -703,6 +711,7 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 		cands, _ := g.candidates(a.UserID, a.Key.Policy.AllowedChannels, model, st.dialect, mrule)
 		if len(cands) == 0 {
 			if i == 0 {
+				st.affinity.Broken() // a bound channel cannot be a candidate
 				msg := fmt.Sprintf("model %q is not available for this API key", model)
 				switch {
 				case st.dialect == protocol.OpenAIEmbeddings:
@@ -720,8 +729,12 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 			continue
 		}
 		platformAttempts, admitted := 0, false
+		ordered := g.arrange(r.Context(), cands, model, mrule, st.start, true)
+		if i == 0 {
+			ordered = g.pin(st, ordered) // fallback models are never pinned
+		}
 	attemptLoop:
-		for _, c := range g.arrange(r.Context(), cands, model, mrule, st.start, true) {
+		for _, c := range ordered {
 			if attempts >= routing.HardAttemptCap {
 				break
 			}
@@ -761,10 +774,13 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 			attempts++
 			gerr, class := g.attempt(w, r, st, c.rt, c.tier)
 			if gerr == nil {
+				st.affinity.Served(c.rt.ID, i == 0)
 				return nil
 			}
 			lastErr = gerr
-			if !policy.Allows(class) || st.written || r.Context().Err() != nil {
+			// Strict session affinity: the bound channel's error is returned
+			// without trying another channel.
+			if st.affinity.StopAfter(c.rt.ID) || !policy.Allows(class) || st.written || r.Context().Err() != nil {
 				return gerr
 			}
 		}
@@ -773,6 +789,32 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 		return protocol.NewError(protocol.ErrUpstreamUnavailable, "all channels for this model are temporarily unavailable (circuit open)")
 	}
 	return lastErr
+}
+
+// pin puts the session's bound channel first within its tier (session
+// affinity, phase12-api.md §2). The tier order own → shared → platform is a
+// billing boundary and never changes. A bound channel that is not a candidate
+// — disabled, no longer usable by the key, not serving the model, or with an
+// open circuit — breaks the binding and the request is routed normally.
+func (g *Gateway) pin(st *reqState, ordered []routeCand) []routeCand {
+	id, ok := st.affinity.Bound()
+	if !ok {
+		return ordered
+	}
+	idx := slices.IndexFunc(ordered, func(c routeCand) bool { return c.rt.ID == id })
+	if idx < 0 || g.reg.Breaker.State(id) == "open" {
+		st.affinity.Broken()
+		return ordered
+	}
+	start := idx
+	for start > 0 && ordered[start-1].tier == ordered[idx].tier {
+		start--
+	}
+	c := ordered[idx]
+	copy(ordered[start+1:idx+1], ordered[start:idx])
+	ordered[start] = c
+	st.affinity.Routed()
+	return ordered
 }
 
 // admit applies plan quotas (docs/contracts/phase3-api.md §3) and, for a
@@ -950,6 +992,13 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 			body = out.Body
 		}
 		ov = &channel.RequestOverride{Path: out.Path, Headers: out.Headers, SkipAuth: rt.Plugin.SignsRequests()}
+	}
+	if p := st.affinity.PassHeaders(); p != nil {
+		// Session headers of the applying affinity rule (every attempt).
+		if ov == nil {
+			ov = &channel.RequestOverride{}
+		}
+		ov.Pass = p
 	}
 	var req *http.Request
 	var err error
@@ -1241,6 +1290,11 @@ func (g *Gateway) finish(st *reqState, gerr *protocol.GatewayError) {
 	if gerr != nil {
 		c, m := gerr.Class, gerr.Message
 		e.ErrorClass, e.ErrorMessage, e.StatusCode = &c, &m, gerr.Status
+	}
+	if o := st.affinity.Outcome(); o != "" {
+		// The rule name and outcome only; never the session value.
+		rule := st.affinity.Rule
+		e.Affinity, e.AffinityRule = &o, &rule
 	}
 	if e.ChannelTier == string(channel.TierOwn) || e.ChannelTier == string(channel.TierShared) {
 		// Own and shared channels are never billed (phase5-api.md §1): no

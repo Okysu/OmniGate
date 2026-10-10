@@ -37,3 +37,16 @@ export function shortDate(date: string): string {
 export function errorRate(requests: number, errors: number): number | null {
   return requests > 0 ? errors / requests : null
 }
+
+/**
+ * Prompt cache hit ratio: cache reads / prompt tokens (input + cache read + cache write,
+ * `inputTokens` in the summary). Uses the server's `cacheHitRate` when present.
+ */
+export function cacheHitRate(row: { inputTokens?: number, cacheReadTokens?: number, cacheHitRate?: number | null }): number | null {
+  if (typeof row.cacheHitRate === 'number')
+    return row.cacheHitRate
+  if (row.cacheHitRate === null)
+    return null
+  const prompt = row.inputTokens ?? 0
+  return prompt > 0 && typeof row.cacheReadTokens === 'number' ? row.cacheReadTokens / prompt : null
+}

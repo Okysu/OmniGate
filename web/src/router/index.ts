@@ -168,6 +168,12 @@ const consoleRoutes: RouteRecordRaw[] = [
     meta: { title: '兑换码', permission: 'billing.manage' },
   },
   {
+    path: 'billing/reset-cards',
+    name: 'billing-reset-cards',
+    component: () => import('@/views/billing/reset-cards/ResetCardsView.vue'),
+    meta: { title: '重置卡', permission: 'billing.manage' },
+  },
+  {
     path: 'admin/users',
     name: 'admin-users',
     component: () => import('@/views/admin/UsersView.vue'),

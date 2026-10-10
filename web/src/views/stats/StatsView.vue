@@ -3,7 +3,7 @@ import type { ColumnSeries } from '@/components/charts/ColumnChart.vue'
 import type { StatsSummary, User } from '@/lib/types'
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Activity, ArrowDownToLine, ArrowUpFromLine, CircleCheck, Coins, Gauge, RefreshCw, Timer, UserRound, Wallet } from '@lucide/vue'
+import { Activity, ArrowDownToLine, ArrowUpFromLine, CircleCheck, Coins, DatabaseZap, Gauge, RefreshCw, Timer, UserRound, Wallet, Waypoints } from '@lucide/vue'
 import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -21,7 +21,8 @@ import { useRangeQuery } from '@/composables/useRangeQuery'
 import { logsApi } from '@/lib/endpoints'
 import { formatCompact, formatDateTime, formatMs, formatNumber, formatPercent } from '@/lib/format'
 import { isAbortError, queryStr } from '@/lib/query'
-import { errorRate, fillDaily, shortDate } from '@/lib/stats'
+import { cacheHitRate, errorRate, fillDaily, shortDate } from '@/lib/stats'
+import { affinityHitRate, OUTCOME_LABELS, OUTCOMES } from '@/lib/affinity'
 import { useAuthStore } from '@/stores/auth'
 
 const ColumnChart = defineAsyncComponent(() => import('@/components/charts/ColumnChart.vue'))
@@ -88,6 +89,20 @@ const tokenSeries = computed<ColumnSeries[]>(() => [
 ])
 const showDailyTable = ref(false)
 
+// phase12 §5: prompt cache hits; §4: session affinity outcomes.
+const cacheRate = computed(() => (totals.value ? cacheHitRate(totals.value) : null))
+const cacheHint = computed(() => {
+  const t = totals.value
+  if (!t || t.cacheReadTokens == null)
+    return undefined
+  return `缓存读 ${formatCompact(t.cacheReadTokens)} / 输入 ${formatCompact(t.inputTokens)}`
+})
+const affinityCounts = computed(() => data.value?.affinity ?? {})
+const affinityTotal = computed(() => Object.values(affinityCounts.value).reduce((a, b) => a + (b ?? 0), 0))
+const affinityRate = computed(() => affinityHitRate(data.value?.affinity))
+const affinityHint = computed(() => OUTCOMES.filter(o => affinityCounts.value[o]).map(o => `${OUTCOME_LABELS[o]} ${formatNumber(affinityCounts.value[o])}`).join(' · ') || undefined)
+const hasChannelCache = computed(() => data.value?.byChannel.some(c => c.cacheReadTokens !== undefined) ?? false)
+
 const latencyHint = computed(() => {
   const t = totals.value
   if (!t || t.latencyP50Ms == null)
@@ -143,6 +158,26 @@ const latencyHint = computed(() => {
         <StatTile label="输出 Tokens" :icon="ArrowUpFromLine" :value="formatCompact(totals?.outputTokens)" :title="formatNumber(totals?.outputTokens)" :loading="loading && !totals" />
         <StatTile label="收费" :icon="Wallet" :value="money(totals?.charge)" :loading="loading && !totals" />
         <StatTile v-if="totals?.cost != null" label="上游成本" :icon="Coins" :value="money(totals.cost)" :loading="loading && !totals" />
+        <StatTile
+          v-if="!totals || totals.cacheReadTokens !== undefined"
+          label="提示词缓存命中率"
+          :icon="DatabaseZap"
+          :value="cacheRate == null ? '—' : formatPercent(cacheRate)"
+          :hint="cacheHint"
+          title="缓存读取 Token ÷ 输入 Token（含缓存读写）"
+          :loading="loading && !totals"
+          data-testid="stat-cache-hit"
+        />
+        <StatTile
+          v-if="affinityTotal > 0"
+          label="会话亲和命中"
+          :icon="Waypoints"
+          :value="affinityRate == null ? '—' : formatPercent(affinityRate)"
+          :hint="affinityHint"
+          title="已绑定的会话中，由绑定渠道处理的请求占比"
+          :loading="loading && !totals"
+          data-testid="stat-affinity"
+        />
       </div>
 
       <div class="grid gap-4 xl:grid-cols-2">
@@ -325,6 +360,9 @@ const latencyHint = computed(() => {
                   <TableHead class="text-right">
                     P95 延迟
                   </TableHead>
+                  <TableHead v-if="hasChannelCache" class="text-right" title="缓存读取 Token ÷ 输入 Token（含缓存读写）">
+                    缓存命中
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -340,6 +378,9 @@ const latencyHint = computed(() => {
                   </TableCell>
                   <TableCell class="text-right tabular-nums">
                     {{ formatMs(c.latencyP95Ms) }}
+                  </TableCell>
+                  <TableCell v-if="hasChannelCache" class="text-right tabular-nums" :title="c.cacheReadTokens != null ? `缓存读 ${formatNumber(c.cacheReadTokens)} / 输入 ${formatNumber(c.inputTokens)}` : undefined">
+                    {{ cacheHitRate(c) == null ? '—' : formatPercent(cacheHitRate(c)) }}
                   </TableCell>
                 </TableRow>
               </TableBody>

@@ -71,6 +71,9 @@ type Service struct {
 	// OnBulk, when set, receives every committed quota reset or extension
 	// (notifications; phase7-api.md §3).
 	OnBulk func(ctx context.Context, n BulkNotice)
+	// OnCards, when set, receives every committed reset card batch
+	// (notifications; phase11-api.md §2.1).
+	OnCards func(ctx context.Context, n CardNotice)
 	// CustomMeters evaluates billing-plugin meters (nil: custom meters are
 	// rejected on save and count 0).
 	CustomMeters CustomMeters

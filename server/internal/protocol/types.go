@@ -46,6 +46,11 @@ type ChatRequest struct {
 	ParallelToolCalls   *bool           `json:"parallel_tool_calls,omitempty"`
 	User                string          `json:"user,omitempty"`
 	ReasoningEffort     string          `json:"reasoning_effort,omitempty"`
+	// PromptCacheKey and SafetyIdentifier exist in Chat and Responses alike
+	// and are carried across that conversion (phase12-api.md §6): upstream
+	// prompt caches and account pools recognise sessions by them.
+	PromptCacheKey   string `json:"prompt_cache_key,omitempty"`
+	SafetyIdentifier string `json:"safety_identifier,omitempty"`
 }
 
 type StreamOptions struct {

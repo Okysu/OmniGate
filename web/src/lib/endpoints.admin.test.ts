@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { adminApi, billingApi, groupsApi, plansApi } from './endpoints'
+import { adminApi, affinityApi, billingApi, groupsApi, logsApi, plansApi } from './endpoints'
 
 function json(status: number, body: unknown): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -91,5 +91,26 @@ describe('groups & limits (phase8 §1–§2)', () => {
     expect(lastCall(fetchMock).url).toBe('/api/admin/users?page=1&pageSize=20&groupId=g2')
     await billingApi.limits()
     expect(lastCall(fetchMock).url).toBe('/api/billing/limits')
+  })
+})
+
+describe('affinityApi (phase12 §3)', () => {
+  it('reads stats and clears all or one rule', async () => {
+    const fetchMock = vi.fn(async () => json(200, { cleared: 2, stats: { entries: 0, maxEntries: 100, rules: {} } }))
+    vi.stubGlobal('fetch', fetchMock)
+    await affinityApi.stats()
+    expect(lastCall(fetchMock).url).toBe('/api/admin/affinity/stats')
+    expect((await affinityApi.clear('codex cli trace')).cleared).toBe(2)
+    expect(lastCall(fetchMock).url).toBe('/api/admin/affinity/clear')
+    expect(JSON.parse(String(lastCall(fetchMock).init.body))).toEqual({ rule: 'codex cli trace' })
+    await affinityApi.clear()
+    expect(JSON.parse(String(lastCall(fetchMock).init.body))).toEqual({})
+  })
+
+  it('filters request logs by affinity outcome', async () => {
+    const fetchMock = vi.fn(async () => json(200, { items: [], total: 0, page: 1, pageSize: 50 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await logsApi.list({ page: 1, pageSize: 50, affinity: 'strict_failed' })
+    expect(lastCall(fetchMock).url).toContain('affinity=strict_failed')
   })
 })

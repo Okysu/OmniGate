@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"omnigate/internal/affinity"
 	"omnigate/internal/audit"
 	"omnigate/internal/auth"
 	"omnigate/internal/billing"
@@ -19,12 +20,15 @@ import (
 )
 
 // round5 holds the route rules and system settings components
-// (docs/contracts/phase4-api.md §2–§3).
+// (docs/contracts/phase4-api.md §2–§3), and session affinity, whose rules are
+// the gateway.affinity setting (phase12-api.md).
 type round5 struct {
 	settings  *settings.Service
 	settingsH *settings.Handler
 	routes    *routing.Service
 	routesH   *routing.Handler
+	affinity  *affinity.Service
+	affinityH *affinity.Handler
 }
 
 // newRound5 creates the settings and routing services and hooks the settings
@@ -77,7 +81,8 @@ func newRound5(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *
 	if err := routes.Reload(ctx); err != nil {
 		return nil, err
 	}
-	return &round5{settings: st, settingsH: settings.NewHandler(st), routes: routes}, nil
+	aff := affinity.NewService(st.Affinity, nil)
+	return &round5{settings: st, settingsH: settings.NewHandler(st), routes: routes, affinity: aff, affinityH: affinity.NewHandler(aff, rec)}, nil
 }
 
 // workers are the background jobs of the round 5 components.

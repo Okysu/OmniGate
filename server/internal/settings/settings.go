@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"omnigate/internal/affinity"
 	"omnigate/internal/apperr"
 	"omnigate/internal/audit"
 	"omnigate/internal/money"
@@ -82,6 +83,9 @@ type Gateway struct {
 	MaxAttempts      int      `json:"maxAttempts"`
 	RetryOn          []string `json:"retryOn"`
 	LogRetentionDays int      `json:"logRetentionDays"`
+	// Affinity is the session affinity setting (phase12-api.md §1; new-api's
+	// snake_case JSON shape).
+	Affinity affinity.Config `json:"affinity"`
 }
 
 // SMTP is the read view of notifications.smtp (the password is write-only).
@@ -125,7 +129,7 @@ type SMTPConfig struct {
 func (c SMTPConfig) Configured() bool { return c.Host != "" && c.From != "" }
 
 // field describes one setting. Values are canonical Go values: string, bool,
-// int64 or []string.
+// int64, []string or (gateway.affinity) affinity.Config.
 type field struct {
 	key    string
 	def    any
@@ -145,6 +149,7 @@ var fields = []field{
 	{"gateway.maxAttempts", int64(3), decodeInt(1, 5)},
 	{"gateway.retryOn", slices.Clone(routing.DefaultRetryClasses), decodeRetryOn},
 	{"gateway.logRetentionDays", int64(90), decodeInt(0, 3650)},
+	{"gateway.affinity", affinity.Default(), decodeAffinity},
 	{"notifications.smtp.host", "", decodeString(0, 253, validSMTPHost)},
 	{"notifications.smtp.port", int64(587), decodeInt(1, 65535)},
 	{"notifications.smtp.security", "starttls", decodeEnum("starttls", "tls", "none")},
@@ -283,6 +288,14 @@ func decodeRetryOn(raw json.RawMessage) (any, string) {
 	return out, ""
 }
 
+func decodeAffinity(raw json.RawMessage) (any, string) {
+	c, msg := affinity.Decode(raw)
+	if msg != "" {
+		return nil, msg
+	}
+	return c, ""
+}
+
 func decodeDomains(raw json.RawMessage) (any, string) {
 	var list []string
 	if json.Unmarshal(raw, &list) != nil {
@@ -313,12 +326,14 @@ func (v values) settings() Settings {
 	num := func(k string) int64 { n, _ := v[k].(int64); return n }
 	domains, _ := v["auth.allowedEmailDomains"].([]string)
 	retryOn, _ := v["gateway.retryOn"].([]string)
+	aff, _ := v["gateway.affinity"].(affinity.Config)
 	return Settings{
 		Site: Site{Name: str("site.name"), Announcement: str("site.announcement"), LandingEnabled: boolean("site.landingEnabled"), DocsURL: str("site.docsUrl"),
 			PublicModelPlaza: boolean("site.publicModelPlaza")},
 		Auth:    Auth{RegistrationMode: str("auth.registrationMode"), AllowedEmailDomains: slices.Clone(domains)},
 		Billing: Billing{Enforce: boolean("billing.enforce"), SignupCredit: str("billing.signupCredit")},
-		Gateway: Gateway{MaxAttempts: int(num("gateway.maxAttempts")), RetryOn: slices.Clone(retryOn), LogRetentionDays: int(num("gateway.logRetentionDays"))},
+		Gateway: Gateway{MaxAttempts: int(num("gateway.maxAttempts")), RetryOn: slices.Clone(retryOn), LogRetentionDays: int(num("gateway.logRetentionDays")),
+			Affinity: aff},
 		Notifications: Notifications{
 			SMTP: SMTP{Host: str("notifications.smtp.host"), Port: int(num("notifications.smtp.port")), Security: str("notifications.smtp.security"),
 				Username: str("notifications.smtp.username"), PasswordSet: str(keySMTPPassword) != "", From: str("notifications.smtp.from")},
@@ -631,6 +646,11 @@ func (s *Service) GatewayRetryOn(ctx context.Context) []string {
 // GatewayMaxAttempts returns gateway.maxAttempts.
 func (s *Service) GatewayMaxAttempts(ctx context.Context) int {
 	return s.Current(ctx).Gateway.MaxAttempts
+}
+
+// Affinity returns gateway.affinity (the compiled session affinity setting).
+func (s *Service) Affinity(ctx context.Context) affinity.Config {
+	return s.Current(ctx).Gateway.Affinity
 }
 
 // Registration returns the effective registration mode and email domains.

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"omnigate/internal/subscription"
 )
 
 // TestBuiltinCatalog checks the embedded catalog without a database: GPT
@@ -37,6 +39,16 @@ func TestBuiltinCatalog(t *testing.T) {
 	}
 	if tiered != 2 {
 		t.Errorf("%d tiered builtin prices, want 2 (gpt-6-astra, gpt-6.1-sol)", tiered)
+	}
+	// The 5-hour and weekly limits are session windows (opened by the first
+	// request), so reset cards anchor them (phase11-api.md §1).
+	for _, p := range c.Plans {
+		for _, r := range p.Rules {
+			want := map[string]string{"5h": "5h", "weekly": "7d"}[r.ID]
+			if want != "" && (r.Window.Kind != subscription.WindowSession || r.Window.Duration != want) {
+				t.Errorf("plan %s rule %s: window %+v, want session %s", p.Name, r.ID, r.Window, want)
+			}
+		}
 	}
 	if Hash(Builtin()) != Hash(builtinCatalog) || len(Hash(nil)) != 64 {
 		t.Fatal("hash")

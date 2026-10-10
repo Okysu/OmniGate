@@ -29,8 +29,10 @@ type responsesRequest struct {
 	Text *struct {
 		Format json.RawMessage `json:"format,omitempty"`
 	} `json:"text,omitempty"`
-	User  string `json:"user,omitempty"`
-	Store *bool  `json:"store,omitempty"`
+	User             string `json:"user,omitempty"`
+	Store            *bool  `json:"store,omitempty"`
+	PromptCacheKey   string `json:"prompt_cache_key,omitempty"`
+	SafetyIdentifier string `json:"safety_identifier,omitempty"`
 }
 
 type responsesTool struct {
@@ -60,24 +62,28 @@ type responsesPart struct {
 	Detail   string `json:"detail,omitempty"`
 }
 
+// prompt_cache_key and safety_identifier mean the same in Chat and Responses
+// and are carried over; service_tier stays a dropped hint (it selects a
+// processing / billing tier that OpenAI-compatible Chat upstreams rarely
+// implement, so it is only kept by same-protocol passthrough).
 var responsesToChatPolicy = fieldPolicy{
 	handled: set("model", "input", "instructions", "max_output_tokens", "temperature", "top_p", "tools", "tool_choice",
-		"parallel_tool_calls", "stream", "reasoning", "text", "user"),
+		"parallel_tool_calls", "stream", "reasoning", "text", "user", "prompt_cache_key", "safety_identifier"),
 	neutral: map[string]func(json.RawMessage) bool{
 		"store": func(json.RawMessage) bool { return true }, "metadata": emptyJSON, "truncation": equalsJSON(`"disabled"`),
 		"background": equalsJSON("false"), "include": emptyJSON,
 	},
-	hints: set("service_tier", "prompt_cache_key", "safety_identifier", "max_tool_calls"),
+	hints: set("service_tier", "max_tool_calls"),
 }
 
 var chatToResponsesPolicy = fieldPolicy{
 	handled: set("model", "messages", "max_tokens", "max_completion_tokens", "temperature", "top_p", "stream", "stream_options",
-		"tools", "tool_choice", "parallel_tool_calls", "user", "reasoning_effort", "response_format"),
+		"tools", "tool_choice", "parallel_tool_calls", "user", "reasoning_effort", "response_format", "prompt_cache_key", "safety_identifier"),
 	neutral: map[string]func(json.RawMessage) bool{
 		"n": equalsJSON("1"), "presence_penalty": equalsJSON("0"), "frequency_penalty": equalsJSON("0"),
 		"logprobs": equalsJSON("false"), "store": equalsJSON("false"), "metadata": emptyJSON,
 	},
-	hints: set("service_tier", "prompt_cache_key", "safety_identifier"),
+	hints: set("service_tier"),
 }
 
 // ResponsesToChatRequest converts a Responses request into a Chat request.
@@ -96,7 +102,7 @@ func ResponsesToChatRequest(body []byte, upstreamModel, maxTokensField string, c
 		return nil, nil, invalid("请求格式错误：%v", err)
 	}
 	out := ChatRequest{Model: upstreamModel, Stream: req.Stream, Temperature: req.Temperature, TopP: req.TopP,
-		ParallelToolCalls: req.ParallelToolCalls, User: req.User}
+		ParallelToolCalls: req.ParallelToolCalls, User: req.User, PromptCacheKey: req.PromptCacheKey, SafetyIdentifier: req.SafetyIdentifier}
 	if req.Stream {
 		out.StreamOptions = &StreamOptions{IncludeUsage: true}
 	}
@@ -301,6 +307,12 @@ func ChatToResponsesRequest(body []byte, upstreamModel string, compat Compat) ([
 	}
 	if req.User != "" {
 		out["user"] = req.User
+	}
+	if req.PromptCacheKey != "" {
+		out["prompt_cache_key"] = req.PromptCacheKey
+	}
+	if req.SafetyIdentifier != "" {
+		out["safety_identifier"] = req.SafetyIdentifier
 	}
 	var items []any
 	for i, m := range req.Messages {

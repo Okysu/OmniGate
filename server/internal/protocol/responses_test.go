@@ -286,3 +286,34 @@ func mustJSON(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+// prompt_cache_key and safety_identifier exist in both OpenAI formats: they
+// survive Responses ⇄ Chat (upstream caches and account pools key sessions on
+// them); service_tier stays a dropped hint, and Anthropic still drops them.
+func TestSessionFieldsAcrossResponsesAndChat(t *testing.T) {
+	out, warns, err := ResponsesToChatRequest([]byte(`{"model":"r","input":"hi","prompt_cache_key":"conv-1","safety_identifier":"u-1","service_tier":"flex"}`),
+		"up", "max_tokens", Strict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(out, &m)
+	if m["prompt_cache_key"] != "conv-1" || m["safety_identifier"] != "u-1" || m["service_tier"] != nil || strings.Join(warns, ",") != "service_tier" {
+		t.Fatalf("responses → chat: %s %v", out, warns)
+	}
+	out, warns, err = ChatToResponsesRequest([]byte(`{"model":"c","messages":[{"role":"user","content":"hi"}],"prompt_cache_key":"conv-2","safety_identifier":"u-2"}`),
+		"up", Strict)
+	if err != nil || len(warns) != 0 {
+		t.Fatal(err, warns)
+	}
+	m = nil
+	_ = json.Unmarshal(out, &m)
+	if m["prompt_cache_key"] != "conv-2" || m["safety_identifier"] != "u-2" {
+		t.Fatalf("chat → responses: %s", out)
+	}
+	// Responses → Anthropic (through Chat) still drops them with a warning.
+	out, warns, err = ConvertRequest(OpenAIResponses, Anthropic, []byte(`{"model":"r","input":"hi","prompt_cache_key":"conv-3"}`), "up", "max_tokens", Strict)
+	if err != nil || strings.Contains(string(out), "conv-3") || strings.Join(warns, ",") != "prompt_cache_key" {
+		t.Fatalf("responses → anthropic: %s %v %v", out, warns, err)
+	}
+}

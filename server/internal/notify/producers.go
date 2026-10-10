@@ -469,6 +469,43 @@ func (s *Service) SubscriptionBulk(_ context.Context, n subscription.BulkNotice)
 	})
 }
 
+// ---- reset cards (subscription.OnCards; phase11-api.md §2.1) ----
+
+// ResetCardsIssued tells every recipient of a reset card batch how many cards
+// they received. All recipients get the same content, so each chunk of
+// recipients is one event (one insert transaction, emails queued in the
+// outbox) instead of one synchronous send per user.
+func (s *Service) ResetCardsIssued(_ context.Context, n subscription.CardNotice) {
+	s.goAsync(func(ctx context.Context) {
+		label := subscription.CardKindLabel(n.Kind)
+		body := fmt.Sprintf("管理员向你发放了 %d 张%s，可在「钱包与订阅」中使用：使用后对应的额度窗口立即清零并重新计时。", n.Quantity, label)
+		switch n.Kind {
+		case subscription.CardKind5h:
+			body += "\n可重置：5 小时额度。"
+		case subscription.CardKindWeekly:
+			body += "\n可重置：每周额度。"
+		default:
+			body += "\n可重置：5 小时与每周额度（一次同时重置）。"
+		}
+		if len(n.PlanNames) > 0 {
+			body += "\n仅限套餐：" + strings.Join(n.PlanNames, "、") + "。"
+		}
+		data := map[string]any{"batchId": n.BatchID, "kind": n.Kind, "quantity": n.Quantity, "plans": n.PlanNames, "note": n.Note}
+		if n.ExpiresAt != nil {
+			body += "\n有效期至 " + n.ExpiresAt.UTC().Format("2006-01-02 15:04 UTC") + "。"
+			data["expiresAt"] = n.ExpiresAt.UTC()
+		}
+		if n.Note != "" {
+			body += "\n备注：" + n.Note
+		}
+		title := fmt.Sprintf("你获得了 %d 张%s", n.Quantity, label)
+		for i, users := range n.Users {
+			s.emitLogged(ctx, Event{Type: TypeResetCardIssued, Key: fmt.Sprintf("%s:%s:%d", TypeResetCardIssued, n.BatchID, i),
+				Users: users, Title: title, Body: body, Link: "/console/billing", Data: data})
+		}
+	})
+}
+
 // ---- channel shares (phase5-api.md §5.5) ----
 
 // shareInviteWindow: at most one invitation notification per channel and
