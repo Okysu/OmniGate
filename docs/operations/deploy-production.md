@@ -12,8 +12,7 @@
 | `deploy/nginx/omnigate.conf` | nginx 配置示例（配合 certbot / Let's Encrypt；把其中的 `gate.example.com` 换成你的域名） |
 | `deploy/seed/README.md` | 价格与套餐目录：镜像内置的 GPT 目录、首次启动自动导入（`OMNIGATE_SEED_ON_START`）、`omnigate seed` 用法，见第 8 步 |
 
-你的真实配置只放在不进 Git 的文件里：`deploy/omnigate.env`（OmniGate 变量，含密钥）与 `deploy/.env`（Compose 变量，如 `OMNIGATE_DOMAIN`），
-两者都已在 `.gitignore` 中。
+部署时需要的两份配置由模板复制得到：`deploy/omnigate.env`（OmniGate 变量，含主密钥等敏感信息，权限设为 600）与 `deploy/.env`（Compose 变量，如 `OMNIGATE_DOMAIN`）。
 
 变量的完整参考见 [configuration.md](configuration.md)，镜像细节、SQLite ⇄ PostgreSQL 数据迁移见 [deployment.md](deployment.md)。
 
