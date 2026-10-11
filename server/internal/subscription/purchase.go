@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -83,6 +84,7 @@ func ActivePlansTx(ctx context.Context, q db.Querier, now time.Time) ([]*Plan, e
 		}
 		out = append(out, p)
 	}
+	SortCatalog(out)
 	return out, rows.Err()
 }
 
@@ -239,4 +241,18 @@ func UpgradeTx(ctx context.Context, q db.Querier, now time.Time, sub *Subscripti
 		return nil, err
 	}
 	return getSub(ctx, q, sub.ID, false)
+}
+
+// SortCatalog orders plans for customers: by price ascending, plans without a
+// price last, otherwise newest first (the stable input order).
+func SortCatalog(plans []*Plan) {
+	sort.SliceStable(plans, func(i, j int) bool {
+		a, b := plans[i].ListPrice, plans[j].ListPrice
+		switch {
+		case a == nil || b == nil:
+			return a != nil && b == nil
+		default:
+			return *a < *b
+		}
+	})
 }

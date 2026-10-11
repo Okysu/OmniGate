@@ -158,6 +158,7 @@ func (h *Handler) catalog(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	SortCatalog(items)
 	httpx.WriteJSON(w, http.StatusOK, httpx.List[CatalogPlanJSON]{Items: catalogViews(items), Total: total, Page: 1, PageSize: len(items)})
 }
 

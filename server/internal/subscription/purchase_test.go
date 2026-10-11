@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -88,5 +89,19 @@ func TestRenewTarget(t *testing.T) {
 	p.Stackable = true
 	if RenewTarget([]*Subscription{a}, p) != nil {
 		t.Fatal("stackable plans are never renewed")
+	}
+}
+
+func TestSortCatalog(t *testing.T) {
+	price := func(s string) *money.Amount { a := money.MustParse(s); return &a }
+	plans := []*Plan{{Name: "Plus", ListPrice: price("29")}, {Name: "gift"}, {Name: "Go", ListPrice: price("19")},
+		{Name: "Ultra", ListPrice: price("199")}, {Name: "Aigo", ListPrice: price("30")}}
+	SortCatalog(plans)
+	var names []string
+	for _, p := range plans {
+		names = append(names, p.Name)
+	}
+	if got := strings.Join(names, ","); got != "Go,Plus,Aigo,Ultra,gift" {
+		t.Fatalf("order = %s", got)
 	}
 }
