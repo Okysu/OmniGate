@@ -89,9 +89,10 @@ func TestChatToResponsesRequest(t *testing.T) {
 	if r["text"].(map[string]any)["format"].(map[string]any)["type"] != "json_object" {
 		t.Errorf("text.format = %v", r["text"])
 	}
-	_, _, err = ChatToResponsesRequest([]byte(`{"model":"c","stop":"x","messages":[{"role":"user","content":"hi"}]}`), "g", Strict)
-	if err == nil || !strings.Contains(err.Error(), "stop") {
-		t.Fatalf("stop must be unsupported: %v", err)
+	// Responses has no stop sequences: dropped with a warning, even in strict mode.
+	sb, sw, err := ChatToResponsesRequest([]byte(`{"model":"c","stop":"x","messages":[{"role":"user","content":"hi"}]}`), "g", Strict)
+	if err != nil || strings.Join(sw, ",") != "stop" || strings.Contains(string(sb), `"stop"`) {
+		t.Fatalf("stop must be dropped with a warning: %s %v %v", sb, sw, err)
 	}
 }
 

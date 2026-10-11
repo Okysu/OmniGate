@@ -83,7 +83,9 @@ var chatToResponsesPolicy = fieldPolicy{
 		"n": equalsJSON("1"), "presence_penalty": equalsJSON("0"), "frequency_penalty": equalsJSON("0"),
 		"logprobs": equalsJSON("false"), "store": equalsJSON("false"), "metadata": emptyJSON,
 	},
-	hints: set("service_tier"),
+	// The Responses API has no stop sequences: dropped with a warning (agent
+	// clients such as Claude Code send them; failing the request is worse).
+	hints: set("service_tier", "stop"),
 }
 
 // ResponsesToChatRequest converts a Responses request into a Chat request.
@@ -282,9 +284,6 @@ func ChatToResponsesRequest(body []byte, upstreamModel string, compat Compat) ([
 	var req ChatRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		return nil, nil, invalid("请求格式错误：%v", err)
-	}
-	if v, ok := raw["stop"]; ok && !isNull(v) {
-		is.unsupportedField("stop")
 	}
 	out := map[string]any{"model": upstreamModel, "stream": req.Stream, "store": false}
 	if req.Temperature != nil {

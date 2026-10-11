@@ -225,14 +225,10 @@ func emptyJSON(v json.RawMessage) bool {
 
 var chatToAnthropicPolicy = fieldPolicy{
 	handled: set("model", "messages", "max_tokens", "max_completion_tokens", "temperature", "top_p", "stop",
-		"stream", "stream_options", "tools", "tool_choice", "parallel_tool_calls", "user", "reasoning_effort"),
+		"stream", "stream_options", "tools", "tool_choice", "parallel_tool_calls", "user", "reasoning_effort", "response_format"),
 	neutral: map[string]func(json.RawMessage) bool{
 		"n": equalsJSON("1"), "presence_penalty": equalsJSON("0"), "frequency_penalty": equalsJSON("0"),
 		"logprobs": equalsJSON("false"), "store": equalsJSON("false"), "metadata": emptyJSON,
-		"response_format": func(v json.RawMessage) bool {
-			var rf struct{ Type string }
-			return isNull(v) || (json.Unmarshal(v, &rf) == nil && rf.Type == "text")
-		},
 	},
 	hints: set("service_tier", "prompt_cache_key", "safety_identifier"),
 }
@@ -421,6 +417,14 @@ func ChatToAnthropicRequest(body []byte, upstreamModel string, compat Compat) ([
 		out.ToolChoice.DisableParallelToolUse = &t
 	}
 
+	if rf, ok := raw["response_format"]; ok && !isNull(rf) {
+		if format, ok := chatFormatToAnthropic(rf, &is); ok && format != nil {
+			if out.OutputConfig == nil {
+				out.OutputConfig = map[string]json.RawMessage{}
+			}
+			out.OutputConfig["format"] = format
+		}
+	}
 	warnings, err := is.resolve(compat, Anthropic)
 	if err != nil {
 		return nil, nil, err
@@ -545,9 +549,19 @@ func AnthropicToChatRequest(body []byte, upstreamModel, maxTokensField string, c
 	if req.Metadata != nil {
 		out.User = pseudonymousUser(req.Metadata.UserID)
 	}
+	var responseFormat json.RawMessage
 	effort := ""
 	if oc := req.OutputConfig; oc != nil {
 		for k, v := range oc {
+			if k == "format" {
+				// Structured outputs: {type: json_schema, schema} → response_format.
+				if rf, ok := anthropicFormatToChat(v); ok {
+					responseFormat = rf
+				} else {
+					is.unsupportedField("output_config.format")
+				}
+				continue
+			}
 			if k != "effort" {
 				is.unsupportedField("output_config." + k)
 				continue
@@ -638,12 +652,18 @@ func AnthropicToChatRequest(body []byte, upstreamModel, maxTokensField string, c
 					}
 					parts = append(parts, ChatPart{Type: "image_url", ImageURL: &ChatImageURL{URL: url}})
 				case "tool_result":
-					text, err := toolResultText(bl, &is)
+					text, images, err := toolResultContent(bl, &is)
 					if err != nil {
 						return nil, nil, invalid("messages[%d]：%v", i, err)
 					}
 					content, _ := json.Marshal(text)
 					out.Messages = append(out.Messages, ChatMessage{Role: "tool", ToolCallID: bl.ToolUseID, Content: content})
+					if len(images) > 0 {
+						// Chat tool messages carry text only: the images follow in the
+						// user message after the tool results.
+						parts = append(parts, ChatPart{Type: "text", Text: fmt.Sprintf("[Images returned by tool call %s]", bl.ToolUseID)})
+						parts = append(parts, images...)
+					}
 				default:
 					is.unsupportedField("content[].type=" + bl.Type)
 				}
@@ -740,6 +760,9 @@ func AnthropicToChatRequest(body []byte, upstreamModel, maxTokensField string, c
 		return nil, nil, err
 	}
 	b, err := json.Marshal(out)
+	if err == nil && responseFormat != nil {
+		b = setJSONField(b, "response_format", responseFormat)
+	}
 	return b, warnings, err
 }
 
@@ -782,8 +805,11 @@ func imageURLFromSource(src *AnthropicSource) (string, error) {
 	}
 }
 
-func toolResultText(bl AnthropicBlock, is *issues) (string, error) {
+// toolResultContent flattens a tool_result to text; its images are returned
+// separately (Chat tool messages cannot hold images).
+func toolResultContent(bl AnthropicBlock, is *issues) (string, []ChatPart, error) {
 	var text string
+	var images []ChatPart
 	if !isNull(bl.Content) {
 		var s string
 		if json.Unmarshal(bl.Content, &s) == nil {
@@ -791,13 +817,24 @@ func toolResultText(bl AnthropicBlock, is *issues) (string, error) {
 		} else {
 			var blocks []AnthropicBlock
 			if err := json.Unmarshal(bl.Content, &blocks); err != nil {
-				return "", fmt.Errorf("tool_result.content 格式错误")
+				return "", nil, fmt.Errorf("tool_result.content 格式错误")
 			}
 			var b strings.Builder
 			for _, c := range blocks {
-				if c.Type == "text" {
+				switch c.Type {
+				case "text":
 					b.WriteString(c.Text)
-				} else {
+				case "image":
+					url, err := imageURLFromSource(c.Source)
+					if err != nil {
+						return "", nil, err
+					}
+					images = append(images, ChatPart{Type: "image_url", ImageURL: &ChatImageURL{URL: url}})
+					if b.Len() > 0 {
+						b.WriteString("\n")
+					}
+					fmt.Fprintf(&b, "[image %d attached below]", len(images))
+				default:
 					is.unsupportedField("tool_result.content[].type=" + c.Type)
 				}
 			}
@@ -808,7 +845,7 @@ func toolResultText(bl AnthropicBlock, is *issues) (string, error) {
 		is.drop("tool_result.is_error")
 		text = "[tool error] " + text
 	}
-	return text, nil
+	return text, images, nil
 }
 
 // Reasoning ("thinking") mapping between OpenAI reasoning_effort and Anthropic
@@ -869,4 +906,50 @@ func pseudonymousUser(id string) string {
 	}
 	sum := sha256.Sum256([]byte(id))
 	return "og-" + hex.EncodeToString(sum[:16])
+}
+
+// anthropicFormatToChat maps Anthropic structured outputs
+// (output_config.format = {"type":"json_schema","schema":{…}}) to an OpenAI
+// Chat response_format.
+func anthropicFormatToChat(v json.RawMessage) (json.RawMessage, bool) {
+	var f struct {
+		Type   string          `json:"type"`
+		Schema json.RawMessage `json:"schema"`
+	}
+	if json.Unmarshal(v, &f) != nil || f.Type != "json_schema" || isNull(f.Schema) {
+		return nil, false
+	}
+	b, err := json.Marshal(map[string]any{"type": "json_schema",
+		"json_schema": map[string]any{"name": "output", "schema": f.Schema, "strict": true}})
+	return b, err == nil
+}
+
+// chatFormatToAnthropic maps an OpenAI Chat response_format to Anthropic
+// structured outputs: text needs nothing (nil), json_schema becomes
+// output_config.format; json_object has no Anthropic equivalent.
+func chatFormatToAnthropic(v json.RawMessage, is *issues) (json.RawMessage, bool) {
+	var rf struct {
+		Type       string `json:"type"`
+		JSONSchema struct {
+			Schema json.RawMessage `json:"schema"`
+		} `json:"json_schema"`
+	}
+	if json.Unmarshal(v, &rf) != nil {
+		is.unsupportedField("response_format")
+		return nil, false
+	}
+	switch rf.Type {
+	case "", "text":
+		return nil, true
+	case "json_schema":
+		if isNull(rf.JSONSchema.Schema) {
+			is.unsupportedField("response_format")
+			return nil, false
+		}
+		b, _ := json.Marshal(map[string]any{"type": "json_schema", "schema": rf.JSONSchema.Schema})
+		return b, true
+	default:
+		is.unsupportedField("response_format.type=" + rf.Type)
+		return nil, false
+	}
 }
