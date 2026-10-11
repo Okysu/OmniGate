@@ -53,6 +53,8 @@ type responsesItem struct {
 	Output    json.RawMessage `json:"output,omitempty"`
 	ID        string          `json:"id,omitempty"`
 	Summary   json.RawMessage `json:"summary,omitempty"`
+	// reasoning
+	EncryptedContent string `json:"encrypted_content,omitempty"`
 }
 
 type responsesPart struct {
@@ -82,7 +84,8 @@ var responsesToChatPolicy = fieldPolicy{
 
 var chatToResponsesPolicy = fieldPolicy{
 	handled: set("model", "messages", "max_tokens", "max_completion_tokens", "temperature", "top_p", "stream", "stream_options",
-		"tools", "tool_choice", "parallel_tool_calls", "user", "reasoning_effort", "response_format", "prompt_cache_key", "safety_identifier"),
+		"tools", "tool_choice", "parallel_tool_calls", "user", "reasoning_effort", "response_format", "prompt_cache_key", "safety_identifier",
+		"x_og_keep_reasoning"),
 	neutral: map[string]func(json.RawMessage) bool{
 		"n": equalsJSON("1"), "presence_penalty": equalsJSON("0"), "frequency_penalty": equalsJSON("0"),
 		"logprobs": equalsJSON("false"), "store": equalsJSON("false"), "metadata": emptyJSON,
@@ -144,6 +147,16 @@ func responsesToChatPivot(body []byte, upstreamModel, maxTokensField string, com
 		if err := json.Unmarshal(req.Input, &items); err != nil {
 			return nil, nil, invalid("input 必须是字符串或输入项数组")
 		}
+		// Reasoning items belong to the assistant output that follows them.
+		var reasoning []ReasoningBlock
+		attach := func(m *ChatMessage) {
+			if len(reasoning) == 0 {
+				return
+			}
+			m.OGReasoning = append(m.OGReasoning, reasoning...)
+			m.ReasoningContent = reasoningBlocksText(m.OGReasoning)
+			reasoning = nil
+		}
 		for i, it := range items {
 			switch {
 			case it.Type == "function_call":
@@ -151,7 +164,9 @@ func responsesToChatPivot(body []byte, upstreamModel, maxTokensField string, com
 				// Merge consecutive calls into one assistant message (parallel tool calls).
 				if n := len(out.Messages); n > 0 && out.Messages[n-1].Role == "assistant" && len(out.Messages[n-1].ToolCalls) > 0 {
 					out.Messages[n-1].ToolCalls = append(out.Messages[n-1].ToolCalls, msg.ToolCalls...)
+					attach(&out.Messages[n-1])
 				} else {
+					attach(&msg)
 					out.Messages = append(out.Messages, msg)
 				}
 			case it.Type == "function_call_output":
@@ -184,16 +199,30 @@ func responsesToChatPivot(body []byte, upstreamModel, maxTokensField string, com
 				}
 				out.Messages = append(out.Messages, ChatMessage{Role: "tool", ToolCallID: it.CallID, Content: c})
 			case it.Type == "reasoning":
-				is.drop("input[].reasoning")
+				b, ok := openEnvelope(it.EncryptedContent, ReasoningOpenAI)
+				if !ok {
+					b = ReasoningBlock{Provider: ReasoningText}
+				}
+				if b.ID == "" && b.Provider == ReasoningOpenAI {
+					b.ID = it.ID
+				}
+				b.Text = summaryText(it.Summary)
+				reasoning = append(reasoning, b)
 			case it.Type == "message" || it.Type == "" && it.Role != "":
 				msg, err := responsesMessageToChat(it, &is)
 				if err != nil {
 					return nil, nil, invalid("input[%d]：%v", i, err)
 				}
+				if msg.Role == "assistant" {
+					attach(&msg)
+				}
 				out.Messages = append(out.Messages, msg)
 			default:
 				is.unsupportedField("input[].type=" + it.Type)
 			}
+		}
+		if len(reasoning) > 0 {
+			is.drop("input[].reasoning")
 		}
 	}
 	if len(out.Messages) == 0 {
@@ -344,6 +373,11 @@ func ChatToResponsesRequest(body []byte, upstreamModel string, compat Compat) ([
 	if req.ReasoningEffort != "" {
 		out["reasoning"] = map[string]string{"effort": req.ReasoningEffort, "summary": "auto"}
 	}
+	if req.OGKeepReasoning {
+		// The client keeps reasoning blobs (reasoning.go): with store=false the
+		// encrypted reasoning is the only way the model sees it again.
+		out["include"] = []string{"reasoning.encrypted_content"}
+	}
 	if req.ParallelToolCalls != nil {
 		out["parallel_tool_calls"] = *req.ParallelToolCalls
 	}
@@ -381,7 +415,25 @@ func ChatToResponsesRequest(body []byte, upstreamModel string, compat Compat) ([
 			}
 			items = append(items, map[string]any{"role": "user", "content": content})
 		case "assistant":
-			if m.reasoningText() != "" {
+			// Only OpenAI encrypted reasoning can go back as reasoning items; the
+			// items precede the message and calls they produced.
+			kept := 0
+			for _, b := range m.OGReasoning {
+				if b.Provider != ReasoningOpenAI || b.Blob == "" {
+					continue
+				}
+				summary := []map[string]string{}
+				if b.Text != "" {
+					summary = append(summary, map[string]string{"type": "summary_text", "text": b.Text})
+				}
+				item := map[string]any{"type": "reasoning", "summary": summary, "encrypted_content": b.Blob}
+				if b.ID != "" {
+					item["id"] = b.ID
+				}
+				items = append(items, item)
+				kept++
+			}
+			if kept < len(m.OGReasoning) || len(m.OGReasoning) == 0 && m.reasoningText() != "" {
 				is.drop("messages[].reasoning_content")
 			}
 			text, err := chatContentText(m.Content, &is)
@@ -517,6 +569,12 @@ func summaryText(raw json.RawMessage) string {
 
 // ResponsesToChatResponse converts a Responses response into a Chat response.
 func ResponsesToChatResponse(body []byte, model string) ([]byte, Usage, error) {
+	return responsesToChatResponse(body, model, false)
+}
+
+// responsesToChatResponse with pivot set keeps the reasoning items'
+// encrypted_content in x_og_reasoning for the next converter.
+func responsesToChatResponse(body []byte, model string, pivot bool) ([]byte, Usage, error) {
 	var r responsesResponse
 	if err := json.Unmarshal(body, &r); err != nil {
 		return nil, Usage{}, fmt.Errorf("上游响应不是合法的 Responses JSON: %w", err)
@@ -534,7 +592,14 @@ func ResponsesToChatResponse(body []byte, model string) ([]byte, Usage, error) {
 				}
 			}
 		case "reasoning":
-			reasoning.WriteString(summaryText(it.Summary))
+			t := summaryText(it.Summary)
+			if reasoning.Len() > 0 && t != "" {
+				reasoning.WriteString("\n\n")
+			}
+			reasoning.WriteString(t)
+			if pivot {
+				msg.OGReasoning = append(msg.OGReasoning, ReasoningBlock{Provider: ReasoningOpenAI, ID: it.ID, Text: t, Blob: it.EncryptedContent})
+			}
 		case "function_call":
 			msg.ToolCalls = append(msg.ToolCalls, ChatToolCall{ID: it.CallID, Type: "function", Function: ChatToolCallFunc{Name: it.Name, Arguments: it.Arguments}})
 		}
@@ -576,12 +641,25 @@ func responsesUsageFrom(u Usage) map[string]any {
 
 func respID() string { return "resp_" + randomID() }
 
+// responsesReasoningItem renders a reasoning block for a Responses client: a
+// provider blob travels in encrypted_content.
+func responsesReasoningItem(id string, b ReasoningBlock) map[string]any {
+	summary := []map[string]string{}
+	if b.Text != "" {
+		summary = append(summary, map[string]string{"type": "summary_text", "text": b.Text})
+	}
+	item := map[string]any{"type": "reasoning", "id": id, "summary": summary}
+	if b.Blob != "" {
+		item["encrypted_content"] = b.envelope()
+	}
+	return item
+}
+
 // chatOutputItems builds Responses output items from chat content.
-func chatOutputItems(reasoning, text string, calls []ChatToolCall) []map[string]any {
+func chatOutputItems(reasoning []ReasoningBlock, text string, calls []ChatToolCall) []map[string]any {
 	var out []map[string]any
-	if reasoning != "" {
-		out = append(out, map[string]any{"type": "reasoning", "id": "rs_" + randomID(),
-			"summary": []map[string]string{{"type": "summary_text", "text": reasoning}}})
+	for _, b := range reasoning {
+		out = append(out, responsesReasoningItem("rs_"+randomID(), b))
 	}
 	if text != "" || len(calls) == 0 {
 		out = append(out, map[string]any{"type": "message", "id": "msg_" + randomID(), "role": "assistant", "status": "completed",
@@ -629,7 +707,7 @@ func ChatToResponsesResponse(body []byte, model string) ([]byte, Usage, error) {
 	if r.Usage != nil {
 		u = r.Usage.normalize()
 	}
-	b, err := json.Marshal(responseObject(respID(), model, status, time.Now().Unix(), chatOutputItems(m.reasoningText(), text, m.ToolCalls), u, incomplete))
+	b, err := json.Marshal(responseObject(respID(), model, status, time.Now().Unix(), chatOutputItems(chatReasoningBlocks(m), text, m.ToolCalls), u, incomplete))
 	return b, u, err
 }
 
@@ -638,6 +716,7 @@ func ChatToResponsesResponse(body []byte, model string) ([]byte, Usage, error) {
 type responsesToChatStream struct {
 	model        string
 	includeUsage bool
+	pivot        bool // emit x_og_reasoning for a composed converter
 	id           string
 	created      int64
 	started      bool
@@ -678,12 +757,13 @@ func (s *responsesToChatStream) Process(ev *Event) ([]byte, error) {
 		return nil, nil
 	}
 	var e struct {
-		Type     string             `json:"type"`
-		ItemID   string             `json:"item_id"`
-		Delta    string             `json:"delta"`
-		Item     *responsesItem     `json:"item"`
-		Response *responsesResponse `json:"response"`
-		Message  string             `json:"message"`
+		Type         string             `json:"type"`
+		ItemID       string             `json:"item_id"`
+		Delta        string             `json:"delta"`
+		SummaryIndex int                `json:"summary_index"`
+		Item         *responsesItem     `json:"item"`
+		Response     *responsesResponse `json:"response"`
+		Message      string             `json:"message"`
 	}
 	if err := json.Unmarshal(ev.Data, &e); err != nil {
 		return nil, fmt.Errorf("上游流式数据不是合法 JSON: %w", err)
@@ -700,6 +780,16 @@ func (s *responsesToChatStream) Process(ev *Event) ([]byte, error) {
 		d := e.Delta
 		s.out += len(d)
 		s.chunk(&buf, &ChatDelta{Content: &d}, nil, nil)
+	case "response.reasoning_summary_part.added":
+		if e.SummaryIndex > 0 {
+			sep := "\n\n"
+			s.chunk(&buf, &ChatDelta{ReasoningContent: &sep}, nil, nil)
+		}
+	case "response.output_item.done":
+		if s.pivot && e.Item != nil && e.Item.Type == "reasoning" && e.Item.EncryptedContent != "" {
+			s.start(&buf)
+			s.chunk(&buf, &ChatDelta{OGReasoning: []ReasoningBlock{{Provider: ReasoningOpenAI, ID: e.Item.ID, Blob: e.Item.EncryptedContent}}}, nil, nil)
+		}
 	case "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
 		s.start(&buf)
 		d := e.Delta
@@ -774,8 +864,9 @@ type chatToResponsesStream struct {
 	itemID    string
 	text      strings.Builder
 	reasoning strings.Builder
-	allText   strings.Builder
-	allReason strings.Builder
+	summary   bool            // the open reasoning item has a summary part
+	blob      *ReasoningBlock // provider blob of the open reasoning item
+	items     []map[string]any
 	calls     []ChatToolCall
 	callItem  map[int]string // chat tool index -> item id
 	curTool   int
@@ -813,20 +904,33 @@ func (s *chatToResponsesStream) closeItem(buf *bytes.Buffer) {
 		s.emit(buf, "response.output_text.done", map[string]any{"item_id": s.itemID, "output_index": s.outIndex, "content_index": 0, "text": t})
 		part := map[string]any{"type": "output_text", "text": t, "annotations": []any{}}
 		s.emit(buf, "response.content_part.done", map[string]any{"item_id": s.itemID, "output_index": s.outIndex, "content_index": 0, "part": part})
-		s.emit(buf, "response.output_item.done", map[string]any{"output_index": s.outIndex, "item": map[string]any{
-			"type": "message", "id": s.itemID, "role": "assistant", "status": "completed", "content": []any{part}}})
+		item := map[string]any{"type": "message", "id": s.itemID, "role": "assistant", "status": "completed", "content": []any{part}}
+		s.emit(buf, "response.output_item.done", map[string]any{"output_index": s.outIndex, "item": item})
+		s.items = append(s.items, item)
 		s.text.Reset()
 	case "reasoning":
 		t := s.reasoning.String()
-		s.emit(buf, "response.reasoning_summary_text.done", map[string]any{"item_id": s.itemID, "output_index": s.outIndex, "summary_index": 0, "text": t})
-		s.emit(buf, "response.output_item.done", map[string]any{"output_index": s.outIndex, "item": map[string]any{
-			"type": "reasoning", "id": s.itemID, "summary": []any{map[string]string{"type": "summary_text", "text": t}}}})
+		if s.summary {
+			s.emit(buf, "response.reasoning_summary_text.done", map[string]any{"item_id": s.itemID, "output_index": s.outIndex, "summary_index": 0, "text": t})
+			s.emit(buf, "response.reasoning_summary_part.done", map[string]any{"item_id": s.itemID, "output_index": s.outIndex, "summary_index": 0,
+				"part": map[string]string{"type": "summary_text", "text": t}})
+		}
+		b := ReasoningBlock{Provider: ReasoningText, Text: t}
+		if s.blob != nil {
+			b = *s.blob
+			b.Text = t
+		}
+		item := responsesReasoningItem(s.itemID, b)
+		s.emit(buf, "response.output_item.done", map[string]any{"output_index": s.outIndex, "item": item})
+		s.items = append(s.items, item)
 		s.reasoning.Reset()
+		s.summary, s.blob = false, nil
 	case "function_call":
 		c := s.calls[len(s.calls)-1]
 		s.emit(buf, "response.function_call_arguments.done", map[string]any{"item_id": s.itemID, "output_index": s.outIndex, "arguments": c.Function.Arguments})
-		s.emit(buf, "response.output_item.done", map[string]any{"output_index": s.outIndex, "item": map[string]any{
-			"type": "function_call", "id": s.itemID, "call_id": c.ID, "name": c.Function.Name, "arguments": c.Function.Arguments, "status": "completed"}})
+		item := map[string]any{"type": "function_call", "id": s.itemID, "call_id": c.ID, "name": c.Function.Name, "arguments": c.Function.Arguments, "status": "completed"}
+		s.emit(buf, "response.output_item.done", map[string]any{"output_index": s.outIndex, "item": item})
+		s.items = append(s.items, item)
 	default:
 		return
 	}
@@ -864,13 +968,23 @@ func (s *chatToResponsesStream) Process(ev *Event) ([]byte, error) {
 			if r := d.reasoningText(); r != "" {
 				if s.open != "reasoning" {
 					s.openItem(&buf, "reasoning", map[string]any{"type": "reasoning", "id": "rs_" + randomID(), "summary": []any{}})
+				}
+				if !s.summary {
+					s.summary = true
 					s.emit(&buf, "response.reasoning_summary_part.added", map[string]any{"item_id": s.itemID, "output_index": s.outIndex, "summary_index": 0,
 						"part": map[string]string{"type": "summary_text", "text": ""}})
 				}
 				s.reasoning.WriteString(r)
-				s.allReason.WriteString(r)
 				s.out += len(r)
 				s.emit(&buf, "response.reasoning_summary_text.delta", map[string]any{"item_id": s.itemID, "output_index": s.outIndex, "summary_index": 0, "delta": r})
+			}
+			// A provider blob ends its reasoning item (composed streams only).
+			for _, b := range d.OGReasoning {
+				if s.open != "reasoning" {
+					s.openItem(&buf, "reasoning", map[string]any{"type": "reasoning", "id": "rs_" + randomID(), "summary": []any{}})
+				}
+				s.blob = &b
+				s.closeItem(&buf)
 			}
 			if d.Content != nil && *d.Content != "" {
 				if s.open != "message" {
@@ -879,7 +993,6 @@ func (s *chatToResponsesStream) Process(ev *Event) ([]byte, error) {
 						"part": map[string]any{"type": "output_text", "text": "", "annotations": []any{}}})
 				}
 				s.text.WriteString(*d.Content)
-				s.allText.WriteString(*d.Content)
 				s.out += len(*d.Content)
 				s.emit(&buf, "response.output_text.delta", map[string]any{"item_id": s.itemID, "output_index": s.outIndex, "content_index": 0, "delta": *d.Content})
 			}
@@ -925,7 +1038,11 @@ func (s *chatToResponsesStream) stop(buf *bytes.Buffer) []byte {
 	if s.finish == "length" {
 		status, incomplete = "incomplete", "max_output_tokens"
 	}
-	final := responseObject(s.id, s.model, status, s.created, chatOutputItems(s.allReason.String(), s.allText.String(), s.calls), s.usage, incomplete)
+	output := s.items
+	if len(output) == 0 {
+		output = chatOutputItems(nil, "", nil)
+	}
+	final := responseObject(s.id, s.model, status, s.created, output, s.usage, incomplete)
 	typ := "response.completed"
 	if status == "incomplete" {
 		typ = "response.incomplete"

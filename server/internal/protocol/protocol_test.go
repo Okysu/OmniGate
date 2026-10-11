@@ -170,7 +170,8 @@ func TestAnthropicToChatRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(warns, ",") != "cache_control,thinking" {
+	// The thinking text goes back as reasoning_content on the tool-call turn.
+	if strings.Join(warns, ",") != "cache_control" {
 		t.Errorf("warnings = %v", warns)
 	}
 	var r ChatRequest
@@ -184,6 +185,9 @@ func TestAnthropicToChatRequest(t *testing.T) {
 	}
 	if strings.Join(roles, ",") != "system,user,assistant,tool,user" {
 		t.Fatalf("roles = %v (%s)", roles, out)
+	}
+	if r.Messages[2].ReasoningContent != "hmm" || strings.Contains(string(out), "x_og_") {
+		t.Errorf("reasoning = %s", out)
 	}
 	if r.Messages[2].ToolCalls[0].Function.Arguments != `{"a":1}` || r.Messages[3].ToolCallID != "toolu_1" {
 		t.Errorf("tool round trip = %s", out)

@@ -59,8 +59,8 @@ func ChatToAnthropicResponse(body []byte, model string) ([]byte, Usage, error) {
 	}
 	msg := r.Choices[0].Message
 	var blocks []AnthropicBlock
-	if r := msg.reasoningText(); r != "" {
-		blocks = append(blocks, AnthropicBlock{Type: "thinking", Thinking: r, Signature: ""})
+	for _, b := range chatReasoningBlocks(msg) {
+		blocks = append(blocks, anthropicReasoningBlock(b))
 	}
 	if text, _ := chatContentText(msg.Content, &issues{}); text != "" {
 		blocks = append(blocks, AnthropicBlock{Type: "text", Text: text})
@@ -90,6 +90,12 @@ func ChatToAnthropicResponse(body []byte, model string) ([]byte, Usage, error) {
 
 // AnthropicToChatResponse converts a non-streaming Messages response.
 func AnthropicToChatResponse(body []byte, model string) ([]byte, Usage, error) {
+	return anthropicToChatResponse(body, model, false)
+}
+
+// anthropicToChatResponse with pivot set keeps the thinking signatures in
+// x_og_reasoning for the next converter.
+func anthropicToChatResponse(body []byte, model string, pivot bool) ([]byte, Usage, error) {
 	var r AnthropicResponse
 	if err := json.Unmarshal(body, &r); err != nil {
 		return nil, Usage{}, fmt.Errorf("上游响应不是合法的 Messages JSON: %w", err)
@@ -102,6 +108,13 @@ func AnthropicToChatResponse(body []byte, model string) ([]byte, Usage, error) {
 			text.WriteString(bl.Text)
 		case "thinking":
 			reasoning.WriteString(bl.Thinking)
+			if pivot {
+				msg.OGReasoning = append(msg.OGReasoning, ReasoningBlock{Provider: ReasoningAnthropic, Text: bl.Thinking, Blob: bl.Signature})
+			}
+		case "redacted_thinking":
+			if pivot {
+				msg.OGReasoning = append(msg.OGReasoning, ReasoningBlock{Provider: ReasoningAnthropic, Blob: bl.Data, Redacted: true})
+			}
 		case "tool_use":
 			args := string(bl.Input)
 			if isNull(bl.Input) {
@@ -129,6 +142,27 @@ func AnthropicToChatResponse(body []byte, model string) ([]byte, Usage, error) {
 	}
 	b, err := json.Marshal(out)
 	return b, u, err
+}
+
+// chatReasoningBlocks returns a Chat message's reasoning as blocks: the
+// pivot blocks when present, else its plain reasoning text.
+func chatReasoningBlocks(m *ChatMessage) []ReasoningBlock {
+	if len(m.OGReasoning) > 0 {
+		return m.OGReasoning
+	}
+	if t := m.reasoningText(); t != "" {
+		return []ReasoningBlock{{Provider: ReasoningText, Text: t}}
+	}
+	return nil
+}
+
+// anthropicReasoningBlock renders a reasoning block for an Anthropic client:
+// the provider blob (or a text placeholder) travels in the signature.
+func anthropicReasoningBlock(b ReasoningBlock) AnthropicBlock {
+	if b.Redacted {
+		return AnthropicBlock{Type: "redacted_thinking", Data: b.envelope()}
+	}
+	return AnthropicBlock{Type: "thinking", Thinking: b.Text, Signature: b.envelope()}
 }
 
 func anthropicID(id string) string {

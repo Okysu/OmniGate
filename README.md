@@ -137,13 +137,14 @@ export ANTHROPIC_AUTH_TOKEN=og-...
 - 流式响应（SSE 事件逐个转换）、停止原因、Token 用量（含缓存读写与推理 Token）
 - 结构化输出：`response_format` json_schema ⇄ Anthropic `output_config.format` ⇄ Responses `text.format`
 - 推理强度：`reasoning_effort` ⇄ `thinking` / `output_config.effort`
+- 推理连续性：上游的加密推理（Responses `encrypted_content`、Anthropic thinking `signature`）会包装进客户端协议自己的对应字段，下一轮随历史原样回到**产生它的那家上游**，模型在多轮工具调用中能接着上一轮的思路，不用从头推理。Claude Code 用 GPT（Responses 渠道）、Codex 用 Claude（Anthropic 渠道）都适用；发往 Chat 渠道时，推理文本在工具调用轮次以 `reasoning_content` 回传（DeepSeek、Kimi 等思考模型在工具循环中需要它）
 - 采样参数：`max_tokens`、`temperature`、`top_p`；`prompt_cache_key` 等提示字段尽量保留
 
 **会丢弃或无法转换**（丢弃的字段会在响应头 `X-OmniGate-Compat-Warnings` 中列出，并记录在请求日志详情的「协议转换」一栏）：
 
 | 内容 | 转换时的处理 |
 |---|---|
-| 推理 / 思考内容（`thinking`、`reasoning` 输入项、`reasoning_content`） | 丢弃：各家的推理内容不能互相传递（加密签名不通用），模型会重新推理 |
+| 推理内容交给**另一家**上游，或 Chat 客户端经转换访问 Responses / Anthropic 渠道 | 丢弃：加密推理只有产生它的上游认得；Chat 协议没有字段能携带加密推理，模型会重新推理。需要推理连续性时请用 Responses 或 Messages 协议，或让请求落在同协议渠道 |
 | Anthropic `cache_control` | 丢弃：上游按自己的规则自动缓存 |
 | 服务端工具（联网搜索、代码解释器、文件检索等）与非函数类型的工具 | 不支持；只有函数工具可以转换 |
 | HTTP 请求中的 `previous_response_id` | 需要转换协议时不支持（依赖上游保存的会话），请发送完整的 `input`；**WebSocket 模式**下网关会在连接内缓存历史并自动展开，可以正常接续 |

@@ -249,8 +249,12 @@ func relocateToolMedia(msgs []ChatMessage) []ChatMessage {
 	return out
 }
 
-// relocateToolMediaJSON applies relocateToolMedia to a Chat request body.
-func relocateToolMediaJSON(body []byte) []byte {
+// chatUpstreamBody finishes a pivot request for a real Chat upstream: tool
+// media moves into a user message, the private x_og_* fields are removed, and
+// reasoning text is echoed as reasoning_content only on tool-call turns —
+// thinking models (DeepSeek, Kimi, GLM...) expect their reasoning back inside
+// a tool loop, while some reject it on plain turns.
+func chatUpstreamBody(body []byte) []byte {
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(body, &raw) != nil {
 		return body
@@ -259,18 +263,14 @@ func relocateToolMediaJSON(body []byte) []byte {
 	if json.Unmarshal(raw["messages"], &msgs) != nil {
 		return body
 	}
-	moved := false
-	for _, m := range msgs {
-		if m.Role == "tool" {
-			if parts, err := chatContentParts(m.Content); err == nil && hasMedia(parts) {
-				moved = true
-				break
-			}
+	for i := range msgs {
+		m := &msgs[i]
+		m.OGReasoning = nil
+		if len(m.ToolCalls) == 0 {
+			m.ReasoningContent, m.Reasoning = "", ""
 		}
 	}
-	if !moved {
-		return body
-	}
+	delete(raw, "x_og_keep_reasoning")
 	raw["messages"], _ = json.Marshal(relocateToolMedia(msgs))
 	out, err := json.Marshal(raw)
 	if err != nil {

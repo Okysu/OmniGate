@@ -57,6 +57,10 @@ type ChatRequest struct {
 	// prompt caches and account pools recognise sessions by them.
 	PromptCacheKey   string `json:"prompt_cache_key,omitempty"`
 	SafetyIdentifier string `json:"safety_identifier,omitempty"`
+	// OGKeepReasoning is a private pivot flag: the client can carry provider
+	// reasoning blobs back (reasoning.go), so a Responses upstream is asked
+	// for encrypted_content. Never sent to a Chat upstream.
+	OGKeepReasoning bool `json:"x_og_keep_reasoning,omitempty"`
 }
 
 type StreamOptions struct {
@@ -73,6 +77,10 @@ type ChatMessage struct {
 	// some providers use "reasoning" instead (or send both with the same text).
 	ReasoningContent string `json:"reasoning_content,omitempty"`
 	Reasoning        string `json:"reasoning,omitempty"`
+	// OGReasoning is the private pivot field carrying provider reasoning
+	// blocks between converters (reasoning.go); never sent to a Chat client
+	// or upstream.
+	OGReasoning []ReasoningBlock `json:"x_og_reasoning,omitempty"`
 }
 
 // reasoningText prefers reasoning_content and falls back to reasoning.
@@ -173,6 +181,9 @@ type ChatDelta struct {
 	Reasoning        *string        `json:"reasoning,omitempty"`
 	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
 	Refusal          *string        `json:"refusal,omitempty"`
+	// OGReasoning carries provider reasoning blobs between composed stream
+	// converters (reasoning.go); never sent to a Chat client.
+	OGReasoning []ReasoningBlock `json:"x_og_reasoning,omitempty"`
 }
 
 // ---- Anthropic Messages ----
@@ -239,6 +250,8 @@ type AnthropicBlock struct {
 	// thinking
 	Thinking  string `json:"thinking,omitempty"`
 	Signature string `json:"signature,omitempty"`
+	// redacted_thinking
+	Data string `json:"data,omitempty"`
 	// cache_control is a hint we may need to drop
 	CacheControl json.RawMessage `json:"cache_control,omitempty"`
 }

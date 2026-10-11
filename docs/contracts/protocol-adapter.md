@@ -170,7 +170,7 @@ Responses 转换的取舍：`previous_response_id`（依赖上游会话状态）
 | --- | --- | --- | --- |
 | 可转换 | messages、tools、tool_choice、stop、temperature、图片、tool_result、reasoning/thinking | 转换 | 转换 |
 | 中性值（等同默认值，不影响语义） | `n:1`、`presence_penalty:0`、`logprobs:false`、`thinking:{type:disabled}` | 忽略 | 忽略 |
-| 提示类（只影响缓存/延迟，或历史中无法还原） | `cache_control`、历史 `thinking` 块、`service_tier`、`tools[].function.strict` | 丢弃 + 告警头 | 丢弃 + 告警头 |
+| 提示类（只影响缓存/延迟，或历史中无法还原） | `cache_control`、无法交给目标上游的历史推理（见下）、`service_tier`、`tools[].function.strict` | 丢弃 + 告警头 | 丢弃 + 告警头 |
 | 无法转换 | `top_k`、`seed`、`logprobs:true`、`n>1`、服务端工具、文档块 | **400 unsupported_parameter** | 丢弃 + 告警头 |
 
 **思考（reasoning）映射**：
@@ -180,6 +180,7 @@ Responses 转换的取舍：`previous_response_id`（依赖上游会话状态）
 | Anthropic `thinking` → OpenAI `reasoning_effort` | `enabled`：budget < 4096 → `low`，< 16384 → `medium`，否则 `high`；`adaptive` → `medium`；`disabled` → 不设置 |
 | OpenAI `reasoning_effort` → Anthropic `thinking` | `low/medium/high` → budget 2048/8192/24576；`minimal/none` → 不开启；`max_tokens` 不大于 budget 时自动提高并告警；开启后去掉 `temperature`/`top_p` 并告警（Anthropic 的要求） |
 | 响应中的推理内容 | OpenAI `reasoning_content`（或 `reasoning`，两者同时出现时只取一份）↔ Anthropic `thinking` 块 / `thinking_delta` |
+| 历史推理（`server/internal/protocol/reasoning.go`） | 上游的加密推理（Responses `encrypted_content`、Anthropic `signature` / `redacted_thinking.data`）包装为 `og1.<base64url(JSON)>` 信封（记录来源：openai / anthropic / text），放进客户端协议的对应字段（thinking `signature`、reasoning `encrypted_content`）。回传时只交给同一来源的上游：Anthropic 客户端 → Responses 渠道还原为 `reasoning` 输入项（并请求 `include: ["reasoning.encrypted_content"]`），Responses 客户端 → Anthropic 渠道还原为 `thinking` / `redacted_thinking`；发往 Chat 渠道时推理文本只在带 `tool_calls` 的 assistant 消息上作为 `reasoning_content` 回传；其余丢弃并告警。透传到同协议渠道时，信封里属于该上游的内容还原为原始值，其余移除。Chat 中间格式用私有字段 `x_og_reasoning` / `x_og_keep_reasoning` 传递，不会发给 Chat 客户端或 Chat 上游 |
 
 **usage 归一化**：`input` 不含缓存（OpenAI 的 `prompt_tokens` 会减去 `cached_tokens`），`cacheRead`/`cacheWrite` 单独计价；
 `output` 含推理 token；上游未返回 usage 时按约 4 字节/token 估算并标记 `estimated`。OpenAI 流式请求一律向上游请求 `include_usage`，

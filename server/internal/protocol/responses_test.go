@@ -25,7 +25,7 @@ func TestResponsesToChatRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(warns, ",") != "input[].reasoning" {
+	if len(warns) != 0 {
 		t.Errorf("warnings = %v", warns)
 	}
 	var r map[string]any

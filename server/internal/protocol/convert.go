@@ -74,7 +74,7 @@ func toChatUpstream(body []byte, warnings []string, err error) ([]byte, []string
 	if err != nil {
 		return nil, nil, err
 	}
-	return relocateToolMediaJSON(body), warnings, nil
+	return chatUpstreamBody(body), warnings, nil
 }
 
 // ConvertResponse converts a non-streaming upstream response for the client.
@@ -89,14 +89,14 @@ func ConvertResponse(client, upstream string, body []byte, model string) ([]byte
 	case client == OpenAIResponses && upstream == OpenAIChat:
 		return ChatToResponsesResponse(body, model)
 	case client == Anthropic && upstream == OpenAIResponses:
-		mid, u, err := ResponsesToChatResponse(body, model)
+		mid, u, err := responsesToChatResponse(body, model, true)
 		if err != nil {
 			return nil, u, err
 		}
 		out, _, err := ChatToAnthropicResponse(mid, model)
 		return out, u, err
 	case client == OpenAIResponses && upstream == Anthropic:
-		mid, u, err := AnthropicToChatResponse(body, model)
+		mid, u, err := anthropicToChatResponse(body, model, true)
 		if err != nil {
 			return nil, u, err
 		}
@@ -160,5 +160,5 @@ func newChatToResponses(model string) *chatToResponsesStream {
 }
 
 func newAnthropicToChat(model string, includeUsage bool) *anthropicToChatStream {
-	return &anthropicToChatStream{model: model, includeUsage: includeUsage, toolIndex: map[int]int{}, created: time.Now().Unix()}
+	return &anthropicToChatStream{model: model, includeUsage: includeUsage, toolIndex: map[int]int{}, thinking: map[int]string{}, created: time.Now().Unix()}
 }

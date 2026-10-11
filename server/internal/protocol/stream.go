@@ -41,9 +41,13 @@ func NewStreamProcessor(client, upstream, model string, includeUsage bool) (Stre
 	case client == OpenAIResponses && upstream == OpenAIChat:
 		return newChatToResponses(model), nil
 	case client == Anthropic && upstream == OpenAIResponses:
-		return &composedStream{first: newResponsesToChat(model, true), second: &chatToAnthropicStream{model: model, toolBlocks: map[int]int{}}}, nil
+		first := newResponsesToChat(model, true)
+		first.pivot = true
+		return &composedStream{first: first, second: &chatToAnthropicStream{model: model, toolBlocks: map[int]int{}}}, nil
 	case client == OpenAIResponses && upstream == Anthropic:
-		return &composedStream{first: newAnthropicToChat(model, true), second: newChatToResponses(model)}, nil
+		first := newAnthropicToChat(model, true)
+		first.pivot = true
+		return &composedStream{first: first, second: newChatToResponses(model)}, nil
 	}
 	return nil, fmt.Errorf("protocol: no stream conversion from %s to %s", upstream, client)
 }
@@ -106,6 +110,7 @@ type anthropicStreamEvent struct {
 		Type        string  `json:"type"`
 		Text        string  `json:"text"`
 		Thinking    string  `json:"thinking"`
+		Signature   string  `json:"signature"`
 		PartialJSON string  `json:"partial_json"`
 		StopReason  *string `json:"stop_reason"`
 	} `json:"delta,omitempty"`
@@ -215,6 +220,7 @@ type chatToAnthropicStream struct {
 	started    bool
 	blockOpen  bool
 	blockType  string // "text" | "thinking" | "tool_use"
+	signed     bool   // the open thinking block got its signature
 	blockIndex int
 	nextIndex  int
 	curTool    int         // OpenAI tool_call index of the open tool block
@@ -248,15 +254,25 @@ func (s *chatToAnthropicStream) start(buf *bytes.Buffer, id string) {
 }
 
 func (s *chatToAnthropicStream) closeBlock(buf *bytes.Buffer) {
+	if s.blockOpen && s.blockType == "thinking" && !s.signed {
+		// Clients require a signature on every thinking block.
+		s.signature(buf, ReasoningBlock{Provider: ReasoningText})
+	}
 	if s.blockOpen {
 		s.emit(buf, "content_block_stop", map[string]any{"type": "content_block_stop", "index": s.blockIndex})
 		s.blockOpen = false
 	}
 }
 
+func (s *chatToAnthropicStream) signature(buf *bytes.Buffer, b ReasoningBlock) {
+	s.signed = true
+	s.emit(buf, "content_block_delta", map[string]any{"type": "content_block_delta", "index": s.blockIndex,
+		"delta": map[string]string{"type": "signature_delta", "signature": b.envelope()}})
+}
+
 func (s *chatToAnthropicStream) openBlock(buf *bytes.Buffer, typ string, block map[string]any) {
 	s.closeBlock(buf)
-	s.blockIndex, s.blockType, s.blockOpen = s.nextIndex, typ, true
+	s.blockIndex, s.blockType, s.blockOpen, s.signed = s.nextIndex, typ, true, false
 	s.nextIndex++
 	s.emit(buf, "content_block_start", map[string]any{"type": "content_block_start", "index": s.blockIndex, "content_block": block})
 }
@@ -289,6 +305,19 @@ func (s *chatToAnthropicStream) Process(ev *Event) ([]byte, error) {
 				s.out += len(r)
 				s.emit(&buf, "content_block_delta", map[string]any{"type": "content_block_delta", "index": s.blockIndex,
 					"delta": map[string]string{"type": "thinking_delta", "thinking": r}})
+			}
+			// A provider blob ends its thinking block (composed streams only).
+			for _, b := range d.OGReasoning {
+				if b.Redacted {
+					s.openBlock(&buf, "redacted_thinking", map[string]any{"type": "redacted_thinking", "data": b.envelope()})
+					s.closeBlock(&buf)
+					continue
+				}
+				if !s.blockOpen || s.blockType != "thinking" || s.signed {
+					s.openBlock(&buf, "thinking", map[string]any{"type": "thinking", "thinking": ""})
+				}
+				s.signature(&buf, b)
+				s.closeBlock(&buf)
 			}
 			if d.Content != nil && *d.Content != "" {
 				if !s.blockOpen || s.blockType != "text" {
@@ -364,6 +393,8 @@ func (s *chatToAnthropicStream) Done() bool           { return s.done }
 type anthropicToChatStream struct {
 	model        string
 	includeUsage bool
+	pivot        bool           // emit x_og_reasoning for a composed converter
+	thinking     map[int]string // open thinking block index -> signature so far
 	id           string
 	created      int64
 	meter        anthropicMeter
@@ -405,6 +436,14 @@ func (s *anthropicToChatStream) Process(ev *Event) ([]byte, error) {
 		empty := ""
 		s.chunk(&buf, &ChatDelta{Role: "assistant", Content: &empty}, nil, nil)
 	case "content_block_start":
+		if s.pivot && e.ContentBlock != nil {
+			switch e.ContentBlock.Type {
+			case "thinking":
+				s.thinking[e.Index] = e.ContentBlock.Signature
+			case "redacted_thinking":
+				s.chunk(&buf, &ChatDelta{OGReasoning: []ReasoningBlock{{Provider: ReasoningAnthropic, Blob: e.ContentBlock.Data, Redacted: true}}}, nil, nil)
+			}
+		}
 		if e.ContentBlock != nil && e.ContentBlock.Type == "tool_use" {
 			idx := s.nextTool
 			s.nextTool++
@@ -423,12 +462,23 @@ func (s *anthropicToChatStream) Process(ev *Event) ([]byte, error) {
 		case "thinking_delta":
 			t := e.Delta.Thinking
 			s.chunk(&buf, &ChatDelta{ReasoningContent: &t}, nil, nil)
+		case "signature_delta":
+			if sig, ok := s.thinking[e.Index]; ok {
+				s.thinking[e.Index] = sig + e.Delta.Signature
+			}
 		case "input_json_delta":
 			idx, ok := s.toolIndex[e.Index]
 			if !ok {
 				return nil, fmt.Errorf("上游流式数据中的工具参数没有对应的 tool_use 块")
 			}
 			s.chunk(&buf, &ChatDelta{ToolCalls: []ChatToolCall{{Index: &idx, Function: ChatToolCallFunc{Arguments: e.Delta.PartialJSON}}}}, nil, nil)
+		}
+	case "content_block_stop":
+		if sig, ok := s.thinking[e.Index]; ok {
+			delete(s.thinking, e.Index)
+			if sig != "" {
+				s.chunk(&buf, &ChatDelta{OGReasoning: []ReasoningBlock{{Provider: ReasoningAnthropic, Blob: sig}}}, nil, nil)
+			}
 		}
 	case "message_delta":
 		if e.Delta != nil && e.Delta.StopReason != nil {

@@ -92,6 +92,7 @@ func ParseInfo(dialect string, body []byte) (RequestInfo, error) {
 // completions, forces stream_options.include_usage so usage can be metered.
 // All other fields are preserved byte-for-byte.
 func RewriteForPassthrough(dialect string, body []byte, upstreamModel string, stream bool) ([]byte, error) {
+	body = UnwrapReasoningForPassthrough(dialect, body)
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, invalid("请求体不是合法的 JSON：%v", err)
@@ -324,9 +325,22 @@ func ChatToAnthropicRequest(body []byte, upstreamModel string, compat Compat) ([
 			}
 			appendBlocks("user", blocks)
 		case "assistant":
+			// Only Anthropic-signed reasoning can go back to Anthropic; other
+			// reasoning (unsigned text, another provider's blob) is dropped.
 			var blocks []AnthropicBlock
-			if m.reasoningText() != "" {
-				// Anthropic thinking blocks need a provider signature we can't produce.
+			kept := 0
+			for _, b := range m.OGReasoning {
+				switch {
+				case b.Provider != ReasoningAnthropic || b.Blob == "":
+				case b.Redacted:
+					blocks = append(blocks, AnthropicBlock{Type: "redacted_thinking", Data: b.Blob})
+					kept++
+				default:
+					blocks = append(blocks, AnthropicBlock{Type: "thinking", Thinking: b.Text, Signature: b.Blob})
+					kept++
+				}
+			}
+			if kept < len(m.OGReasoning) || len(m.OGReasoning) == 0 && m.reasoningText() != "" {
 				is.drop("messages[].reasoning_content")
 			}
 			text, err := chatContentText(m.Content, &is)
@@ -561,7 +575,7 @@ func anthropicToChatPivot(body []byte, upstreamModel, maxTokensField string, com
 		return nil, nil, invalid("messages 不能为空")
 	}
 
-	out := ChatRequest{Model: upstreamModel, Stream: req.Stream, Temperature: req.Temperature, TopP: req.TopP}
+	out := ChatRequest{Model: upstreamModel, Stream: req.Stream, Temperature: req.Temperature, TopP: req.TopP, OGKeepReasoning: true}
 	mt := req.MaxTokens
 	if maxTokensField == "max_completion_tokens" {
 		out.MaxCompletionTokens = &mt
@@ -712,8 +726,18 @@ func anthropicToChatPivot(body []byte, upstreamModel, maxTokensField string, com
 						args = "{}"
 					}
 					msg.ToolCalls = append(msg.ToolCalls, ChatToolCall{ID: bl.ID, Type: "function", Function: ChatToolCallFunc{Name: bl.Name, Arguments: args}})
-				case "thinking", "redacted_thinking":
-					is.drop("thinking")
+				case "thinking":
+					b, ok := openEnvelope(bl.Signature, ReasoningAnthropic)
+					if !ok {
+						b = ReasoningBlock{Provider: ReasoningText}
+					}
+					b.Text = bl.Thinking
+					msg.OGReasoning = append(msg.OGReasoning, b)
+				case "redacted_thinking":
+					if b, ok := openEnvelope(bl.Data, ReasoningAnthropic); ok {
+						b.Redacted = b.Redacted || b.Provider == ReasoningAnthropic
+						msg.OGReasoning = append(msg.OGReasoning, b)
+					}
 				default:
 					is.unsupportedField("content[].type=" + bl.Type)
 				}
@@ -721,6 +745,7 @@ func anthropicToChatPivot(body []byte, upstreamModel, maxTokensField string, com
 			if text.Len() > 0 || len(msg.ToolCalls) == 0 {
 				msg.Content, _ = json.Marshal(text.String())
 			}
+			msg.ReasoningContent = reasoningBlocksText(msg.OGReasoning)
 			out.Messages = append(out.Messages, msg)
 		case "system":
 			// Newer Anthropic clients (e.g. Claude Code) may place system messages
