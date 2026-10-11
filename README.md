@@ -2,7 +2,7 @@
 
 # OmniGate
 
-**可自托管的统一大模型 API 网关 —— 一个 Key，接入所有模型。**
+**可自托管的统一大模型 API 网关 —— 一个 Key，接入平台上的全部模型。**
 
 OpenAI 与 Anthropic 协议互转 · 多渠道路由与故障转移 · 插件化渠道 · 钱包、套餐与计费 · 多用户与审计
 
@@ -21,8 +21,8 @@ OpenAI 与 Anthropic 协议互转 · 多渠道路由与故障转移 · 插件化
 ## 简介
 
 OmniGate 是一个面向个人与团队的大模型 API 网关。把 OpenAI、Anthropic、DeepSeek、智谱等上游接入为「渠道」后，用户只需要一个 `og-` 开头的 API Key，
-就能用任意 SDK 或客户端（OpenAI SDK、Anthropic SDK、Claude Code、Codex、Cherry Studio……）调用平台上的所有模型，网关负责协议转换、路由、
-重试、计费与审计。
+就能用 OpenAI 或 Anthropic 协议的 SDK 与客户端（OpenAI SDK、Anthropic SDK、Claude Code、Codex、Cherry Studio……）调用平台上的模型，
+网关负责协议转换、路由、重试、计费与审计。跨协议调用时的能力边界见 [协议转换说明](#协议转换说明)。
 
 - **一个镜像、一个端口**：后端与管理后台编译为单个二进制，同一端口提供页面、`/api` 与 `/v1`。
 - **零依赖起步**：默认使用嵌入式 SQLite，数据就是一个文件；需要时切换到 PostgreSQL。
@@ -32,7 +32,7 @@ OmniGate 是一个面向个人与团队的大模型 API 网关。把 OpenAI、An
 
 **协议与接口**
 
-- OpenAI Chat Completions、Responses 与 Anthropic Messages 三种入口，任意入口可路由到任意协议的渠道，请求与流式响应自动互转
+- OpenAI Chat Completions、Responses（含 WebSocket 模式）与 Anthropic Messages 三种入口，任意入口可路由到任意协议的渠道，请求与流式响应自动互转（[能力边界](#协议转换说明)）
 - 嵌入、图片生成 / 编辑、语音转写 / 合成、文本补全（Completions / FIM）
 - 识别 Claude Code、Codex、Cherry Studio 等客户端，按会话亲和把同一段对话固定到同一渠道，提高上游提示词缓存命中率
 
@@ -124,6 +124,35 @@ export ANTHROPIC_AUTH_TOKEN=og-...
 ```
 
 同一个 Key 可以通过任一协议访问任意渠道的模型。例如 Claude Code 可以直接调用 OpenAI 兼容渠道上的模型，网关自动完成 Messages ⇄ Chat 的转换。
+
+## 协议转换说明
+
+客户端协议与渠道协议**相同**时，请求与响应原样透传（只替换模型名），所有字段与能力都可用。**不同**时由网关转换：以 Chat Completions
+为中间格式，Messages ⇄ Responses 经过两次转换。路由会优先选择与客户端协议相同的渠道，以减少转换。
+
+**完整转换**（有测试覆盖）：
+
+- 文本、多轮对话、system / developer 指令；图片输入（URL 与 base64）
+- 函数工具：工具定义、`tool_choice`、并行调用、流式工具调用参数、工具结果（Anthropic 工具结果中的图片会放进紧随其后的用户消息）
+- 流式响应（SSE 事件逐个转换）、停止原因、Token 用量（含缓存读写与推理 Token）
+- 结构化输出：`response_format` json_schema ⇄ Anthropic `output_config.format` ⇄ Responses `text.format`
+- 推理强度：`reasoning_effort` ⇄ `thinking` / `output_config.effort`
+- 采样参数：`max_tokens`、`temperature`、`top_p`；`prompt_cache_key` 等提示字段尽量保留
+
+**会丢弃或无法转换**（丢弃的字段会在响应头 `X-OmniGate-Compat-Warnings` 中列出）：
+
+| 内容 | 转换时的处理 |
+|---|---|
+| 推理 / 思考内容（`thinking`、`reasoning` 输入项、`reasoning_content`） | 丢弃：各家的推理内容不能互相传递（加密签名不通用），模型会重新推理 |
+| Anthropic `cache_control` | 丢弃：上游按自己的规则自动缓存 |
+| 服务端工具（联网搜索、代码解释器、文件检索等）与非函数类型的工具 | 不支持；只有函数工具可以转换 |
+| HTTP 请求中的 `previous_response_id` | 需要转换协议时不支持（依赖上游保存的会话），请发送完整的 `input`；**WebSocket 模式**下网关会在连接内缓存历史并自动展开，可以正常接续 |
+| `stop` 发往 Responses 渠道 | Responses API 没有该参数，带警告丢弃 |
+| `n > 1`、`logprobs`、Responses `input_image.file_id` 等少数字段 | 不支持 |
+
+API Key 的兼容模式决定遇到**无法转换**的字段时的行为：`strict`（默认）返回 `400 unsupported_parameter` 并列出字段，
+`lenient` 丢弃这些字段并继续。需要上述能力的客户端，请让它的请求落在同协议的渠道上（例如 Responses 客户端配 Responses 渠道），
+可以用路由规则或 Key 的可用渠道限制来保证。完整的字段对照见 [protocol-adapter.md](docs/contracts/protocol-adapter.md)。
 
 ## 文档
 
