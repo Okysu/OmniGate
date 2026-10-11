@@ -49,6 +49,8 @@ export interface PlanFormState {
   durationN: number | string
   durationUnit: DurationUnit
   stackable: boolean
+  /** Upgrade group ("" = ungrouped). */
+  group: string
   models: string[]
   rules: RuleFormState[]
 }
@@ -220,6 +222,7 @@ export function emptyPlanForm(): PlanFormState {
     durationN: 30,
     durationUnit: 'd',
     stackable: false,
+    group: '',
     models: [],
     rules: [emptyRuleForm()],
   }
@@ -234,6 +237,7 @@ export function formFromPlan(p: Plan): PlanFormState {
     durationN: d.n,
     durationUnit: d.unit,
     stackable: p.stackable,
+    group: p.group ?? '',
     models: [...p.models],
     rules: p.rules.map(ruleFormFromRule),
   }
@@ -250,6 +254,7 @@ export function buildPlanPayload(f: PlanFormState): PlanInput {
     models: [...new Set(f.models.map(m => m.trim()).filter(Boolean))],
     rules: f.rules.map(ruleFromForm),
     stackable: f.stackable,
+    group: f.group.trim(),
   }
 }
 

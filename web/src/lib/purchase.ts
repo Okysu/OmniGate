@@ -271,3 +271,18 @@ export function planValue(plan: CatalogPlan): { monthly: number, ratio: number }
   const monthly = Math.round(best)
   return { monthly, ratio: Math.round((monthly / price) * 10) / 10 }
 }
+
+/** Store cards grouped by plan group, groups in order of first appearance (the cards are price-sorted). */
+export function groupCards(cards: PurchaseCard[]): { key: string, label: string, cards: PurchaseCard[] }[] {
+  const out: { key: string, label: string, cards: PurchaseCard[] }[] = []
+  for (const c of cards) {
+    const key = c.option.plan.group?.trim() ?? ''
+    let g = out.find(x => x.key === key)
+    if (!g) {
+      g = { key, label: key || '其他套餐', cards: [] }
+      out.push(g)
+    }
+    g.cards.push(c)
+  }
+  return out
+}

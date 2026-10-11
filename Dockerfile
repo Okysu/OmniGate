@@ -16,8 +16,11 @@ ARG NODE_IMAGE=node:24.21.0-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401
 ARG GO_IMAGE=golang:1.26.9-alpine@sha256:cdfd4fe2da6b225d8b40c6b7a105736e548e83ff56d5d8f9394446eeb5eb84e0
 ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
-# ---------- 1. 前端 ----------
-FROM ${NODE_IMAGE} AS web
+# 多架构构建：前端与 Go 编译都在构建机本机架构上运行（--platform=$BUILDPLATFORM），Go 交叉编译到目标架构
+# （纯 Go，CGO_ENABLED=0）；运行时阶段只复制文件。因此 arm64 镜像不需要 QEMU 模拟，构建快很多。
+
+# ---------- 1. 前端（与架构无关，只构建一次） ----------
+FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS web
 WORKDIR /src/web
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     PNPM_HOME=/pnpm \
@@ -32,8 +35,8 @@ RUN pnpm build
 COPY scripts/precompress.mjs /src/scripts/precompress.mjs
 RUN node /src/scripts/precompress.mjs dist
 
-# ---------- 2. 后端（嵌入前端） ----------
-FROM ${GO_IMAGE} AS server
+# ---------- 2. 后端（嵌入前端，交叉编译到目标架构） ----------
+FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS server
 WORKDIR /src
 # 官方 golang 镜像默认 GOTOOLCHAIN=local，会忽略 go.mod 的 toolchain 行。改为 auto：
 # 镜像自带的 Go 低于 toolchain 行时自动下载该版本（经 GOPROXY 校验），保证产物不低于 go1.26.9。
@@ -45,9 +48,11 @@ COPY --from=web /src/web/dist/ ./internal/webui/dist/
 ARG VERSION=dev
 ARG COMMIT=
 ARG BUILD_TIME=
+ARG TARGETOS
+ARG TARGETARCH
 RUN --mount=type=cache,id=omnigate-gomod,target=/go/pkg/mod \
     --mount=type=cache,id=omnigate-gobuild,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags "-s -w -X omnigate/internal/app.Version=${VERSION} -X omnigate/internal/app.Commit=${COMMIT} -X omnigate/internal/app.BuildTime=${BUILD_TIME}" \
       -o /out/omnigate ./cmd/omnigate \
  && go version /out/omnigate \

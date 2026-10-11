@@ -107,6 +107,9 @@ type Options struct {
 	// BeforeLogInsert runs before every request log insert; an error fails
 	// the insert (tests: request log failures).
 	BeforeLogInsert func(context.Context) error
+	// LogFlushInterval overrides how often request logs are written in batches
+	// (default 1s; tests use a long one to make batching deterministic).
+	LogFlushInterval time.Duration
 }
 
 func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *db.DB, opts Options) (*App, error) {

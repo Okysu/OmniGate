@@ -8,6 +8,7 @@ import {
   changedPrice,
   directIntent,
   findIntent,
+  groupCards,
   intentButtonLabel,
   intentTitle,
   isLongDescription,
@@ -212,5 +213,15 @@ describe('plan value', () => {
     expect(planValue(plan(null, [rule('30', { kind: 'session', duration: '7d' })]))).toBeNull()
     expect(planValue(plan('19', [{ ...rule('30', { kind: 'session', duration: '7d' }), meter: 'requests' }]))).toBeNull()
     expect(planValue(plan('19', [rule('30', { kind: 'session', duration: '7d' }, { models: ['m'] })]))).toBeNull()
+  })
+})
+
+describe('store groups', () => {
+  it('groups cards by plan group in order of first appearance', () => {
+    const opts: PurchaseOptions = { available: '1', currency: 'USD', plans: [
+      option({}, { id: 'go', group: 'GPT' }), option({}, { id: 'aigo', group: '国模' }), option({}, { id: 'pro', group: 'GPT' }), option({}, { id: 'x' }),
+    ] }
+    const groups = groupCards(buildPurchaseCards(opts))
+    expect(groups.map(g => [g.label, g.cards.map(c => c.option.plan.id)])).toEqual([['GPT', ['go', 'pro']], ['国模', ['aigo']], ['其他套餐', ['x']]])
   })
 })

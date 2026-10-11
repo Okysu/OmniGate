@@ -31,6 +31,7 @@ func openJournal(cfg *config.Config, log *slog.Logger, pool *db.DB, logs *reques
 	j.Ping = pool.Ping
 	logs.Journal = j
 	logs.BeforeInsert = opts.BeforeLogInsert
+	logs.FlushInterval = opts.LogFlushInterval
 	return j, nil
 }
 

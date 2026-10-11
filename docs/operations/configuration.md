@@ -1217,6 +1217,7 @@ curl -sS https://gateway.example.com/api/admin/billing/redeem-batches \
   升级**原地替换**订阅的名称、模型与规则，同 `id` 规则的已用量保留，百分比按新上限计算。不支持降级。
 - 扣款写一条 `charge` 账本记录（`refType = purchase`），不受 `billing.enforce` 影响；审计 `subscription.purchase`。余额不足返回 `403 insufficient_balance`。
 - 只想通过兑换码发放、不允许自助购买的套餐，把 `listPrice` 留空即可。
+- **分组**：套餐的「分组」（`group`）决定能否互相升级——只有同一分组的套餐之间可以补差价升级（例如「GPT」组内 Go → Pro），不同分组（如「GPT」与「国模」）不能；未分组的套餐自成一组。购买页按分组分段展示（phase17-api.md）。
 
 ### 11.6.3 邀请返利
 

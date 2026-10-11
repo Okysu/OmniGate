@@ -936,6 +936,8 @@ export interface Plan {
   models: string[]
   rules: QuotaRule[]
   stackable: boolean
+  /** Plans of one group can be upgraded into each other; "" = ungrouped. */
+  group?: string
   status: PlanStatus
   /** Live (active, unexpired) subscriptions. */
   subscribers: number
@@ -954,6 +956,7 @@ export interface CatalogPlan {
   models: string[]
   rules: QuotaRule[]
   stackable: boolean
+  group?: string
 }
 
 export interface PlanInput {
@@ -964,6 +967,7 @@ export interface PlanInput {
   models: string[]
   rules: QuotaRule[]
   stackable: boolean
+  group?: string
   status?: PlanStatus
 }
 

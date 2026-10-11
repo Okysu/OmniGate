@@ -105,3 +105,25 @@ func TestSortCatalog(t *testing.T) {
 		t.Fatalf("order = %s", got)
 	}
 }
+
+func TestUpgradeCheckGroups(t *testing.T) {
+	now := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	price := func(s string) *money.Amount { a := money.MustParse(s); return &a }
+	aigo := &Plan{ID: uuid.New(), Name: "Aigo", ListPrice: price("30"), Duration: "30d", Status: PlanActive, Group: "国模"}
+	pro := &Plan{ID: uuid.New(), Name: "Pro", ListPrice: price("49"), Duration: "30d", Status: PlanActive, Group: "GPT"}
+	goPlan := &Plan{ID: uuid.New(), Name: "Go", ListPrice: price("19"), Duration: "30d", Status: PlanActive, Group: "GPT"}
+	sub := &Subscription{ID: uuid.New(), PlanID: aigo.ID, State: StatusActive, EndsAt: now.Add(10 * 24 * time.Hour)}
+	if _, err := UpgradeCheck(sub, aigo, pro, []*Subscription{sub}, now); err == nil || !strings.Contains(err.Error(), "不同分组") {
+		t.Fatalf("cross-group upgrade must be refused: %v", err)
+	}
+	goSub := &Subscription{ID: uuid.New(), PlanID: goPlan.ID, State: StatusActive, EndsAt: now.Add(10 * 24 * time.Hour)}
+	if _, err := UpgradeCheck(goSub, goPlan, pro, []*Subscription{goSub}, now); err != nil {
+		t.Fatalf("same-group upgrade: %v", err)
+	}
+	// Ungrouped plans form their own group.
+	ungrouped := &Plan{ID: uuid.New(), Name: "old", ListPrice: price("10"), Duration: "30d", Status: PlanArchived}
+	old := &Subscription{ID: uuid.New(), PlanID: ungrouped.ID, State: StatusActive, EndsAt: now.Add(time.Hour)}
+	if _, err := UpgradeCheck(old, ungrouped, pro, []*Subscription{old}, now); err == nil {
+		t.Fatal("ungrouped → GPT must be refused")
+	}
+}

@@ -41,8 +41,8 @@ jobs:
     name: Build image
     needs: [ci]
     runs-on: ubuntu-latest
-    # 多架构构建通常 20–30 分钟；卡住（例如 QEMU 下的 arm64）时按时失败，不长期占住队列。
-    timeout-minutes: 60
+    # Dockerfile 在构建机本机架构上交叉编译 arm64（不经 QEMU 模拟），多架构构建通常 5 分钟左右；卡住时按时失败。
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -84,7 +84,6 @@ jobs:
           # 多架构镜像的 index 也带上 OCI 注解。
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
 
-      - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
 
       # 1) 先构建本机架构并加载到 Docker，用于安全扫描与冒烟检查；通过后才进行多架构构建与推送。

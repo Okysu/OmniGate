@@ -43,6 +43,7 @@ describe('plan form ↔ payload', () => {
       models: ['gpt-x'],
       rules: plan.rules,
       stackable: true,
+      group: '',
     })
   })
 

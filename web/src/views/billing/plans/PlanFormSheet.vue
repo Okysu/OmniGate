@@ -113,7 +113,7 @@ function applyPreset(key: PlanPresetKey) {
 }
 
 // ---------- errors ----------
-const KNOWN = new Set(['name', 'description', 'listPrice', 'duration', 'models', 'rules', 'stackable'])
+const KNOWN = new Set(['name', 'description', 'listPrice', 'duration', 'models', 'rules', 'stackable', 'group'])
 const otherErrors = computed(() => Object.entries(errors.value).filter(([k]) => {
   if (KNOWN.has(k))
     return false
@@ -250,6 +250,9 @@ async function reloadLatest() {
                   </div>
                 </FormField>
               </div>
+              <FormField label="分组" for="plan-group" :error="errors.group" hint="同一分组内的套餐可以互相补差价升级，不同分组之间不能（例如「GPT」与「国模」）。购买页按分组展示；留空为未分组。">
+                <Input id="plan-group" v-model="form.group" maxlength="50" placeholder="例如 GPT" :aria-invalid="!!errors.group" />
+              </FormField>
               <div class="flex items-start justify-between gap-4 rounded-lg border p-3">
                 <div class="space-y-1">
                   <Label for="plan-stackable">可叠加</Label>

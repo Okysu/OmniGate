@@ -227,6 +227,9 @@ async function applyStatus() {
                   <button type="button" class="hover:text-primary block max-w-full truncate text-left font-medium hover:underline" :title="p.name" @click="openEdit(p)">
                     {{ p.name }}
                   </button>
+                  <Badge v-if="p.group" variant="outline" class="mt-1 font-normal">
+                    {{ p.group }}
+                  </Badge>
                   <p v-if="p.description" class="text-muted-foreground truncate text-xs" :title="p.description">
                     {{ p.description }}
                   </p>

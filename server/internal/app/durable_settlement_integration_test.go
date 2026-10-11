@@ -195,6 +195,9 @@ func setupDurable(t *testing.T) *durableEnv {
 	d := &durableEnv{bill: &flakyBilling{}}
 	opts := app.Options{
 		WrapBilling: func(b gateway.Billing) gateway.Billing { d.bill.Billing = b; return d.bill },
+		// Logs are written only by explicit FlushLogs calls, so one outage
+		// produces exactly one journaled batch however slow the runner is.
+		LogFlushInterval: time.Hour,
 		BeforeLogInsert: func(context.Context) error {
 			if n := d.logFail.Load(); n < 0 || n > 0 && d.logFail.CompareAndSwap(n, n-1) {
 				return errors.New("simulated request log insert failure")

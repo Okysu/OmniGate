@@ -123,6 +123,9 @@ type Writer struct {
 	BeforeInsert func(ctx context.Context) error
 	// retryDelay is the first backoff between insert attempts (default 500ms).
 	retryDelay time.Duration
+	// FlushInterval is how often queued entries are written (default 1s). Set
+	// before Run.
+	FlushInterval time.Duration
 }
 
 func NewWriter(pool *db.DB, log *slog.Logger) *Writer {
@@ -159,7 +162,11 @@ func (w *Writer) Run(ctx context.Context) {
 	defer w.wg.Done()
 	w.running.Store(true)
 	defer w.running.Store(false)
-	tick := time.NewTicker(time.Second)
+	interval := w.FlushInterval
+	if interval <= 0 {
+		interval = time.Second
+	}
+	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	var batch []*Entry
 	flush := func() {

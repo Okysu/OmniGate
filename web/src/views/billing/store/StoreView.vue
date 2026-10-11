@@ -28,6 +28,7 @@ import {
   findIntent,
   intentButtonLabel,
   intentTitle,
+  groupCards,
   isLongDescription,
   parallelSubscriptions,
   parallelWarning,
@@ -67,6 +68,7 @@ async function loadOptions() {
 }
 onMounted(loadOptions)
 const cards = computed(() => buildPurchaseCards(options.value))
+const cardGroups = computed(() => groupCards(cards.value))
 const available = computed(() => options.value?.available ?? null)
 
 /** Long descriptions collapse behind 展开 / 收起. */
@@ -271,94 +273,101 @@ function recordTitle(r: PurchaseRecord): string {
       description="管理员上架套餐后会出现在这里；你也可以通过兑换码开通套餐。"
       class="rounded-xl border"
     />
-    <ul v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3" data-testid="plan-cards">
-      <li
-        v-for="c in cards"
-        :key="c.option.plan.id"
-        class="bg-card text-card-foreground ring-foreground/10 flex min-w-0 flex-col gap-4 rounded-xl p-5 ring-1"
-        :aria-label="`套餐：${c.option.plan.name}`"
-      >
-        <div class="space-y-2">
-          <div class="flex items-start justify-between gap-2">
-            <h2 class="min-w-0 truncate text-base font-semibold" :title="c.option.plan.name">
-              {{ c.option.plan.name }}
-            </h2>
-            <Badge v-if="c.direct?.action === 'renew'" variant="secondary" class="shrink-0">
-              已订阅
-            </Badge>
-          </div>
-          <p v-if="c.direct" class="flex items-baseline gap-1">
-            <span class="text-3xl font-semibold tabular-nums">{{ money(c.direct.price) }}</span>
-            <span class="text-muted-foreground text-sm">/ {{ formatDuration(c.option.plan.duration) }}</span>
-          </p>
-          <p v-if="c.direct && planValue(c.option.plan)" class="text-xs font-medium text-emerald-700 dark:text-emerald-400" data-testid="plan-value">
-            约合每月 {{ currency?.symbol ?? '' }}{{ planValue(c.option.plan)!.monthly }} 额度 · 售价的 {{ planValue(c.option.plan)!.ratio }} 倍
-          </p>
-          <p v-else class="text-muted-foreground text-sm">
-            暂不支持余额购买 · 每份 {{ formatDuration(c.option.plan.duration) }}
-          </p>
-        </div>
-
-        <div class="space-y-2 text-sm">
-          <p>{{ rulesSummary(c.option.plan.rules, money) }}</p>
-          <div class="text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 text-xs">
-            <span :title="c.option.plan.models.join('\n') || '全部模型'">适用模型：{{ modelsSummary(c.option.plan.models, 3) }}</span>
-            <span>{{ c.option.plan.stackable ? '可叠加' : '重复购买将续期' }}</span>
-          </div>
-        </div>
-
-        <div v-if="c.option.plan.description" class="text-muted-foreground text-xs">
-          <p
-            :id="`store-plan-desc-${c.option.plan.id}`"
-            class="break-words whitespace-pre-line"
-            :class="isLongDescription(c.option.plan.description) && !expandedPlans.has(c.option.plan.id) ? 'line-clamp-6' : ''"
-            data-testid="plan-description"
+    <div v-else class="space-y-8">
+      <section v-for="g in cardGroups" :key="g.key" class="space-y-3" :aria-label="g.label">
+        <h2 v-if="cardGroups.length > 1" class="text-lg font-semibold">
+          {{ g.label }}
+        </h2>
+        <ul class="grid gap-4 md:grid-cols-2 xl:grid-cols-3" data-testid="plan-cards">
+          <li
+            v-for="c in g.cards"
+            :key="c.option.plan.id"
+            class="bg-card text-card-foreground ring-foreground/10 flex min-w-0 flex-col gap-4 rounded-xl p-5 ring-1"
+            :aria-label="`套餐：${c.option.plan.name}`"
           >
-            {{ c.option.plan.description.trim() }}
-          </p>
-          <button
-            v-if="isLongDescription(c.option.plan.description)"
-            type="button"
-            class="text-foreground mt-1 rounded-sm font-medium underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
-            :aria-expanded="expandedPlans.has(c.option.plan.id)"
-            :aria-controls="`store-plan-desc-${c.option.plan.id}`"
-            @click="togglePlanDescription(c.option.plan.id)"
-          >
-            {{ expandedPlans.has(c.option.plan.id) ? '收起' : '展开' }}
-          </button>
-        </div>
+            <div class="space-y-2">
+              <div class="flex items-start justify-between gap-2">
+                <h2 class="min-w-0 truncate text-base font-semibold" :title="c.option.plan.name">
+                  {{ c.option.plan.name }}
+                </h2>
+                <Badge v-if="c.direct?.action === 'renew'" variant="secondary" class="shrink-0">
+                  已订阅
+                </Badge>
+              </div>
+              <p v-if="c.direct" class="flex items-baseline gap-1">
+                <span class="text-3xl font-semibold tabular-nums">{{ money(c.direct.price) }}</span>
+                <span class="text-muted-foreground text-sm">/ {{ formatDuration(c.option.plan.duration) }}</span>
+              </p>
+              <p v-if="c.direct && planValue(c.option.plan)" class="text-xs font-medium text-emerald-700 dark:text-emerald-400" data-testid="plan-value">
+                约合每月 {{ currency?.symbol ?? '' }}{{ planValue(c.option.plan)!.monthly }} 额度 · 售价的 {{ planValue(c.option.plan)!.ratio }} 倍
+              </p>
+              <p v-else class="text-muted-foreground text-sm">
+                暂不支持余额购买 · 每份 {{ formatDuration(c.option.plan.duration) }}
+              </p>
+            </div>
 
-        <div class="mt-auto space-y-2 border-t pt-4">
-          <p v-if="c.direct?.action === 'renew' && c.direct.currentEndsAt" class="text-muted-foreground text-xs tabular-nums">
-            当前到期 {{ formatDateTime(c.direct.currentEndsAt) }}，续费后至 {{ formatDateTime(c.direct.endsAt) }}
-          </p>
-          <Button v-if="c.showDirect && c.direct" class="w-full" @click="openConfirm(c.direct)">
-            <ShoppingCart />
-            {{ intentButtonLabel(c.direct, money) }}
-          </Button>
-          <template v-else-if="!c.direct">
-            <Button class="w-full" disabled>
-              <ShoppingCart />
-              购买
-            </Button>
-            <p class="text-muted-foreground text-center text-xs">
-              暂不支持余额购买，可通过兑换码或联系管理员开通。
-            </p>
-          </template>
-          <Button
-            v-for="u in c.upgrades"
-            :key="u.fromSubscriptionId ?? ''"
-            variant="outline"
-            class="w-full whitespace-normal"
-            data-testid="upgrade-button"
-            @click="openConfirm(u)"
-          >
-            <ArrowUpCircle />
-            {{ intentButtonLabel(u, money) }}
-          </Button>
-        </div>
-      </li>
-    </ul>
+            <div class="space-y-2 text-sm">
+              <p>{{ rulesSummary(c.option.plan.rules, money) }}</p>
+              <div class="text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                <span :title="c.option.plan.models.join('\n') || '全部模型'">适用模型：{{ modelsSummary(c.option.plan.models, 3) }}</span>
+                <span>{{ c.option.plan.stackable ? '可叠加' : '重复购买将续期' }}</span>
+              </div>
+            </div>
+
+            <div v-if="c.option.plan.description" class="text-muted-foreground text-xs">
+              <p
+                :id="`store-plan-desc-${c.option.plan.id}`"
+                class="break-words whitespace-pre-line"
+                :class="isLongDescription(c.option.plan.description) && !expandedPlans.has(c.option.plan.id) ? 'line-clamp-6' : ''"
+                data-testid="plan-description"
+              >
+                {{ c.option.plan.description.trim() }}
+              </p>
+              <button
+                v-if="isLongDescription(c.option.plan.description)"
+                type="button"
+                class="text-foreground mt-1 rounded-sm font-medium underline-offset-4 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+                :aria-expanded="expandedPlans.has(c.option.plan.id)"
+                :aria-controls="`store-plan-desc-${c.option.plan.id}`"
+                @click="togglePlanDescription(c.option.plan.id)"
+              >
+                {{ expandedPlans.has(c.option.plan.id) ? '收起' : '展开' }}
+              </button>
+            </div>
+
+            <div class="mt-auto space-y-2 border-t pt-4">
+              <p v-if="c.direct?.action === 'renew' && c.direct.currentEndsAt" class="text-muted-foreground text-xs tabular-nums">
+                当前到期 {{ formatDateTime(c.direct.currentEndsAt) }}，续费后至 {{ formatDateTime(c.direct.endsAt) }}
+              </p>
+              <Button v-if="c.showDirect && c.direct" class="w-full" @click="openConfirm(c.direct)">
+                <ShoppingCart />
+                {{ intentButtonLabel(c.direct, money) }}
+              </Button>
+              <template v-else-if="!c.direct">
+                <Button class="w-full" disabled>
+                  <ShoppingCart />
+                  购买
+                </Button>
+                <p class="text-muted-foreground text-center text-xs">
+                  暂不支持余额购买，可通过兑换码或联系管理员开通。
+                </p>
+              </template>
+              <Button
+                v-for="u in c.upgrades"
+                :key="u.fromSubscriptionId ?? ''"
+                variant="outline"
+                class="w-full whitespace-normal"
+                data-testid="upgrade-button"
+                @click="openConfirm(u)"
+              >
+                <ArrowUpCircle />
+                {{ intentButtonLabel(u, money) }}
+              </Button>
+            </div>
+          </li>
+        </ul>
+      </section>
+    </div>
 
     <Card>
       <CardHeader>

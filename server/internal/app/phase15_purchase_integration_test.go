@@ -136,6 +136,21 @@ func TestWalletPurchase(t *testing.T) {
 	if resp.StatusCode != 409 || errCode(out) != "not_an_upgrade" {
 		t.Fatalf("downgrade = %d %v", resp.StatusCode, out)
 	}
+	// Plan groups (phase17-api.md): upgrades only within a group.
+	other := planBody("国模", "500", 100)
+	other["group"] = "国模"
+	otherPlan := e.mustDo(e.admin, http.MethodPost, "/api/admin/billing/plans", other, 201)
+	if otherPlan["group"] != "国模" {
+		t.Fatalf("group not saved: %v", otherPlan)
+	}
+	opts = e.mustDo(e.carol, http.MethodGet, "/api/billing/purchase/options", nil, 200)
+	if o := optionFor(opts, otherPlan["id"].(string)); o == nil || len(o["upgrades"].([]any)) != 0 || o["plan"].(map[string]any)["group"] != "国模" {
+		t.Fatalf("cross-group upgrade offered: %v", o)
+	}
+	resp, out = e.carol.do(http.MethodPost, "/api/billing/purchase", map[string]any{"planId": otherPlan["id"], "fromSubscriptionId": subID, "expectedPrice": "1000"})
+	if resp.StatusCode != 409 || errCode(out) != "not_an_upgrade" {
+		t.Fatalf("cross-group upgrade = %d %v", resp.StatusCode, out)
+	}
 	big := e.mustDo(e.admin, http.MethodPost, "/api/admin/billing/plans", planBody("Max", "1000", 50), 201)["id"].(string)
 	resp, out = e.carol.do(http.MethodPost, "/api/billing/purchase", map[string]any{"planId": big, "expectedPrice": "1000"})
 	if resp.StatusCode != 403 || errCode(out) != "insufficient_balance" {

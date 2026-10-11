@@ -53,6 +53,7 @@ const (
 
 	MaxPeriods     = 120
 	maxNameLen     = 100
+	maxGroupLen    = 50
 	maxDescLen     = 2000
 	maxNoteLen     = 500
 	mySubsLimit    = 50
@@ -141,6 +142,9 @@ type Plan struct {
 	Models      []string
 	Rules       []Rule
 	Stackable   bool
+	// Group: plans of one group can be upgraded into each other (e.g. "GPT",
+	// "国模"); "" is its own group (phase17-api.md).
+	Group       string
 	Status      string
 	Subscribers int
 	Version     int
@@ -157,6 +161,7 @@ type PlanInput struct {
 	Models      []string
 	Rules       []Rule
 	Stackable   bool
+	Group       string
 	Status      string // "" → active
 }
 
@@ -171,6 +176,7 @@ type PlanPatch struct {
 	Models       *[]string
 	Rules        *[]Rule
 	Stackable    *bool
+	Group        *string
 	Status       *string
 	Version      int
 }
@@ -209,6 +215,10 @@ func validatePlan(in *PlanInput) error {
 	if in.Status != PlanActive && in.Status != PlanArchived {
 		details["status"] = "必须为 active 或 archived"
 	}
+	in.Group = strings.TrimSpace(in.Group)
+	if utf8.RuneCountInString(in.Group) > maxGroupLen {
+		details["group"] = fmt.Sprintf("不能超过 %d 个字符", maxGroupLen)
+	}
 	if len(details) > 0 {
 		return apperr.Validation("参数校验失败", details)
 	}
@@ -218,13 +228,13 @@ func validatePlan(in *PlanInput) error {
 // planCols needs $1 = now (for the live subscriber count).
 const planCols = `p.id, p.name, p.description, p.list_price_nano, p.duration, p.models, p.rules, p.stackable, p.status,
 	(SELECT count(*) FROM subscriptions s WHERE s.plan_id = p.id AND s.status = 'active' AND s.ends_at > $1),
-	p.version, p.created_at, p.updated_at`
+	p.version, p.created_at, p.updated_at, p.plan_group`
 
 func scanPlan(row db.Row) (*Plan, error) {
 	var p Plan
 	var price *int64
 	if err := row.Scan(&p.ID, &p.Name, &p.Description, &price, &p.Duration, &p.Models, &p.Rules, &p.Stackable,
-		&p.Status, &p.Subscribers, &p.Version, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		&p.Status, &p.Subscribers, &p.Version, &p.CreatedAt, &p.UpdatedAt, &p.Group); err != nil {
 		return nil, err
 	}
 	if price != nil {
@@ -254,7 +264,7 @@ func planAudit(p *Plan) map[string]any {
 		price = ptr(p.ListPrice.String())
 	}
 	return map[string]any{"name": p.Name, "description": p.Description, "listPrice": price, "duration": p.Duration,
-		"models": p.Models, "rules": p.Rules, "stackable": p.Stackable, "status": p.Status}
+		"models": p.Models, "rules": p.Rules, "stackable": p.Stackable, "group": p.Group, "status": p.Status}
 }
 
 // GetPlan returns a plan by id.
@@ -337,10 +347,10 @@ func (s *Service) CreatePlan(ctx context.Context, actor Actor, in PlanInput, met
 	var p *Plan
 	err = db.InTx(ctx, s.pool, func(tx db.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO plans (id, name, description, list_price_nano, duration, models, rules,
-				stackable, status, created_by, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)`,
+				stackable, status, created_by, created_at, updated_at, plan_group)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12)`,
 			id, in.Name, in.Description, priceNano(in.ListPrice), in.Duration, models, rules, in.Stackable, in.Status,
-			createdBy, now); err != nil {
+			createdBy, now, in.Group); err != nil {
 			return err
 		}
 		var err error
@@ -372,7 +382,7 @@ func (s *Service) UpdatePlan(ctx context.Context, actor Actor, id uuid.UUID, pat
 			return apperr.VersionConflict()
 		}
 		in := PlanInput{Name: cur.Name, Description: cur.Description, ListPrice: cur.ListPrice, Duration: cur.Duration,
-			Models: cur.Models, Rules: cur.Rules, Stackable: cur.Stackable, Status: cur.Status}
+			Models: cur.Models, Rules: cur.Rules, Stackable: cur.Stackable, Group: cur.Group, Status: cur.Status}
 		if patch.Name != nil {
 			in.Name = *patch.Name
 		}
@@ -397,6 +407,9 @@ func (s *Service) UpdatePlan(ctx context.Context, actor Actor, id uuid.UUID, pat
 		if patch.Status != nil {
 			in.Status = *patch.Status
 		}
+		if patch.Group != nil {
+			in.Group = *patch.Group
+		}
 		if err := validatePlan(&in); err != nil {
 			return err
 		}
@@ -414,9 +427,9 @@ func (s *Service) UpdatePlan(ctx context.Context, actor Actor, id uuid.UUID, pat
 		models, _ := json.Marshal(in.Models)
 		rules, _ := json.Marshal(in.Rules)
 		if _, err := tx.Exec(ctx, `UPDATE plans SET name = $2, description = $3, list_price_nano = $4, duration = $5,
-				models = $6, rules = $7, stackable = $8, status = $9, version = version + 1, updated_at = $10
+				models = $6, rules = $7, stackable = $8, status = $9, version = version + 1, updated_at = $10, plan_group = $11
 			WHERE id = $1`, id, in.Name, in.Description, priceNano(in.ListPrice), in.Duration, models, rules,
-			in.Stackable, in.Status, now); err != nil {
+			in.Stackable, in.Status, now, in.Group); err != nil {
 			return err
 		}
 		if p, err = scanPlan(tx.QueryRow(ctx, `SELECT `+planCols+` FROM plans p WHERE p.id = $2`, now, id)); err != nil {

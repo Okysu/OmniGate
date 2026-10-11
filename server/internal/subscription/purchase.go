@@ -195,6 +195,13 @@ func UpgradeCheck(from *Subscription, fromPlan, plan *Plan, subs []*Subscription
 	if plan.Stackable {
 		return UpgradeQuote{}, NotAnUpgradeError("可叠加的套餐不能作为升级目标")
 	}
+	fromGroup := ""
+	if fromPlan != nil {
+		fromGroup = fromPlan.Group
+	}
+	if fromGroup != plan.Group {
+		return UpgradeQuote{}, NotAnUpgradeError("不同分组的套餐不能互相升级")
+	}
 	for _, s := range subs {
 		if s.PlanID == plan.ID {
 			return UpgradeQuote{}, NotAnUpgradeError("已持有该套餐，请直接续费")

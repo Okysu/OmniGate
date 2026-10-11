@@ -84,6 +84,7 @@ type PlanJSON struct {
 	Models      []string  `json:"models"`
 	Rules       []Rule    `json:"rules"`
 	Stackable   bool      `json:"stackable"`
+	Group       string    `json:"group"`
 	Status      string    `json:"status"`
 	Subscribers int       `json:"subscribers"`
 	Version     int       `json:"version"`
@@ -98,7 +99,7 @@ func PlanView(p *Plan) PlanJSON {
 		price = ptr(p.ListPrice.String())
 	}
 	return PlanJSON{ID: p.ID, Name: p.Name, Description: p.Description, ListPrice: price, Duration: p.Duration,
-		Models: p.Models, Rules: p.Rules, Stackable: p.Stackable, Status: p.Status, Subscribers: p.Subscribers,
+		Models: p.Models, Rules: p.Rules, Stackable: p.Stackable, Group: p.Group, Status: p.Status, Subscribers: p.Subscribers,
 		Version: p.Version, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
 }
 
@@ -113,6 +114,7 @@ type CatalogPlanJSON struct {
 	Models      []string  `json:"models"`
 	Rules       []Rule    `json:"rules"`
 	Stackable   bool      `json:"stackable"`
+	Group       string    `json:"group"`
 }
 
 func catalogViews(ps []*Plan) []CatalogPlanJSON {
@@ -120,7 +122,7 @@ func catalogViews(ps []*Plan) []CatalogPlanJSON {
 	for i, p := range ps {
 		v := PlanView(p)
 		out[i] = CatalogPlanJSON{ID: v.ID, Name: v.Name, Description: v.Description, ListPrice: v.ListPrice,
-			Duration: v.Duration, Models: v.Models, Rules: v.Rules, Stackable: v.Stackable}
+			Duration: v.Duration, Models: v.Models, Rules: v.Rules, Stackable: v.Stackable, Group: v.Group}
 	}
 	return out
 }
@@ -196,6 +198,7 @@ type planBody struct {
 	Models      *[]string       `json:"models"`
 	Rules       *[]Rule         `json:"rules"`
 	Stackable   *bool           `json:"stackable"`
+	Group       *string         `json:"group"`
 	Status      *string         `json:"status"`
 	Version     *int            `json:"version"`
 }
@@ -248,6 +251,9 @@ func (h *Handler) createPlan(w http.ResponseWriter, r *http.Request) {
 	if body.Stackable != nil {
 		in.Stackable = *body.Stackable
 	}
+	if body.Group != nil {
+		in.Group = *body.Group
+	}
 	if body.Status != nil {
 		in.Status = *body.Status
 	}
@@ -276,7 +282,7 @@ func (h *Handler) patchPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	details := map[string]any{}
 	patch := PlanPatch{Name: body.Name, Description: body.Description, Duration: body.Duration, Models: body.Models,
-		Rules: body.Rules, Stackable: body.Stackable, Status: body.Status}
+		Rules: body.Rules, Stackable: body.Stackable, Group: body.Group, Status: body.Status}
 	patch.SetListPrice, patch.ListPrice = body.listPrice(details)
 	if body.Version == nil {
 		details["version"] = "必填"

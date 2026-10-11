@@ -11244,6 +11244,9 @@ components:
           maxItems: 10
           items:
             $ref: "#/components/schemas/QuotaRule"
+        group:
+          type: string
+          description: 升级分组（phase17-api.md）；同组套餐之间才能补差价升级，"" = 未分组
         stackable:
           type: boolean
           description: true = 每次开通都生成一份新订阅（可同时持有多份）；false = 已有有效订阅时延长它
@@ -11298,6 +11301,9 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/QuotaRule"
+        group:
+          type: string
+          description: 升级分组（phase17-api.md）；同组套餐之间才能补差价升级，"" = 未分组
         stackable:
           type: boolean
 
