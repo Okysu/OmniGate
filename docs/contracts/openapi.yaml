@@ -10502,6 +10502,9 @@ components:
           description: 生效的会话亲和规则名称；从不记录会话值
         client:
           $ref: "#/components/schemas/LogClient"
+        compatWarnings:
+          type: [string, "null"]
+          description: 协议转换时丢弃或无法转换的字段（逗号分隔，同响应头 X-OmniGate-Compat-Warnings）；没有时为 null
 
     RequestLogList:
       allOf:

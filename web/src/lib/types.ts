@@ -694,6 +694,8 @@ export interface RequestLog {
   affinityRule?: string | null
   /** phase13 §3: detected client (rows logged before detection read as unknown); absent on older backends. */
   client?: LogClient | null
+  /** Fields protocol conversion dropped or could not convert (comma-separated); null = none / older backends. */
+  compatWarnings?: string | null
   /** NOT in the contract: shown in the tooltip when the backend splits the multiplier. */
   groupMultiplier?: string | null
   scheduleMultiplier?: string | null

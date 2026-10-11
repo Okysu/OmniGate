@@ -651,6 +651,15 @@ const colCount = computed(() => 13 + (seeAll.value ? 2 : 0))
                             <span class="text-muted-foreground block">{{ OUTCOME_HINTS[l.affinity] }}</span>
                           </dd>
                         </template>
+                        <template v-if="l.compatWarnings">
+                          <dt class="text-muted-foreground">
+                            协议转换
+                          </dt>
+                          <dd data-testid="compat-warnings-detail">
+                            <span class="font-mono break-all">{{ l.compatWarnings.split(",").join("、") }}</span>
+                            <span class="text-muted-foreground block">跨协议转换时丢弃或无法转换的字段（兼容模式 lenient 时会丢弃并继续）</span>
+                          </dd>
+                        </template>
                         <dt class="text-muted-foreground">
                           错误信息
                         </dt>

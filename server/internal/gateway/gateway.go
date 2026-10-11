@@ -975,6 +975,11 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 			return convertError(err), ""
 		}
 		st.warnings = warnings
+		st.entry.CompatWarnings = nil
+		if len(warnings) > 0 {
+			w := strings.Join(warnings, ",")
+			st.entry.CompatWarnings = &w
+		}
 		if k := st.affinity.PromptCacheKey(); k != "" && openAIText(upDialect) {
 			// Session affinity's per-conversation prompt_cache_key (every
 			// attempt, before plugin hooks so they see and sign the final body).

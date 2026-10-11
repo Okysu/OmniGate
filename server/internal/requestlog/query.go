@@ -199,6 +199,9 @@ type logView struct {
 	// Client is the detected client (phase13-api.md §3); rows logged before
 	// detection existed read as unknown.
 	Client clientRef `json:"client"`
+	// CompatWarnings lists the fields protocol conversion dropped or could
+	// not convert (comma-separated); null = none.
+	CompatWarnings *string `json:"compatWarnings"`
 }
 
 // clientRef is a logged client: id, display name and version (null = not
@@ -229,7 +232,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		l.reasoning_tokens, l.usage_estimated, l.cost_nano, l.charge_nano, l.subscription_id, l.quota_charge_nano,
 		COALESCE(l.served_model, l.model), l.channel_tier, l.image_count, l.image_input_tokens, l.price_multiplier,
 		l.audio_seconds, l.audio_input_tokens, l.audio_output_tokens, l.input_characters, l.price_tier, l.affinity, l.affinity_rule,
-		l.client, l.client_version
+		l.client, l.client_version, l.compat_warnings
 		FROM request_logs l LEFT JOIN users u ON u.id = l.user_id`+f.sql()+
 		` ORDER BY l.started_at DESC LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
@@ -251,7 +254,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 			&ttft, &dur, &v.Usage.Input, &v.Usage.Output, &v.Usage.CacheRead, &v.Usage.CacheWrite, &v.Usage.Reasoning,
 			&v.Usage.Estimated, &cost, &charge, &v.SubscriptionID, &quota, &v.ServedModel, &v.ChannelTier, &v.ImageCount,
 			&v.Usage.ImageInputTokens, &v.PriceMultiplier, &v.AudioSeconds, &v.Usage.AudioInputTokens, &v.Usage.AudioOutputTokens,
-			&v.Usage.InputCharacters, &v.PriceTier, &v.Affinity, &v.AffinityRule, &client, &clientVersion); err != nil {
+			&v.Usage.InputCharacters, &v.PriceTier, &v.Affinity, &v.AffinityRule, &client, &clientVersion, &v.CompatWarnings); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}

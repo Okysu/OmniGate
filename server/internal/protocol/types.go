@@ -87,11 +87,32 @@ type ChatPart struct {
 	Type     string        `json:"type"`
 	Text     string        `json:"text,omitempty"`
 	ImageURL *ChatImageURL `json:"image_url,omitempty"`
+	File     *ChatFile     `json:"file,omitempty"`
 }
 
 type ChatImageURL struct {
 	URL    string `json:"url"`
 	Detail string `json:"detail,omitempty"`
+}
+
+// UnmarshalJSON also accepts image_url as a bare URL string, which several
+// OpenAI-compatible clients send.
+func (u *ChatImageURL) UnmarshalJSON(b []byte) error {
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		*u = ChatImageURL{URL: s}
+		return nil
+	}
+	type plain ChatImageURL
+	return json.Unmarshal(b, (*plain)(u))
+}
+
+// ChatFile is the Chat "file" content part (PDF and other documents).
+// FileData is a data URL.
+type ChatFile struct {
+	FileID   string `json:"file_id,omitempty"`
+	FileData string `json:"file_data,omitempty"`
+	Filename string `json:"filename,omitempty"`
 }
 
 type ChatTool struct {
@@ -206,6 +227,7 @@ type AnthropicBlock struct {
 	Text string `json:"text,omitempty"`
 	// image / document
 	Source *AnthropicSource `json:"source,omitempty"`
+	Title  string           `json:"title,omitempty"`
 	// tool_use
 	ID    string          `json:"id,omitempty"`
 	Name  string          `json:"name,omitempty"`

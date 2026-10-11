@@ -60,6 +60,10 @@ type responsesPart struct {
 	Text     string `json:"text,omitempty"`
 	ImageURL string `json:"image_url,omitempty"`
 	Detail   string `json:"detail,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
+	FileData string `json:"file_data,omitempty"`
+	FileURL  string `json:"file_url,omitempty"`
+	Filename string `json:"filename,omitempty"`
 }
 
 // prompt_cache_key and safety_identifier mean the same in Chat and Responses
@@ -90,6 +94,12 @@ var chatToResponsesPolicy = fieldPolicy{
 
 // ResponsesToChatRequest converts a Responses request into a Chat request.
 func ResponsesToChatRequest(body []byte, upstreamModel, maxTokensField string, compat Compat) ([]byte, []string, error) {
+	return toChatUpstream(responsesToChatPivot(body, upstreamModel, maxTokensField, compat))
+}
+
+// responsesToChatPivot is ResponsesToChatRequest leaving function_call_output
+// media on the tool messages, for composing with another converter.
+func responsesToChatPivot(body []byte, upstreamModel, maxTokensField string, compat Compat) ([]byte, []string, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, nil, invalid("请求体不是合法的 JSON：%v", err)
@@ -145,11 +155,33 @@ func ResponsesToChatRequest(body []byte, upstreamModel, maxTokensField string, c
 					out.Messages = append(out.Messages, msg)
 				}
 			case it.Type == "function_call_output":
-				text := ""
-				if json.Unmarshal(it.Output, &text) != nil {
-					text = string(it.Output)
+				// output is a string or an array of input_text / input_image /
+				// input_file parts; media stays on the tool message in the pivot.
+				var c json.RawMessage
+				var text string
+				var parts []responsesPart
+				switch {
+				case json.Unmarshal(it.Output, &text) == nil:
+					c, _ = json.Marshal(text)
+				case json.Unmarshal(it.Output, &parts) == nil:
+					var cp []ChatPart
+					for _, p := range parts {
+						if q := responsesPartToChat(p, &is); q != nil {
+							cp = append(cp, *q)
+						}
+					}
+					if hasMedia(cp) {
+						c, _ = json.Marshal(cp)
+					} else {
+						var b strings.Builder
+						for _, q := range cp {
+							b.WriteString(q.Text)
+						}
+						c, _ = json.Marshal(b.String())
+					}
+				default:
+					c, _ = json.Marshal(string(it.Output))
 				}
-				c, _ := json.Marshal(text)
 				out.Messages = append(out.Messages, ChatMessage{Role: "tool", ToolCallID: it.CallID, Content: c})
 			case it.Type == "reasoning":
 				is.drop("input[].reasoning")
@@ -222,6 +254,20 @@ func ResponsesToChatRequest(body []byte, upstreamModel, maxTokensField string, c
 	return b, warnings, nil
 }
 
+func chatPartsToResponses(parts []ChatPart, is *issues) ([]map[string]any, error) {
+	var out []map[string]any
+	for _, p := range parts {
+		c, err := chatPartToResponses(p, is)
+		if err != nil {
+			return nil, err
+		}
+		if c != nil {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
 func setJSONField(b []byte, key string, v json.RawMessage) []byte {
 	var m map[string]json.RawMessage
 	if json.Unmarshal(b, &m) != nil {
@@ -251,20 +297,17 @@ func responsesMessageToChat(it responsesItem, is *issues) (ChatMessage, error) {
 	var cp []ChatPart
 	var text strings.Builder
 	for _, p := range parts {
-		switch p.Type {
-		case "input_text", "output_text", "text":
-			cp = append(cp, ChatPart{Type: "text", Text: p.Text})
+		if p.Type == "refusal" {
 			text.WriteString(p.Text)
-		case "input_image":
-			if p.ImageURL == "" {
-				is.unsupportedField("input_image.file_id")
-				continue
-			}
-			cp = append(cp, ChatPart{Type: "image_url", ImageURL: &ChatImageURL{URL: p.ImageURL, Detail: p.Detail}})
-		case "refusal":
-			text.WriteString(p.Text)
-		default:
+			continue
+		}
+		if role != "user" && p.Type != "input_text" && p.Type != "output_text" && p.Type != "text" {
 			is.unsupportedField("content[].type=" + p.Type)
+			continue
+		}
+		if q := responsesPartToChat(p, is); q != nil {
+			cp = append(cp, *q)
+			text.WriteString(q.Text)
 		}
 	}
 	if role != "user" { // assistant/system content must be text
@@ -332,23 +375,9 @@ func ChatToResponsesRequest(body []byte, upstreamModel string, compat Compat) ([
 			if err := json.Unmarshal(m.Content, &parts); err != nil {
 				return nil, nil, invalid("messages[%d]：content 格式错误", i)
 			}
-			var content []map[string]any
-			for _, p := range parts {
-				switch p.Type {
-				case "text":
-					content = append(content, map[string]any{"type": "input_text", "text": p.Text})
-				case "image_url":
-					if p.ImageURL == nil {
-						return nil, nil, invalid("messages[%d]：image_url 缺少 url", i)
-					}
-					c := map[string]any{"type": "input_image", "image_url": p.ImageURL.URL}
-					if p.ImageURL.Detail != "" {
-						c["detail"] = p.ImageURL.Detail
-					}
-					content = append(content, c)
-				default:
-					is.unsupportedField("content[].type=" + p.Type)
-				}
+			content, err := chatPartsToResponses(parts, &is)
+			if err != nil {
+				return nil, nil, invalid("messages[%d]：%v", i, err)
 			}
 			items = append(items, map[string]any{"role": "user", "content": content})
 		case "assistant":
@@ -370,11 +399,22 @@ func ChatToResponsesRequest(body []byte, upstreamModel string, compat Compat) ([
 				items = append(items, map[string]any{"type": "function_call", "call_id": tc.ID, "name": tc.Function.Name, "arguments": args})
 			}
 		case "tool":
-			text, err := chatContentText(m.Content, &is)
+			// function_call_output takes a string, or an array of text / image /
+			// file parts when the tool returned media (screenshots, read_file on
+			// an image...).
+			parts, err := chatContentParts(m.Content)
 			if err != nil {
 				return nil, nil, invalid("messages[%d]：%v", i, err)
 			}
-			items = append(items, map[string]any{"type": "function_call_output", "call_id": m.ToolCallID, "output": text})
+			var output any
+			if hasMedia(parts) {
+				if output, err = chatPartsToResponses(parts, &is); err != nil {
+					return nil, nil, invalid("messages[%d]：%v", i, err)
+				}
+			} else if output, err = chatContentText(m.Content, &is); err != nil {
+				return nil, nil, invalid("messages[%d]：%v", i, err)
+			}
+			items = append(items, map[string]any{"type": "function_call_output", "call_id": m.ToolCallID, "output": output})
 		default:
 			return nil, nil, invalid("不支持的消息角色 %q", m.Role)
 		}

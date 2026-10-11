@@ -51,14 +51,14 @@ func ConvertRequest(client, upstream string, body []byte, upstreamModel, maxToke
 	case client == OpenAIResponses && upstream == OpenAIChat:
 		return ResponsesToChatRequest(body, upstreamModel, maxTokensField, compat)
 	case client == Anthropic && upstream == OpenAIResponses:
-		mid, w1, err := AnthropicToChatRequest(body, upstreamModel, "max_tokens", compat)
+		mid, w1, err := anthropicToChatPivot(body, upstreamModel, "max_tokens", compat)
 		if err != nil {
 			return nil, nil, err
 		}
 		out, w2, err := ChatToResponsesRequest(mid, upstreamModel, compat)
 		return out, mergeWarnings(w1, w2), err
 	case client == OpenAIResponses && upstream == Anthropic:
-		mid, w1, err := ResponsesToChatRequest(body, upstreamModel, "max_tokens", compat)
+		mid, w1, err := responsesToChatPivot(body, upstreamModel, "max_tokens", compat)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -66,6 +66,15 @@ func ConvertRequest(client, upstream string, body []byte, upstreamModel, maxToke
 		return out, mergeWarnings(w1, w2), err
 	}
 	return nil, nil, &ConvertError{Class: ErrUnsupportedParameter, Message: fmt.Sprintf("不支持从 %s 转换到 %s", client, upstream)}
+}
+
+// toChatUpstream finishes a request converted into the Chat pivot for a real
+// Chat upstream: media in tool messages moves into a user message.
+func toChatUpstream(body []byte, warnings []string, err error) ([]byte, []string, error) {
+	if err != nil {
+		return nil, nil, err
+	}
+	return relocateToolMediaJSON(body), warnings, nil
 }
 
 // ConvertResponse converts a non-streaming upstream response for the client.

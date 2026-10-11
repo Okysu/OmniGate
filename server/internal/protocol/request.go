@@ -347,11 +347,26 @@ func ChatToAnthropicRequest(body []byte, upstreamModel string, compat Compat) ([
 			}
 			appendBlocks("assistant", blocks)
 		case "tool":
-			text, err := chatContentText(m.Content, &is)
+			// tool_result content is a string, or text / image / document blocks
+			// when the tool returned media.
+			parts, err := chatContentParts(m.Content)
 			if err != nil {
 				return nil, nil, invalid("messages[%d]：%v", i, err)
 			}
-			content, _ := json.Marshal(text)
+			var content json.RawMessage
+			if hasMedia(parts) {
+				blocks, err := chatPartsToBlocks(m.Content, &is)
+				if err != nil {
+					return nil, nil, invalid("messages[%d]：%v", i, err)
+				}
+				content, _ = json.Marshal(blocks)
+			} else {
+				text, err := chatContentText(m.Content, &is)
+				if err != nil {
+					return nil, nil, invalid("messages[%d]：%v", i, err)
+				}
+				content, _ = json.Marshal(text)
+			}
 			appendBlocks("user", []AnthropicBlock{{Type: "tool_result", ToolUseID: m.ToolCallID, Content: content}})
 		default:
 			return nil, nil, &ConvertError{Class: "unsupported_parameter", Message: fmt.Sprintf("不支持的消息角色 %q", m.Role), Fields: []string{"messages[].role"}}
@@ -494,6 +509,14 @@ func chatPartsToBlocks(raw json.RawMessage, is *issues) ([]AnthropicBlock, error
 				return nil, err
 			}
 			out = append(out, AnthropicBlock{Type: "image", Source: src})
+		case "file":
+			bl, ok, err := chatFileToBlock(p.File, is)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				out = append(out, bl)
+			}
 		default:
 			is.unsupportedField("content[].type=" + p.Type)
 		}
@@ -502,10 +525,9 @@ func chatPartsToBlocks(raw json.RawMessage, is *issues) ([]AnthropicBlock, error
 }
 
 func imageSourceFromURL(u string) (*AnthropicSource, error) {
-	if rest, ok := strings.CutPrefix(u, "data:"); ok {
-		meta, data, ok := strings.Cut(rest, ",")
-		mediaType, isB64 := strings.CutSuffix(meta, ";base64")
-		if !ok || !isB64 || mediaType == "" {
+	if strings.HasPrefix(u, "data:") {
+		mediaType, data, ok := parseDataURL(u)
+		if !ok {
 			return nil, fmt.Errorf("图片 data URL 必须是 base64 编码")
 		}
 		return &AnthropicSource{Type: "base64", MediaType: mediaType, Data: data}, nil
@@ -519,6 +541,12 @@ func imageSourceFromURL(u string) (*AnthropicSource, error) {
 // AnthropicToChatRequest converts an Anthropic Messages request into an OpenAI
 // Chat request. maxTokensField selects "max_tokens" or "max_completion_tokens".
 func AnthropicToChatRequest(body []byte, upstreamModel, maxTokensField string, compat Compat) ([]byte, []string, error) {
+	return toChatUpstream(anthropicToChatPivot(body, upstreamModel, maxTokensField, compat))
+}
+
+// anthropicToChatPivot is AnthropicToChatRequest leaving tool-result media on
+// the tool messages, for composing with another converter.
+func anthropicToChatPivot(body []byte, upstreamModel, maxTokensField string, compat Compat) ([]byte, []string, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, nil, invalid("请求体不是合法的 JSON：%v", err)
@@ -651,19 +679,16 @@ func AnthropicToChatRequest(body []byte, upstreamModel, maxTokensField string, c
 						return nil, nil, invalid("messages[%d]：%v", i, err)
 					}
 					parts = append(parts, ChatPart{Type: "image_url", ImageURL: &ChatImageURL{URL: url}})
+				case "document":
+					if p := anthropicDocumentToChat(bl, &is); p != nil {
+						parts = append(parts, *p)
+					}
 				case "tool_result":
-					text, images, err := toolResultContent(bl, &is)
+					content, err := toolResultContent(bl, &is)
 					if err != nil {
 						return nil, nil, invalid("messages[%d]：%v", i, err)
 					}
-					content, _ := json.Marshal(text)
 					out.Messages = append(out.Messages, ChatMessage{Role: "tool", ToolCallID: bl.ToolUseID, Content: content})
-					if len(images) > 0 {
-						// Chat tool messages carry text only: the images follow in the
-						// user message after the tool results.
-						parts = append(parts, ChatPart{Type: "text", Text: fmt.Sprintf("[Images returned by tool call %s]", bl.ToolUseID)})
-						parts = append(parts, images...)
-					}
 				default:
 					is.unsupportedField("content[].type=" + bl.Type)
 				}
@@ -805,47 +830,52 @@ func imageURLFromSource(src *AnthropicSource) (string, error) {
 	}
 }
 
-// toolResultContent flattens a tool_result to text; its images are returned
-// separately (Chat tool messages cannot hold images).
-func toolResultContent(bl AnthropicBlock, is *issues) (string, []ChatPart, error) {
-	var text string
-	var images []ChatPart
+// toolResultContent converts a tool_result into Chat tool content: a string,
+// or text / image_url / file parts when it carries media (kept in the pivot;
+// relocateToolMedia moves them for a real Chat upstream).
+func toolResultContent(bl AnthropicBlock, is *issues) (json.RawMessage, error) {
+	var parts []ChatPart
 	if !isNull(bl.Content) {
 		var s string
 		if json.Unmarshal(bl.Content, &s) == nil {
-			text = s
+			parts = append(parts, ChatPart{Type: "text", Text: s})
 		} else {
 			var blocks []AnthropicBlock
 			if err := json.Unmarshal(bl.Content, &blocks); err != nil {
-				return "", nil, fmt.Errorf("tool_result.content 格式错误")
+				return nil, fmt.Errorf("tool_result.content 格式错误")
 			}
-			var b strings.Builder
 			for _, c := range blocks {
 				switch c.Type {
 				case "text":
-					b.WriteString(c.Text)
+					parts = append(parts, ChatPart{Type: "text", Text: c.Text})
 				case "image":
 					url, err := imageURLFromSource(c.Source)
 					if err != nil {
-						return "", nil, err
+						return nil, err
 					}
-					images = append(images, ChatPart{Type: "image_url", ImageURL: &ChatImageURL{URL: url}})
-					if b.Len() > 0 {
-						b.WriteString("\n")
+					parts = append(parts, ChatPart{Type: "image_url", ImageURL: &ChatImageURL{URL: url}})
+				case "document":
+					if p := anthropicDocumentToChat(c, is); p != nil {
+						parts = append(parts, *p)
 					}
-					fmt.Fprintf(&b, "[image %d attached below]", len(images))
 				default:
 					is.unsupportedField("tool_result.content[].type=" + c.Type)
 				}
 			}
-			text = b.String()
 		}
 	}
 	if bl.IsError {
 		is.drop("tool_result.is_error")
-		text = "[tool error] " + text
+		parts = append([]ChatPart{{Type: "text", Text: "[tool error] "}}, parts...)
 	}
-	return text, images, nil
+	if hasMedia(parts) {
+		return json.Marshal(parts)
+	}
+	var b strings.Builder
+	for _, p := range parts {
+		b.WriteString(p.Text)
+	}
+	return json.Marshal(b.String())
 }
 
 // Reasoning ("thinking") mapping between OpenAI reasoning_effort and Anthropic

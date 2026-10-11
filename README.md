@@ -132,14 +132,14 @@ export ANTHROPIC_AUTH_TOKEN=og-...
 
 **完整转换**（有测试覆盖）：
 
-- 文本、多轮对话、system / developer 指令；图片输入（URL 与 base64）
-- 函数工具：工具定义、`tool_choice`、并行调用、流式工具调用参数、工具结果（Anthropic 工具结果中的图片会放进紧随其后的用户消息）
+- 文本、多轮对话、system / developer 指令；图片输入（URL 与 base64）；文件输入（PDF 等，Chat `file` ⇄ Responses `input_file` ⇄ Anthropic `document`）
+- 函数工具：工具定义、`tool_choice`、并行调用、流式工具调用参数、工具结果，包括工具返回的图片与文件（截图、读取图片等）：Anthropic `tool_result` ⇄ Responses `function_call_output` 直接互转；Chat 客户端在 tool 消息里发送的图片同样会转换；发往 Chat 渠道时，因 Chat 的 tool 消息只能是文本，图片会移到紧随其后的用户消息
 - 流式响应（SSE 事件逐个转换）、停止原因、Token 用量（含缓存读写与推理 Token）
 - 结构化输出：`response_format` json_schema ⇄ Anthropic `output_config.format` ⇄ Responses `text.format`
 - 推理强度：`reasoning_effort` ⇄ `thinking` / `output_config.effort`
 - 采样参数：`max_tokens`、`temperature`、`top_p`；`prompt_cache_key` 等提示字段尽量保留
 
-**会丢弃或无法转换**（丢弃的字段会在响应头 `X-OmniGate-Compat-Warnings` 中列出）：
+**会丢弃或无法转换**（丢弃的字段会在响应头 `X-OmniGate-Compat-Warnings` 中列出，并记录在请求日志详情的「协议转换」一栏）：
 
 | 内容 | 转换时的处理 |
 |---|---|
@@ -148,7 +148,7 @@ export ANTHROPIC_AUTH_TOKEN=og-...
 | 服务端工具（联网搜索、代码解释器、文件检索等）与非函数类型的工具 | 不支持；只有函数工具可以转换 |
 | HTTP 请求中的 `previous_response_id` | 需要转换协议时不支持（依赖上游保存的会话），请发送完整的 `input`；**WebSocket 模式**下网关会在连接内缓存历史并自动展开，可以正常接续 |
 | `stop` 发往 Responses 渠道 | Responses API 没有该参数，带警告丢弃 |
-| `n > 1`、`logprobs`、Responses `input_image.file_id` 等少数字段 | 不支持 |
+| `n > 1`、`logprobs`、按 `file_id` / `file_url` 引用的图片与文件（Responses `input_image.file_id`、`input_file.file_url`，以及发往 Anthropic 的 Chat `file.file_id`）等少数字段 | 不支持：请直接发送 base64 或图片 URL |
 
 API Key 的兼容模式决定遇到**无法转换**的字段时的行为：`strict`（默认）返回 `400 unsupported_parameter` 并列出字段，
 `lenient` 丢弃这些字段并继续。需要上述能力的客户端，请让它的请求落在同协议的渠道上（例如 Responses 客户端配 Responses 渠道），
