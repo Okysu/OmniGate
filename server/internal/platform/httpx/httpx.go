@@ -3,6 +3,7 @@
 package httpx
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -258,4 +259,16 @@ type List[T any] struct {
 	Total    int `json:"total"`
 	Page     int `json:"page"`
 	PageSize int `json:"pageSize"`
+}
+
+// WithRequestID returns ctx with id as the request id (requests the server
+// starts itself, e.g. one per response on a WebSocket connection).
+func WithRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, requestIDKey, id)
+}
+
+// Hijack lets WebSocket upgrades through the access-log wrapper.
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	w.status = http.StatusSwitchingProtocols
+	return http.NewResponseController(w.ResponseWriter).Hijack()
 }

@@ -2,11 +2,11 @@
 // confirm dialog and error messages. Pure functions; money formatting is injected
 // (`useCurrency().money`) and amounts stay decimal strings (BigInt nano arithmetic).
 import type { MoneyFormatter } from './quota'
-import type { ActiveSubscription, PurchaseAction, PurchaseInput, PurchaseOption, PurchaseOptions, PurchaseResult } from './types'
+import type { ActiveSubscription, CatalogPlan, PurchaseAction, PurchaseInput, PurchaseOption, PurchaseOptions, PurchaseResult } from './types'
 import { errorMessage, isApiError } from './api'
 import { formatDateTime } from './format'
 import { amountSign, fromNano, isValidAmount, toNano } from './money'
-import { PLAN_ERROR_MESSAGES } from './quota'
+import { durationMinutes, PLAN_ERROR_MESSAGES } from './quota'
 
 export const PURCHASE_ACTION_LABELS: Record<PurchaseAction, string> = {
   new: '购买',
@@ -228,4 +228,46 @@ export function parallelWarning(subs: ActiveSubscription[], planName: string): s
   const held = subs.map(s => `「${s.planName}」（至 ${formatDateTime(s.endsAt)}）`).join('、')
   return `你已持有 ${held}。本次购买会另开一份独立的「${planName}」订阅，与现有订阅额度叠加，先到期的先使用；`
     + '它不会延长或替换现有订阅。如需延长现有套餐请对它续费，换到更高档位请使用补差价升级。'
+}
+
+const MONTH_MINUTES = 30 * 1440
+const CALENDAR_MINUTES: Record<string, number> = { day: 1440, week: 7 * 1440, month: MONTH_MINUTES }
+
+/**
+ * What a plan's spend quota is worth per 30 days and how many times its price
+ * that is: the tightest `charge` rule (covering every model of the plan)
+ * extrapolated to 30 days, e.g. a $30 weekly limit ≈ $129 a month. Null when
+ * the plan has no price or no such rule. Shown on the store so users see the
+ * value at a glance.
+ */
+export function planValue(plan: CatalogPlan): { monthly: number, ratio: number } | null {
+  const price = Number(plan.listPrice)
+  if (!(price > 0))
+    return null
+  let best: number | null = null
+  for (const r of plan.rules) {
+    const limit = Number(r.limit)
+    if (r.meter !== 'charge' || (r.models?.length ?? 0) > 0 || !(limit > 0))
+      continue
+    const w = r.window
+    let value: number | null = null
+    if (w.kind === 'lifetime') {
+      value = limit
+    }
+    else {
+      const minutes = w.kind === 'session' || w.kind === 'rolling'
+        ? durationMinutes(w.duration)
+        : w.kind === 'period'
+          ? durationMinutes(w.every)
+          : w.kind === 'calendar' ? CALENDAR_MINUTES[w.unit ?? ''] ?? null : null
+      if (minutes)
+        value = limit * MONTH_MINUTES / minutes
+    }
+    if (value !== null && (best === null || value < best))
+      best = value
+  }
+  if (best === null)
+    return null
+  const monthly = Math.round(best)
+  return { monthly, ratio: Math.round((monthly / price) * 10) / 10 }
 }

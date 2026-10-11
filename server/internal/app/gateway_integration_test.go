@@ -300,17 +300,17 @@ func TestGatewayStreamingAndFallback(t *testing.T) {
 	_, key := e.key(e.admin, map[string]any{"name": "k"})
 
 	t.Run("fallback on 5xx then circuit opens", func(t *testing.T) {
-		for i := 0; i < 3; i++ {
+		for i := 0; i < 5; i++ {
 			code, body, raw := readBody(gwPost(t, context.Background(), base, "/v1/chat/completions", key, chatBody))
 			if code != 200 || body["choices"] == nil {
 				t.Fatalf("attempt %d = %d %s", i, code, raw)
 			}
 		}
-		if bad.hits.Load() != 3 {
+		if bad.hits.Load() != 5 {
 			t.Fatalf("bad channel hits = %d", bad.hits.Load())
 		}
 		readBody(gwPost(t, context.Background(), base, "/v1/chat/completions", key, chatBody))
-		if bad.hits.Load() != 3 {
+		if bad.hits.Load() != 5 {
 			t.Fatal("open circuit still received traffic")
 		}
 		_, ch := e.admin.do(http.MethodGet, "/api/channels/"+badID, nil)

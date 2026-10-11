@@ -372,7 +372,7 @@ func NewRegistry(store *Store, log *slog.Logger, opts RegistryOptions) *Registry
 		opts.RefreshInterval = 15 * time.Second
 	}
 	g := &Registry{
-		store: store, log: log, opts: opts, Breaker: NewBreaker(3, 30*time.Second),
+		store: store, log: log, opts: opts, Breaker: NewBreaker(5, time.Minute, 30*time.Second),
 		guarded: &http.Client{Transport: netguard.NewTransport(netguard.Options{Proxy: opts.Proxy}), CheckRedirect: netguard.NoRedirect},
 		open:    &http.Client{Transport: netguard.NewTransport(netguard.Options{AllowPrivate: true, Proxy: opts.Proxy}), CheckRedirect: netguard.NoRedirect},
 		byID:    map[uuid.UUID]*Runtime{},

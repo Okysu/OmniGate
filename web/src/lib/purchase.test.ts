@@ -1,4 +1,4 @@
-import type { PurchaseOption, PurchaseOptions, PurchaseResult } from './types'
+import type { CatalogPlan, PurchaseOption, PurchaseOptions, PurchaseResult, QuotaRule, QuotaWindow } from './types'
 import { describe, expect, it } from 'vitest'
 import { ApiError } from './api'
 import {
@@ -14,6 +14,7 @@ import {
   modelsOverlap,
   parallelSubscriptions,
   parallelWarning,
+  planValue,
   purchaseBody,
   purchaseErrorMessage,
   purchaseSuccessText,
@@ -191,5 +192,25 @@ describe('parallel subscriptions', () => {
     expect(modelsOverlap(['a'], [])).toBe(true)
     expect(modelsOverlap(['a'], ['b'])).toBe(false)
     expect(modelsOverlap(['a', 'b'], ['b'])).toBe(true)
+  })
+})
+
+describe('plan value', () => {
+  const rule = (limit: string, window: QuotaWindow, extra = {}): QuotaRule =>
+    ({ id: 'r', label: 'r', meter: 'charge', window, limit, models: [], modelWeights: {}, ...extra })
+  const plan = (listPrice: string | null, rules: QuotaRule[]): CatalogPlan =>
+    ({ id: 'p', name: 'P', description: '', listPrice, duration: '30d', models: [], rules, stackable: false })
+
+  it('extrapolates the tightest spend rule to 30 days', () => {
+    expect(planValue(plan('19', [rule('30', { kind: 'session', duration: '7d' })]))).toEqual({ monthly: 129, ratio: 6.8 })
+    // A loose monthly cap does not raise the value of a tight weekly limit, and vice versa.
+    expect(planValue(plan('10', [rule('40', { kind: 'session', duration: '7d' }), rule('80', { kind: 'period', every: '30d' })]))?.monthly).toBe(80)
+    expect(planValue(plan('10', [rule('10', { kind: 'calendar', unit: 'day' })]))?.monthly).toBe(300)
+  })
+
+  it('needs a price and a spend rule over all models', () => {
+    expect(planValue(plan(null, [rule('30', { kind: 'session', duration: '7d' })]))).toBeNull()
+    expect(planValue(plan('19', [{ ...rule('30', { kind: 'session', duration: '7d' }), meter: 'requests' }]))).toBeNull()
+    expect(planValue(plan('19', [rule('30', { kind: 'session', duration: '7d' }, { models: ['m'] })]))).toBeNull()
   })
 })

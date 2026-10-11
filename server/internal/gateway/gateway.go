@@ -160,6 +160,7 @@ func (g *Gateway) Routes(r chi.Router) {
 	r.Post("/chat/completions", g.handle(protocol.OpenAIChat))
 	r.Post("/completions", g.handle(protocol.OpenAICompletions))
 	r.Post("/responses", g.handle(protocol.OpenAIResponses))
+	r.Get("/responses", g.responsesWS) // Responses WebSocket mode
 	r.Post("/embeddings", g.handle(protocol.OpenAIEmbeddings))
 	r.Post("/images/generations", g.handle(protocol.OpenAIImagesGenerations))
 	r.Post("/images/edits", g.handle(protocol.OpenAIImagesEdits))
@@ -1073,7 +1074,7 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 			g.reg.ReportAuthFailure(rt.ID, resp.StatusCode)
 		}
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		e, class, health := classifyStatus(resp.StatusCode, "upstream: "+protocol.UpstreamErrorMessage(raw))
+		e, class, health := classifyUpstream(resp.StatusCode, raw)
 		return fail(e, class, health)
 	}
 
@@ -1102,6 +1103,21 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 // unknown field.
 func openAIText(dialect string) bool {
 	return dialect == protocol.OpenAIChat || dialect == protocol.OpenAIResponses
+}
+
+// classifyUpstream classifies an upstream error response by status and body.
+// A context-window error is the client's input, whatever status the upstream
+// (or a proxy in front of it) used: it is returned as 400
+// context_length_exceeded, never retried on another channel and never counted
+// against the channel's health. Rate limits and credential errors keep their
+// status-based class.
+func classifyUpstream(status int, raw []byte) (*protocol.GatewayError, string, bool) {
+	msg := "upstream: " + protocol.UpstreamErrorMessage(raw)
+	if status != http.StatusTooManyRequests && status != http.StatusUnauthorized && status != http.StatusForbidden &&
+		protocol.IsContextLengthError(raw) {
+		return protocol.NewError(protocol.ErrContextLengthExceeded, msg), "", false
+	}
+	return classifyStatus(status, msg)
 }
 
 // classifyStatus maps an upstream error status to the gateway error, its retry
@@ -1158,6 +1174,12 @@ func (g *Gateway) unary(w http.ResponseWriter, st *reqState, rt *channel.Runtime
 	if int64(len(raw)) > g.opts.MaxRespBytes {
 		return fail(protocol.NewError(protocol.ErrUpstreamInvalid, "upstream response too large"), "", false)
 	}
+	// A 2xx body that is only an error object (some proxies send upstream
+	// errors with status 200) is that error, not a response.
+	if _, isErr := protocol.UpstreamError(raw); isErr && !protocol.HasResponsePayload(raw) {
+		e, class, health := classifyUpstream(http.StatusBadGateway, raw)
+		return fail(e, class, health)
+	}
 	var out []byte
 	var usage protocol.Usage
 	var ok bool
@@ -1199,6 +1221,14 @@ func (g *Gateway) unary(w http.ResponseWriter, st *reqState, rt *channel.Runtime
 
 func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, st *reqState, rt *channel.Runtime, resp *http.Response, upDialect, upstreamModel string, ttft int64, fail failFunc) (*protocol.GatewayError, string) {
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		// Some proxies answer a stream request whose upstream failed before the
+		// first event with 200 and a JSON error body (seen with Responses
+		// WebSocket transports): classify it like the error it carries.
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+		if _, ok := protocol.UpstreamError(raw); ok {
+			e, class, health := classifyUpstream(http.StatusBadGateway, raw)
+			return fail(e, class, health)
+		}
 		return fail(protocol.NewError(protocol.ErrUpstreamInvalid, "upstream did not return an event stream (content-type "+ct+")"), routing.RetryServerError, true)
 	}
 	var proc protocol.StreamProcessor
@@ -1266,7 +1296,12 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, st *reqState, r
 		}
 		out, perr := proc.Process(ev)
 		if perr != nil {
-			streamErr = protocol.NewError(protocol.ErrUpstreamInvalid, perr.Error())
+			if protocol.IsContextLengthMessage(perr.Error()) {
+				// An in-stream context-window error is the client's input.
+				streamErr, streamClass = protocol.NewError(protocol.ErrContextLengthExceeded, perr.Error()), ""
+			} else {
+				streamErr = protocol.NewError(protocol.ErrUpstreamInvalid, perr.Error())
+			}
 			break
 		}
 		if !emit(out) {
@@ -1294,14 +1329,18 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, st *reqState, r
 
 	if streamErr != nil && !st.written {
 		// Nothing reached the client: safe to try another channel.
-		if streamErr.Class == protocol.ErrClientClosed {
+		if streamErr.Class == protocol.ErrClientClosed || streamErr.Class == protocol.ErrContextLengthExceeded {
 			return fail(streamErr, "", false)
 		}
 		return fail(streamErr, streamClass, true)
 	}
 	if streamErr != nil && streamErr.Class != protocol.ErrClientClosed {
 		emit(protocol.EncodeStreamError(st.dialect, streamErr))
-		g.reg.Breaker.Failure(rt.ID, streamErr.Message)
+		if streamErr.Class == protocol.ErrContextLengthExceeded {
+			g.reg.Breaker.Release(rt.ID)
+		} else {
+			g.reg.Breaker.Failure(rt.ID, streamErr.Message)
+		}
 	} else {
 		g.reg.Breaker.Success(rt.ID)
 	}
@@ -1489,4 +1528,14 @@ func CollapseDuplicateV1(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// classifyMessage is classifyUpstream for errors known only by their message
+// (custom-protocol plugins report status and message).
+func classifyMessage(status int, msg string) (*protocol.GatewayError, string, bool) {
+	if status != http.StatusTooManyRequests && status != http.StatusUnauthorized && status != http.StatusForbidden &&
+		protocol.IsContextLengthMessage(msg) {
+		return protocol.NewError(protocol.ErrContextLengthExceeded, msg), "", false
+	}
+	return classifyStatus(status, msg)
 }

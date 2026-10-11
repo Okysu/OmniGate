@@ -31,6 +31,7 @@ import {
   isLongDescription,
   parallelSubscriptions,
   parallelWarning,
+  planValue,
   PURCHASE_ACTION_LABELS,
   purchaseBody,
   purchaseErrorMessage,
@@ -45,7 +46,7 @@ const BILLING_PATH = '/console/billing'
 
 const route = useRoute()
 const router = useRouter()
-const { money } = useCurrency()
+const { money, currency } = useCurrency()
 
 // ---------- options ----------
 const options = ref<PurchaseOptions | null>(null)
@@ -289,6 +290,9 @@ function recordTitle(r: PurchaseRecord): string {
           <p v-if="c.direct" class="flex items-baseline gap-1">
             <span class="text-3xl font-semibold tabular-nums">{{ money(c.direct.price) }}</span>
             <span class="text-muted-foreground text-sm">/ {{ formatDuration(c.option.plan.duration) }}</span>
+          </p>
+          <p v-if="c.direct && planValue(c.option.plan)" class="text-xs font-medium text-emerald-700 dark:text-emerald-400" data-testid="plan-value">
+            约合每月 {{ currency?.symbol ?? '' }}{{ planValue(c.option.plan)!.monthly }} 额度 · 售价的 {{ planValue(c.option.plan)!.ratio }} 倍
           </p>
           <p v-else class="text-muted-foreground text-sm">
             暂不支持余额购买 · 每份 {{ formatDuration(c.option.plan.duration) }}

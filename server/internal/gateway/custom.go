@@ -53,7 +53,7 @@ func canonicalFailure(ce *protocol.CanonicalError) (*protocol.GatewayError, stri
 	if status < 400 || status > 599 {
 		status = http.StatusBadGateway
 	}
-	return classifyStatus(status, "upstream: "+protocol.Redact(truncateMsg(ce.Message)))
+	return classifyMessage(status, "upstream: "+protocol.Redact(truncateMsg(ce.Message)))
 }
 
 func truncateMsg(s string) string {
@@ -179,7 +179,7 @@ func (g *Gateway) attemptCustom(w http.ResponseWriter, r *http.Request, st *reqS
 		if status == http.StatusUnauthorized || status == http.StatusForbidden {
 			g.reg.ReportAuthFailure(rt.ID, status)
 		}
-		e, class, health := classifyStatus(status, "upstream: "+msg)
+		e, class, health := classifyMessage(status, "upstream: "+msg)
 		return fail(e, class, health)
 	}
 

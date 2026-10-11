@@ -153,7 +153,7 @@ func TestNotificationEventsChannelsModelsPlugins(t *testing.T) {
 
 	// channel.unhealthy / recovered: platform channel → owner and channels.manage admins, never users it is shared with.
 	plat.status.Store(500)
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 6; i++ {
 		e.mustDo(e.admin, http.MethodPost, "/api/channels/"+platID+"/test", nil, 200)
 	}
 	un := e.expectNotifs(e.admin, "channel.unhealthy", 1)
@@ -170,7 +170,7 @@ func TestNotificationEventsChannelsModelsPlugins(t *testing.T) {
 
 	// channel.auth_failed: a regular user's channel → only its owner; at most once per 6 hours.
 	own.status.Store(401)
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 4; i++ {
 		if code := call("c1"); code < 400 {
 			t.Fatalf("401 upstream answered %d", code)
 		}
@@ -186,7 +186,7 @@ func TestNotificationEventsChannelsModelsPlugins(t *testing.T) {
 	// Alerts summary: only manageable channels; recent alert-class notifications.
 	cs := e.mustDo(e.carol, http.MethodGet, "/api/alerts/summary", nil, 200)
 	ch := cs["channels"].(map[string]any)
-	// carol's channel failed three times (401 counts against health): unhealthy + auth_failed.
+	// carol's channel failed five times within a minute (401 counts against health): unhealthy + auth_failed.
 	if ch["total"].(float64) != 1 || ch["down"].(float64) != 1 || len(cs["balances"].([]any)) != 0 || len(cs["recent"].([]any)) != 2 ||
 		!strings.Contains(fmt.Sprint(cs["recent"]), "channel.auth_failed") {
 		t.Fatalf("carol summary = %v", cs)

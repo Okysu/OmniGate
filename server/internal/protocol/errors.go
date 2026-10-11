@@ -33,9 +33,12 @@ const (
 	ErrUpstreamTimeout     = "upstream_timeout"
 	ErrUpstreamInvalid     = "upstream_invalid_response"
 	ErrUpstreamBadRequest  = "upstream_bad_request"
-	ErrClientClosed        = "client_closed"
-	ErrPluginError         = "plugin_error"
-	ErrInternal            = "internal"
+	// ErrContextLengthExceeded: the upstream rejected the input as longer than the
+	// model's context window — the client's error, never the channel's.
+	ErrContextLengthExceeded = "context_length_exceeded"
+	ErrClientClosed          = "client_closed"
+	ErrPluginError           = "plugin_error"
+	ErrInternal              = "internal"
 )
 
 // GatewayError is a classified error rendered in the client's protocol.
@@ -56,7 +59,7 @@ func NewError(class, msg string) *GatewayError {
 
 func defaultStatus(class string) int {
 	switch class {
-	case ErrInvalidRequest, ErrUnsupportedParameter, ErrUpstreamBadRequest:
+	case ErrInvalidRequest, ErrUnsupportedParameter, ErrUpstreamBadRequest, ErrContextLengthExceeded:
 		return http.StatusBadRequest
 	case ErrAuthentication:
 		return http.StatusUnauthorized
@@ -85,6 +88,8 @@ func openAIType(class string) (typ, code string) {
 		return "invalid_request_error", class
 	case ErrUnsupportedParameter:
 		return "invalid_request_error", "unsupported_parameter"
+	case ErrContextLengthExceeded:
+		return "invalid_request_error", ErrContextLengthExceeded
 	case ErrAuthentication:
 		return "invalid_request_error", "invalid_api_key"
 	case ErrPermission:
@@ -104,7 +109,7 @@ func openAIType(class string) (typ, code string) {
 
 func anthropicType(class string) string {
 	switch class {
-	case ErrInvalidRequest, ErrUnsupportedParameter, ErrUpstreamBadRequest:
+	case ErrInvalidRequest, ErrUnsupportedParameter, ErrUpstreamBadRequest, ErrContextLengthExceeded:
 		return "invalid_request_error"
 	case ErrAuthentication:
 		return "authentication_error"
@@ -183,4 +188,66 @@ func randomID() string {
 	b := make([]byte, 12)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// contextLengthRe matches the context-window errors of OpenAI, Anthropic,
+// Gemini, GLM, DeepSeek and the proxies in front of them.
+var contextLengthRe = regexp.MustCompile(`(?i)context[ _-]?(window|length)|maximum context|prompt is too long|input is too long|input (token count|length) exceeds|exceeds the (model'?s )?(maximum|context|max)|reduce the length of (the )?(messages|input|prompt)`)
+
+// IsContextLengthMessage reports whether an upstream error message says the
+// input does not fit the model's context window.
+func IsContextLengthMessage(msg string) bool { return contextLengthRe.MatchString(msg) }
+
+// IsContextLengthError reports whether an upstream error body (OpenAI or
+// Anthropic format, or plain text) is a context-window error.
+func IsContextLengthError(body []byte) bool {
+	var env struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(body, &env) == nil && len(env.Error) > 0 {
+		var obj struct {
+			Code    any    `json:"code"`
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(env.Error, &obj) == nil {
+			if c, ok := obj.Code.(string); ok && (c == "context_length_exceeded" || c == "model_context_window_exceeded") {
+				return true
+			}
+			return IsContextLengthMessage(obj.Message)
+		}
+		var s string
+		if json.Unmarshal(env.Error, &s) == nil {
+			return IsContextLengthMessage(s)
+		}
+	}
+	return IsContextLengthMessage(string(body))
+}
+
+// UpstreamError extracts the error object of a JSON body that carries one
+// ({"error": …}); ok is false for any other body.
+func UpstreamError(body []byte) (msg string, ok bool) {
+	var env struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(body, &env) != nil || len(env.Error) == 0 || string(env.Error) == "null" {
+		return "", false
+	}
+	return UpstreamErrorMessage(body), true
+}
+
+// HasResponsePayload reports whether a JSON body carries a real response next
+// to an "error" field (choices, output, content, data …), so a body like
+// Responses' {"error": null, "output": …} is never mistaken for an error.
+func HasResponsePayload(body []byte) bool {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(body, &m) != nil {
+		return false
+	}
+	for _, k := range []string{"choices", "output", "content", "data", "embedding"} {
+		if v, ok := m[k]; ok && string(v) != "null" {
+			return true
+		}
+	}
+	return false
 }
