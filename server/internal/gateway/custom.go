@@ -225,7 +225,8 @@ func (g *Gateway) customUnary(ctx context.Context, w http.ResponseWriter, r *htt
 		}
 	}
 	if !hasUsage {
-		usage = protocol.Usage{Input: protocol.EstimateTokens(len(st.body)), Output: protocol.EstimateTokens(len(raw)), Estimated: true}
+		// Billing uses reported usage only (ADR-0006): no estimate.
+		g.log.Warn("plugin response without usage: not billed by tokens", "request_id", st.entry.RequestID, "channel", rt.Name, "model", st.info.Model)
 	}
 	g.reg.Breaker.Success(rt.ID)
 	g.writeHeaders(w, st, "application/json")
@@ -335,14 +336,10 @@ func (g *Gateway) customStream(ctx context.Context, w http.ResponseWriter, r *ht
 		}
 	}
 
+	// Only reported usage is billed (see attempt).
 	usage, ok := cs.Usage()
-	// Broken streams keep the reported usage only (see attempt).
-	if streamErr == nil && (!ok || (usage.Output == 0 && cs.OutputBytes() > 0)) {
-		if !ok {
-			usage.Input = protocol.EstimateTokens(len(st.body))
-		}
-		usage.Output = protocol.EstimateTokens(cs.OutputBytes())
-		usage.Estimated = true
+	if !ok && streamErr == nil {
+		g.log.Warn("plugin stream without usage: not billed by tokens", "request_id", st.entry.RequestID, "channel", rt.Name, "model", st.info.Model)
 	}
 
 	if streamErr != nil && !st.written {

@@ -1207,7 +1207,8 @@ func (g *Gateway) unary(w http.ResponseWriter, st *reqState, rt *channel.Runtime
 			usage, ok = protocol.UsageFromCompletionResponse(raw)
 		}
 		if !ok {
-			usage = protocol.Usage{Input: protocol.EstimateTokens(len(st.body)), Output: protocol.EstimateTokens(len(raw)), Estimated: true}
+			// Billing uses reported usage only (ADR-0006): no estimate.
+			g.log.Warn("upstream response without usage: not billed by tokens", "request_id", st.entry.RequestID, "channel", rt.Name, "model", st.info.Model)
 		}
 	default:
 		out, usage, err = protocol.ConvertResponse(st.dialect, upDialect, raw, st.info.Model)
@@ -1323,17 +1324,12 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, st *reqState, r
 		}
 	}
 
+	// Only the usage the upstream reported is billed (ADR-0006): an estimate
+	// from the request size ignores prompt caching and overcharged by orders
+	// of magnitude.
 	usage, ok := proc.Usage()
-	// Usage is estimated only for a stream that completed without reporting
-	// it. A broken stream (client hang-up, upstream interruption) keeps the
-	// usage the upstream actually reported: an estimate from the request size
-	// ignores prompt caching and overcharges by orders of magnitude.
-	if streamErr == nil && !protocol.IsImages(st.dialect) && !protocol.IsAudio(st.dialect) && (!ok || (usage.Output == 0 && proc.OutputBytes() > 0)) {
-		if !ok {
-			usage.Input = protocol.EstimateTokens(len(st.body))
-		}
-		usage.Output = protocol.EstimateTokens(proc.OutputBytes())
-		usage.Estimated = true
+	if !ok && streamErr == nil && !protocol.IsImages(st.dialect) && !protocol.IsAudio(st.dialect) {
+		g.log.Warn("upstream stream without usage: not billed by tokens", "request_id", st.entry.RequestID, "channel", rt.Name, "model", st.info.Model)
 	}
 
 	if streamErr != nil && !st.written {

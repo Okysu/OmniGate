@@ -6141,7 +6141,7 @@ paths:
         **只路由到 openai 类型的渠道**，直通到 `{baseUrl}/embeddings`（只改写 `model`，响应原样返回）；该逻辑模型只由 anthropic 渠道提供时返回
         `404 model_not_found`，消息为 `model "<name>" is not available for this API key (embeddings are served by OpenAI-compatible channels only)`。
         路由、回退、熔断、Key 策略、套餐配额与计费规则与其他 `/v1` 接口相同；嵌入不支持流式：请求中的 `stream` 字段在转发前被去掉，始终按非流式处理；预留余额时不计输出 token。
-        用量取上游 `usage.prompt_tokens`，按售价的**输入**单价计费（输出为 0）；上游未返回 usage 时按约 4 字节 / token 估算并标记 `estimated`。
+        用量取上游 `usage.prompt_tokens`，按售价的**输入**单价计费（输出为 0）；上游未返回 usage 时不按 token 计费（不估算）。
         每个请求写一条请求日志（`inbound = openai.embeddings`）。错误使用 OpenAI 格式。
       security:
         - gatewayKey: []
