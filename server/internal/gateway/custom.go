@@ -336,9 +336,8 @@ func (g *Gateway) customStream(ctx context.Context, w http.ResponseWriter, r *ht
 	}
 
 	usage, ok := cs.Usage()
-	// Client hang-ups are billed by reported usage only (see attempt).
-	clientClosed := streamErr != nil && streamErr.Class == protocol.ErrClientClosed
-	if !clientClosed && (!ok || (usage.Output == 0 && cs.OutputBytes() > 0)) {
+	// Broken streams keep the reported usage only (see attempt).
+	if streamErr == nil && (!ok || (usage.Output == 0 && cs.OutputBytes() > 0)) {
 		if !ok {
 			usage.Input = protocol.EstimateTokens(len(st.body))
 		}

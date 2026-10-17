@@ -1324,11 +1324,11 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, st *reqState, r
 	}
 
 	usage, ok := proc.Usage()
-	// A stream the client hung up on is billed only by the usage the upstream
-	// actually reported: an estimate from the request size ignores prompt
-	// caching and overcharges agent clients that cancel often.
-	clientClosed := streamErr != nil && streamErr.Class == protocol.ErrClientClosed
-	if !clientClosed && !protocol.IsImages(st.dialect) && !protocol.IsAudio(st.dialect) && (!ok || (usage.Output == 0 && proc.OutputBytes() > 0)) {
+	// Usage is estimated only for a stream that completed without reporting
+	// it. A broken stream (client hang-up, upstream interruption) keeps the
+	// usage the upstream actually reported: an estimate from the request size
+	// ignores prompt caching and overcharges by orders of magnitude.
+	if streamErr == nil && !protocol.IsImages(st.dialect) && !protocol.IsAudio(st.dialect) && (!ok || (usage.Output == 0 && proc.OutputBytes() > 0)) {
 		if !ok {
 			usage.Input = protocol.EstimateTokens(len(st.body))
 		}
@@ -1395,7 +1395,12 @@ func (g *Gateway) finish(st *reqState, gerr *protocol.GatewayError) {
 		g.logs.Add(e)
 		return
 	}
-	succeeded := gerr == nil && e.StatusCode > 0 && e.StatusCode < 500 || (e.StatusCode == 499 && !e.Usage.IsZero())
+	// A stream that failed on the upstream side after the response was
+	// committed (interrupted, malformed, no terminal event, in-band error) is
+	// not billed: the client did not get a complete answer. A client hang-up
+	// is billed by the usage the upstream reported.
+	streamFailed := gerr == nil && e.ErrorClass != nil && *e.ErrorClass != protocol.ErrClientClosed
+	succeeded := !streamFailed && (gerr == nil && e.StatusCode > 0 && e.StatusCode < 500 || (e.StatusCode == 499 && !e.Usage.IsZero()))
 	ctx := context.Background()
 	// Billing and quotas follow the model that actually served the request.
 	served := e.Model

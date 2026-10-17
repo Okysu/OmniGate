@@ -425,6 +425,40 @@ func TestGatewayStreamingAndFallback(t *testing.T) {
 	})
 }
 
+// A stream that breaks on the upstream side after bytes reached the client is
+// logged with status 200 and its error, but never billed, and its usage is
+// never estimated from the request size.
+func TestGatewayBrokenStreamNotBilled(t *testing.T) {
+	e, bob := setupTiers(t)
+	base := e.h.srv.URL
+	up := newFakeUpstream(t)
+	e.channel(e.admin, map[string]any{"name": "plat", "type": "openai", "baseUrl": pub(up.srv.URL) + "/v1", "scope": "global", "models": models("m1")})
+	e.mustDo(e.admin, http.MethodPost, "/api/admin/prices", map[string]any{"kind": "sell", "model": "m1", "inputPerM": "1000", "outputPerM": "1000"}, 201)
+	bobID := e.userID(bob)
+	e.credit(bobID, "100")
+	_, key := e.key(bob, map[string]any{"name": "k"})
+
+	up.setMode("cut")
+	_, _, raw := readBody(gwPost(t, context.Background(), base, "/v1/chat/completions", key, chatStream))
+	if !strings.Contains(raw, "first") || !strings.Contains(raw, "upstream_invalid_response") {
+		t.Fatalf("stream = %q", raw)
+	}
+	l := e.lastLog(e.admin, "userId="+bobID)
+	u := l["usage"].(map[string]any)
+	if l["channelTier"] != "platform" || l["statusCode"] != float64(200) || l["errorClass"] != "upstream_invalid_response" || l["charge"] != "0" || u["estimated"] != false {
+		t.Fatalf("broken stream log = %v", l)
+	}
+
+	// A complete stream is still billed.
+	up.setMode("")
+	if code, _, raw := readBody(gwPost(t, context.Background(), base, "/v1/chat/completions", key, chatStream)); code != 200 {
+		t.Fatalf("stream = %d %s", code, raw)
+	}
+	if l := e.lastLog(e.admin, "userId="+bobID); l["charge"] == "0" || l["errorClass"] != nil {
+		t.Fatalf("complete stream log = %v", l)
+	}
+}
+
 func TestGatewayHeaderTimeoutFallback(t *testing.T) {
 	e := setupGateway(t)
 	slow, fast := newFakeUpstream(t), newFakeUpstream(t)
