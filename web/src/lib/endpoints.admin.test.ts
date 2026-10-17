@@ -50,7 +50,7 @@ describe('plansApi bulk actions (phase7 §3)', () => {
   it('adds ?dryRun=true only for previews', async () => {
     const fetchMock = vi.fn(async () => json(200, { affected: 3, subscriptions: ['a', 'b', 'c'] }))
     vi.stubGlobal('fetch', fetchMock)
-    const body = { target: { planId: null, status: 'active' as const }, rules: null, includeLifetime: false, note: '' }
+    const body = { target: { status: 'active' as const, planIds: [], groupIds: [] }, rules: null, includeLifetime: false, note: '' }
     expect(await plansApi.resetQuota(body, { dryRun: true })).toEqual({ affected: 3, subscriptions: ['a', 'b', 'c'] })
     expect(lastCall(fetchMock).url).toBe('/api/admin/billing/subscriptions/reset-quota?dryRun=true')
     expect(JSON.parse(String(lastCall(fetchMock).init.body))).toEqual(body)

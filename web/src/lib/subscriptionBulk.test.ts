@@ -76,7 +76,7 @@ describe('rule options', () => {
 describe('bodies', () => {
   it('builds reset and extend bodies (rules null = all, trimmed note)', () => {
     expect(buildResetInput({ ids: ['a'] }, null, false, ' 补偿 ')).toEqual({ target: { ids: ['a'] }, rules: null, includeLifetime: false, note: '补偿' })
-    expect(buildResetInput({ planId: null, status: 'active' }, ['5h', '5h'], true, '')).toEqual({ target: { planId: null, status: 'active' }, rules: ['5h'], includeLifetime: true, note: '' })
+    expect(buildResetInput({ status: 'active', planIds: [], groupIds: [] }, ['5h', '5h'], true, '')).toEqual({ target: { status: 'active', planIds: [], groupIds: [] }, rules: ['5h'], includeLifetime: true, note: '' })
     expect(buildExtendInput({ ids: ['a'] }, '7d', ' x ')).toEqual({ target: { ids: ['a'] }, duration: '7d', note: 'x' })
     expect(bodyKey({ a: 1 })).toBe('{"a":1}')
   })
