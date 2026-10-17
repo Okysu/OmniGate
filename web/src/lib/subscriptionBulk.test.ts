@@ -2,7 +2,6 @@ import type { Plan, QuotaRule, RuleUsage, Subscription } from './types'
 import { describe, expect, it } from 'vitest'
 import {
   affectedText,
-  ALL_PLANS,
   bodyKey,
   buildDuration,
   buildExtendInput,
@@ -36,15 +35,15 @@ function sub(id: string, rules: RuleUsage[]): Subscription {
 }
 
 describe('targets', () => {
-  it('builds id and plan targets (全部套餐 → null)', () => {
-    expect(buildTarget('selected', ['a', 'b', 'a'], ALL_PLANS)).toEqual({ ids: ['a', 'b'] })
-    expect(buildTarget('plan', ['a'], ALL_PLANS)).toEqual({ planId: null, status: 'active' })
-    expect(buildTarget('plan', [], 'p1')).toEqual({ planId: 'p1', status: 'active' })
+  it('builds id and filter targets (plans and groups combine; [] = no restriction)', () => {
+    expect(buildTarget('selected', ['a', 'b', 'a'])).toEqual({ ids: ['a', 'b'] })
+    expect(buildTarget('plan', ['a'])).toEqual({ status: 'active', planIds: [], groupIds: [] })
+    expect(buildTarget('plan', [], ['p1', 'p2', 'p1'], ['g1'])).toEqual({ status: 'active', planIds: ['p1', 'p2'], groupIds: ['g1'] })
     expect(targetIsEmpty({ ids: [] })).toBe(true)
-    expect(targetIsEmpty({ planId: null, status: 'active' })).toBe(false)
+    expect(targetIsEmpty({ status: 'active', planIds: [], groupIds: [] })).toBe(false)
     expect(targetLabel({ ids: ['a', 'b'] }, x => x)).toBe('所选 2 份订阅')
-    expect(targetLabel({ planId: 'p1', status: 'active' }, () => 'Pro')).toBe('「Pro」的全部有效订阅')
-    expect(targetLabel({ planId: null, status: 'active' }, x => x)).toBe('全部套餐的有效订阅')
+    expect(targetLabel({ status: 'active', planIds: ['p1', 'p2'], groupIds: [] }, id => (id === 'p1' ? 'Pro' : 'Max'))).toBe('「Pro」、「Max」的有效订阅')
+    expect(targetLabel({ status: 'active', planIds: [], groupIds: ['g'] }, x => x, () => 'VIP')).toBe('用户组「VIP」中全部套餐的有效订阅')
   })
 })
 
@@ -60,9 +59,9 @@ describe('rule options', () => {
 
   it('uses the selected subscriptions or the chosen plan(s)', () => {
     const plans = [plan('p1', [r5h]), plan('p2', [weekly, total])]
-    expect(ruleOptionsForTarget('plan', [], plans, ALL_PLANS).map(o => o.id)).toEqual(['5h', 'weekly', 'total'])
-    expect(ruleOptionsForTarget('plan', [], plans, 'p2').map(o => o.id)).toEqual(['weekly', 'total'])
-    expect(ruleOptionsForTarget('selected', [sub('s', [usage({ id: 'x', label: 'X' })])], plans, 'p2').map(o => o.id)).toEqual(['x'])
+    expect(ruleOptionsForTarget('plan', [], plans, []).map(o => o.id)).toEqual(['5h', 'weekly', 'total'])
+    expect(ruleOptionsForTarget('plan', [], plans, ['p2']).map(o => o.id)).toEqual(['weekly', 'total'])
+    expect(ruleOptionsForTarget('selected', [sub('s', [usage({ id: 'x', label: 'X' })])], plans, ['p2']).map(o => o.id)).toEqual(['x'])
   })
 
   it('warns when only lifetime rules would be reset without includeLifetime', () => {

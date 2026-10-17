@@ -184,6 +184,8 @@ func TestCardIssueTargets(t *testing.T) {
 	if _, err := f.svc.Cancel(f.ctx, admin, cancelled.ID, "", RequestMeta{}); err != nil {
 		t.Fatal(err)
 	}
+	p2 := f.plan(PlanInput{Rules: []Rule{sessionRule("10")}})
+	f.grant(a.ID, p2.ID, 1)
 	var everyone int // active users allowed billing.own (fixture admins included)
 	_ = f.pool.QueryRow(f.ctx, `SELECT count(*) FROM users WHERE status = 'active' AND role <> 'auditor'`).Scan(&everyone)
 
@@ -206,6 +208,11 @@ func TestCardIssueTargets(t *testing.T) {
 		{CardTarget{Type: CardTargetGroup, GroupID: &group}, 1},
 		{CardTarget{Type: CardTargetPlan, PlanID: &p.ID}, 2},
 		{CardTarget{Type: CardTargetAll}, everyone},
+		// Combined filters: any of the groups AND any of the plans.
+		{CardTarget{Type: CardTargetFilter}, everyone},
+		{CardTarget{Type: CardTargetFilter, GroupIDs: []uuid.UUID{group}}, 1},
+		{CardTarget{Type: CardTargetFilter, PlanIDs: []uuid.UUID{p.ID, p2.ID}}, 3},
+		{CardTarget{Type: CardTargetFilter, GroupIDs: []uuid.UUID{group}, PlanIDs: []uuid.UUID{p.ID, p2.ID}}, 1},
 	} {
 		if res := dry(tc.target, 3); res.Recipients != tc.want {
 			t.Fatalf("case %d: %d recipients, want %d", i, res.Recipients, tc.want)
@@ -236,6 +243,32 @@ func TestCardIssueTargets(t *testing.T) {
 	if _, err := f.svc.IssueCards(f.ctx, admin, IssueCardsInput{Kind: CardKind5h, Quantity: 1,
 		Target: CardTarget{Type: CardTargetPlan, PlanID: &missing}}, true, RequestMeta{}); errCode(err) != "not_found" {
 		t.Fatalf("unknown plan: %v", err)
+	}
+	if _, err := f.svc.IssueCards(f.ctx, admin, IssueCardsInput{Kind: CardKind5h, Quantity: 1,
+		Target: CardTarget{Type: CardTargetFilter, PlanIDs: []uuid.UUID{p.ID, missing}}}, true, RequestMeta{}); errCode(err) != "not_found" {
+		t.Fatalf("unknown plan in filter: %v", err)
+	}
+
+	// Bulk subscription operations take the same combined filters.
+	reset := func(tg Target) int {
+		t.Helper()
+		res, err := f.svc.ResetQuota(f.ctx, admin, ResetInput{Target: tg}, true, RequestMeta{})
+		if err != nil {
+			t.Fatalf("reset dry run %+v: %v", tg, err)
+		}
+		return res.Affected
+	}
+	if n := reset(Target{ByPlan: true, PlanIDs: []uuid.UUID{p.ID, p2.ID}}); n != 3 {
+		t.Fatalf("plans filter: %d", n)
+	}
+	if n := reset(Target{ByPlan: true, GroupIDs: []uuid.UUID{group}}); n != 1 {
+		t.Fatalf("group filter: %d", n)
+	}
+	if n := reset(Target{ByPlan: true, GroupIDs: []uuid.UUID{group}, PlanIDs: []uuid.UUID{p.ID}}); n != 0 {
+		t.Fatalf("group + plan filter: %d", n)
+	}
+	if _, err := f.svc.ResetQuota(f.ctx, admin, ResetInput{Target: Target{ByPlan: true, GroupIDs: []uuid.UUID{missing}}}, true, RequestMeta{}); errCode(err) != "not_found" {
+		t.Fatalf("unknown group: %v", err)
 	}
 	if _, err := f.svc.IssueCards(f.ctx, admin, IssueCardsInput{Kind: CardKind5h, Quantity: 1,
 		Target: CardTarget{Type: CardTargetGroup, GroupID: &missing}}, true, RequestMeta{}); errCode(err) != "not_found" {

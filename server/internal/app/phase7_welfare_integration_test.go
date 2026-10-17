@@ -191,7 +191,7 @@ func TestQuotaResetAndExtend(t *testing.T) {
 			t.Fatalf("audit entries = %d", n)
 		}
 		md := stringify(items[0].(map[string]any)["metadata"])
-		if !strings.Contains(md, `"affected":1`) || !strings.Contains(md, `"note":"福利"`) || !strings.Contains(md, `"planId"`) {
+		if !strings.Contains(md, `"affected":1`) || !strings.Contains(md, `"note":"福利"`) || !strings.Contains(md, `"planIds":["`) {
 			t.Fatalf("audit metadata = %s", md)
 		}
 		a := e.expectNotifs(e.admin, "subscription.quota_reset", 2)

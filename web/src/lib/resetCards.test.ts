@@ -137,17 +137,16 @@ describe('issue form', () => {
     const f = emptyIssueForm()
     expect(buildCardTarget(f)).toBeNull()
     expect(buildCardTarget({ ...f, userIds: ['a', 'b', 'a'] })).toEqual({ type: 'users', userIds: ['a', 'b'] })
-    expect(buildCardTarget({ ...f, targetType: 'group' })).toBeNull()
-    expect(buildCardTarget({ ...f, targetType: 'group', groupId: 'g' })).toEqual({ type: 'group', groupId: 'g' })
-    expect(buildCardTarget({ ...f, targetType: 'plan', planId: 'p' })).toEqual({ type: 'plan', planId: 'p' })
-    expect(buildCardTarget({ ...f, targetType: 'all' })).toEqual({ type: 'all' })
+    expect(buildCardTarget({ ...f, targetType: 'filter' })).toEqual({ type: 'filter', groupIds: [], planIds: [] })
+    expect(buildCardTarget({ ...f, targetType: 'filter', groupIds: ['g', 'g'], targetPlanIds: ['p1', 'p2'] }))
+      .toEqual({ type: 'filter', groupIds: ['g'], planIds: ['p1', 'p2'] })
   })
 
   it('builds the request body', () => {
     const expiresAt = new Date(Date.now() + 86_400_000)
-    const f = { ...emptyIssueForm(), kind: 'both' as const, quantity: '3', targetType: 'all' as const, planIds: ['p', 'p'], note: ' 福利 ', expiresAt: toLocalInput(expiresAt) }
+    const f = { ...emptyIssueForm(), kind: 'both' as const, quantity: '3', targetType: 'filter' as const, planIds: ['p', 'p'], note: ' 福利 ', expiresAt: toLocalInput(expiresAt) }
     const body = buildIssueInput(f)!
-    expect(body).toMatchObject({ kind: 'both', quantity: 3, planIds: ['p'], note: '福利', target: { type: 'all' } })
+    expect(body).toMatchObject({ kind: 'both', quantity: 3, planIds: ['p'], note: '福利', target: { type: 'filter', groupIds: [], planIds: [] } })
     expect(Math.abs(new Date(body.expiresAt!).getTime() - expiresAt.getTime())).toBeLessThan(60_000)
     expect(buildIssueInput({ ...f, expiresAt: '' })!.expiresAt).toBeNull()
     expect(buildIssueInput({ ...f, quantity: 101 })).toBeNull()
@@ -160,10 +159,10 @@ describe('issue form', () => {
   it('validates fields', () => {
     const f = emptyIssueForm()
     expect(issueFormErrors(f)).toEqual({ target: '请选择至少一位用户' })
-    expect(issueFormErrors({ ...f, targetType: 'plan', quantity: 0, note: 'x'.repeat(201), expiresAt: toLocalInput(new Date(Date.now() - 3_600_000)) }))
-      .toEqual({ quantity: '每人 1–100 张', target: '请选择套餐', note: '最多 200 个字符', expiresAt: '必须晚于当前时间' })
+    expect(issueFormErrors({ ...f, targetType: 'filter', quantity: 0, note: 'x'.repeat(201), expiresAt: toLocalInput(new Date(Date.now() - 3_600_000)) }))
+      .toEqual({ quantity: '每人 1–100 张', note: '最多 200 个字符', expiresAt: '必须晚于当前时间' })
     expect(issueFormErrors({ ...f, targetType: 'users', userIds: Array.from({ length: 1001 }, (_, i) => String(i)) }).target).toBe('最多 1000 位用户')
-    expect(issueFormErrors({ ...f, targetType: 'all' })).toEqual({})
+    expect(issueFormErrors({ ...f, targetType: 'filter' })).toEqual({})
   })
 
   it('describes recipients and batch targets', () => {
@@ -172,6 +171,9 @@ describe('issue form', () => {
     expect(recipientsText(12, 24)).toBe('将发放给 12 位用户（共 24 张）')
     expect(targetSummary({ type: 'users', userIds: ['a', 'b'] })).toBe('指定 2 位用户')
     expect(targetSummary({ type: 'group', groupId: 'g', groupName: '默认' })).toBe('用户组「默认」')
+    expect(targetSummary({ type: 'filter' })).toBe('全部用户')
+    expect(targetSummary({ type: 'filter', groupIds: ['g'], groupNames: ['VIP'], planIds: ['p1', 'p2'], planNames: ['Pro', 'Max'] }))
+      .toBe('用户组「VIP」且持有「Pro」、「Max」有效订阅的用户')
     expect(targetSummary({ type: 'plan', planId: '0123456789', planName: '' })).toBe('「01234567」的有效订阅用户')
     expect(targetSummary({ type: 'all' })).toBe('全部用户')
   })

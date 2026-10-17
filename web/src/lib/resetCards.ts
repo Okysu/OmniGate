@@ -183,18 +183,24 @@ export type CardTargetType = ResetCardTarget['type']
 
 export const CARD_TARGET_LABELS: Record<CardTargetType, string> = {
   users: '指定用户',
+  filter: '按条件（用户组 / 套餐）',
   group: '用户组',
   plan: '套餐有效订阅用户',
   all: '全部用户',
 }
 
+/** Target types the issue form offers (group / plan / all are covered by `filter`; kept for older batches). */
+export type IssueTargetType = 'users' | 'filter'
+
 export interface IssueForm {
   kind: ResetCardKind
   quantity: number | string
-  targetType: CardTargetType
+  targetType: IssueTargetType
   userIds: string[]
-  groupId: string
-  planId: string
+  /** filter: any of these groups ([] = every group). */
+  groupIds: string[]
+  /** filter: holders of an active subscription of any of these plans ([] = no restriction). */
+  targetPlanIds: string[]
   /** `datetime-local` value ('' = never expires). */
   expiresAt: string
   /** Plan restriction ([] = every plan). */
@@ -203,7 +209,7 @@ export interface IssueForm {
 }
 
 export function emptyIssueForm(): IssueForm {
-  return { kind: '5h', quantity: 1, targetType: 'users', userIds: [], groupId: '', planId: '', expiresAt: '', planIds: [], note: '' }
+  return { kind: '5h', quantity: 1, targetType: 'users', userIds: [], groupIds: [], targetPlanIds: [], expiresAt: '', planIds: [], note: '' }
 }
 
 function quantityOk(v: number | string): boolean {
@@ -212,19 +218,12 @@ function quantityOk(v: number | string): boolean {
 }
 
 /** The target, or null while it is incomplete. */
-export function buildCardTarget(f: Pick<IssueForm, 'targetType' | 'userIds' | 'groupId' | 'planId'>): ResetCardTarget | null {
-  switch (f.targetType) {
-    case 'users': {
-      const ids = [...new Set(f.userIds)]
-      return ids.length ? { type: 'users', userIds: ids } : null
-    }
-    case 'group':
-      return f.groupId ? { type: 'group', groupId: f.groupId } : null
-    case 'plan':
-      return f.planId ? { type: 'plan', planId: f.planId } : null
-    case 'all':
-      return { type: 'all' }
+export function buildCardTarget(f: Pick<IssueForm, 'targetType' | 'userIds' | 'groupIds' | 'targetPlanIds'>): ResetCardTarget | null {
+  if (f.targetType === 'users') {
+    const ids = [...new Set(f.userIds)]
+    return ids.length ? { type: 'users', userIds: ids } : null
   }
+  return { type: 'filter', groupIds: [...new Set(f.groupIds)], planIds: [...new Set(f.targetPlanIds)] }
 }
 
 /** Request body, or null while the form cannot be previewed (incomplete target, bad quantity). */
@@ -251,10 +250,6 @@ export function issueFormErrors(f: IssueForm, now: number = Date.now()): Record<
     e.target = '请选择至少一位用户'
   else if (f.targetType === 'users' && f.userIds.length > CARD_USERS_MAX)
     e.target = `最多 ${CARD_USERS_MAX} 位用户`
-  else if (f.targetType === 'group' && !f.groupId)
-    e.target = '请选择用户组'
-  else if (f.targetType === 'plan' && !f.planId)
-    e.target = '请选择套餐'
   const ex = fromLocalInput(f.expiresAt)
   if (ex && new Date(ex).getTime() <= now)
     e.expiresAt = '必须晚于当前时间'
@@ -286,5 +281,14 @@ export function targetSummary(t: ResetCardTarget): string {
       return `「${t.planName || t.planId.slice(0, 8)}」的有效订阅用户`
     case 'all':
       return '全部用户'
+    case 'filter': {
+      const groups = t.groupNames?.length ? t.groupNames : (t.groupIds ?? []).map(id => id.slice(0, 8))
+      const plans = t.planNames?.length ? t.planNames : (t.planIds ?? []).map(id => id.slice(0, 8))
+      const parts = [
+        groups.length ? `用户组${groups.map(n => `「${n}」`).join('、')}` : '',
+        plans.length ? `持有${plans.map(n => `「${n}」`).join('、')}有效订阅` : '',
+      ].filter(Boolean)
+      return parts.length ? `${parts.join('且')}的用户` : '全部用户'
+    }
   }
 }

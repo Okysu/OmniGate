@@ -5,16 +5,14 @@ import { durationError, PERIOD_RANGE, ruleTitle } from './quota'
 
 export const BULK_NOTE_MAX = 200
 
-/** `selected`: the checked rows; `plan`: every active subscription of a plan (or all plans). */
+/** `selected`: the checked rows; `plan`: every active subscription matching the plan / group filters. */
 export type TargetMode = 'selected' | 'plan'
 
-/** Plan select value for "全部套餐" (sent as `planId: null`). */
-export const ALL_PLANS = '__all__'
-
-export function buildTarget(mode: TargetMode, ids: readonly string[], planId: string): SubscriptionTarget {
+/** The target; in `plan` mode empty planIds / groupIds mean no restriction (they combine with AND). */
+export function buildTarget(mode: TargetMode, ids: readonly string[], planIds: readonly string[] = [], groupIds: readonly string[] = []): SubscriptionTarget {
   if (mode === 'selected')
     return { ids: [...new Set(ids)] }
-  return { planId: planId === ALL_PLANS || !planId ? null : planId, status: 'active' }
+  return { status: 'active', planIds: [...new Set(planIds)], groupIds: [...new Set(groupIds)] }
 }
 
 export function targetIsEmpty(t: SubscriptionTarget): boolean {
@@ -60,11 +58,11 @@ export function ruleOptions(lists: readonly (readonly RuleLike[])[]): RuleOption
   }))
 }
 
-/** Rule options for the target: the selected subscriptions' snapshots, or the plan(s)' rules. */
-export function ruleOptionsForTarget(mode: TargetMode, selected: readonly Subscription[], plans: readonly Plan[], planId: string): RuleOption[] {
+/** Rule options for the target: the selected subscriptions' snapshots, or the chosen plans' rules (none chosen = every plan). */
+export function ruleOptionsForTarget(mode: TargetMode, selected: readonly Subscription[], plans: readonly Plan[], planIds: readonly string[]): RuleOption[] {
   if (mode === 'selected')
     return ruleOptions(selected.map(s => s.rules))
-  const ps = planId === ALL_PLANS || !planId ? plans : plans.filter(p => p.id === planId)
+  const ps = planIds.length ? plans.filter(p => planIds.includes(p.id)) : plans
   return ruleOptions(ps.map(p => p.rules))
 }
 
@@ -138,8 +136,10 @@ export function affectedText(n: number): string {
 }
 
 /** Short description of the target for dialog titles / toasts. */
-export function targetLabel(t: SubscriptionTarget, planName: (id: string) => string): string {
+export function targetLabel(t: SubscriptionTarget, planName: (id: string) => string, groupName: (id: string) => string = id => id.slice(0, 8)): string {
   if ('ids' in t)
     return t.ids.length === 1 ? '所选订阅' : `所选 ${t.ids.length} 份订阅`
-  return t.planId === null ? '全部套餐的有效订阅' : `「${planName(t.planId)}」的全部有效订阅`
+  const plans = t.planIds.length ? t.planIds.map(id => `「${planName(id)}」`).join('、') : '全部套餐'
+  const groups = t.groupIds.length ? `用户组${t.groupIds.map(id => `「${groupName(id)}」`).join('、')}中` : ''
+  return `${groups}${plans}的有效订阅`
 }

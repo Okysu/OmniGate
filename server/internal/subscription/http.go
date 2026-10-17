@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -419,11 +420,12 @@ func isNullJSON(raw json.RawMessage) bool {
 	return len(t) == 0 || bytes.Equal(t, []byte("null"))
 }
 
-// parseTarget decodes {ids: string[]} or {planId: string | null, status: "active"}.
+// parseTarget decodes {ids: string[]} or {status: "active", planIds?: string[],
+// groupIds?: string[]} (planId: string | null is the older single-plan form).
 func parseTarget(raw json.RawMessage, details map[string]any) Target {
 	var obj map[string]json.RawMessage
 	if isNullJSON(raw) || json.Unmarshal(raw, &obj) != nil || obj == nil {
-		details["target"] = "必填：{ids} 或 {planId, status: 'active'}"
+		details["target"] = "必填：{ids} 或 {status: 'active', planIds?, groupIds?}"
 		return Target{}
 	}
 	if ids, ok := obj["ids"]; ok {
@@ -449,7 +451,7 @@ func parseTarget(raw json.RawMessage, details map[string]any) Target {
 	}
 	var status string
 	if json.Unmarshal(obj["status"], &status) != nil || status != StatusActive {
-		details["target"] = "按套餐选择时 status 必须为 active"
+		details["target"] = "按条件选择时 status 必须为 active"
 		return Target{}
 	}
 	t := Target{ByPlan: true}
@@ -463,9 +465,40 @@ func parseTarget(raw json.RawMessage, details map[string]any) Target {
 			details["target"] = "planId 必须是套餐 ID 或 null"
 			return Target{}
 		}
-		t.PlanID = &id
+		t.PlanIDs = append(t.PlanIDs, id)
+	}
+	var ok bool
+	if t.PlanIDs, ok = parseIDList(obj["planIds"], t.PlanIDs); !ok {
+		details["target"] = "planIds 必须是套餐 ID 数组"
+		return Target{}
+	}
+	if t.GroupIDs, ok = parseIDList(obj["groupIds"], nil); !ok {
+		details["target"] = "groupIds 必须是用户组 ID 数组"
+		return Target{}
 	}
 	return t
+}
+
+// parseIDList appends the ids of an optional JSON string array to into,
+// without duplicates; ok=false for a malformed list.
+func parseIDList(raw json.RawMessage, into []uuid.UUID) ([]uuid.UUID, bool) {
+	if isNullJSON(raw) {
+		return into, true
+	}
+	var list []string
+	if json.Unmarshal(raw, &list) != nil {
+		return nil, false
+	}
+	for _, v := range list {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			return nil, false
+		}
+		if !slices.Contains(into, id) {
+			into = append(into, id)
+		}
+	}
+	return into, true
 }
 
 func dryRun(r *http.Request) bool {

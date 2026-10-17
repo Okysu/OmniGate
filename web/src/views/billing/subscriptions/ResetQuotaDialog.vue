@@ -15,7 +15,6 @@ import { useDryRun } from '@/composables/useDryRun'
 import { errorMessage, fieldErrors, isApiError } from '@/lib/api'
 import { plansApi } from '@/lib/endpoints'
 import {
-  ALL_PLANS,
   BULK_NOTE_MAX,
   bodyKey,
   buildResetInput,
@@ -42,7 +41,8 @@ const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ done: [result: BulkSubscriptionResult] }>()
 
 const mode = ref<TargetMode>('plan')
-const planId = ref(ALL_PLANS)
+const planIds = ref<string[]>([])
+const groupIds = ref<string[]>([])
 const rules = ref<string[]>([])
 const includeLifetime = ref(false)
 const note = ref('')
@@ -54,7 +54,8 @@ watch(open, (v) => {
   if (!v)
     return
   mode.value = props.single || props.selected.length ? 'selected' : 'plan'
-  planId.value = props.initialPlanId && props.plans.some(p => p.id === props.initialPlanId) ? props.initialPlanId : ALL_PLANS
+  planIds.value = props.initialPlanId && props.plans.some(p => p.id === props.initialPlanId) ? [props.initialPlanId] : []
+  groupIds.value = []
   rules.value = []
   includeLifetime.value = false
   note.value = ''
@@ -64,8 +65,8 @@ watch(open, (v) => {
 
 const effMode = computed<TargetMode>(() => (props.single ? 'selected' : mode.value))
 const sources = computed(() => (props.single ? [props.single] : props.selected))
-const target = computed(() => buildTarget(effMode.value, sources.value.map(s => s.id), planId.value))
-const options = computed(() => ruleOptionsForTarget(effMode.value, sources.value, props.plans, planId.value))
+const target = computed(() => buildTarget(effMode.value, sources.value.map(s => s.id), planIds.value, groupIds.value))
+const options = computed(() => ruleOptionsForTarget(effMode.value, sources.value, props.plans, planIds.value))
 watch(options, (o) => {
   const ids = new Set(o.map(x => x.id))
   if (rules.value.some(r => !ids.has(r)))
@@ -123,7 +124,7 @@ async function submit() {
       </DialogHeader>
 
       <form id="reset-form" class="space-y-4" novalidate @submit.prevent="submit">
-        <BulkTargetFields v-model:mode="mode" v-model:plan-id="planId" :selected-count="selected.length" :plans="plans" :single="single" id-prefix="reset" />
+        <BulkTargetFields v-model:mode="mode" v-model:plan-ids="planIds" v-model:group-ids="groupIds" :selected-count="selected.length" :plans="plans" :single="single" id-prefix="reset" />
 
         <FormField label="规则" for="reset-rules" :error="errors.rules" :hint="options.length ? '不选表示全部规则。' : '目标订阅没有可重置的规则。'">
           <MultiSelect id="reset-rules" v-model="rules" :options="ruleSelectOptions" empty-label="全部规则" placeholder="搜索规则" data-testid="reset-rules" />

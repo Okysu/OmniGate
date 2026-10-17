@@ -47,6 +47,10 @@ const (
 	CardTargetGroup = "group" // members of a user group
 	CardTargetPlan  = "plan"  // holders of an active subscription of a plan
 	CardTargetAll   = "all"   // every user
+	// CardTargetFilter: users matching every given filter — a member of any
+	// of GroupIDs, holding an active subscription of any of PlanIDs (each
+	// empty = no restriction).
+	CardTargetFilter = "filter"
 )
 
 // Audit actions of reset cards.
@@ -139,6 +143,11 @@ type CardTarget struct {
 	GroupName string      `json:"groupName,omitempty"`
 	PlanID    *uuid.UUID  `json:"planId,omitempty"`
 	PlanName  string      `json:"planName,omitempty"`
+	// filter
+	GroupIDs   []uuid.UUID `json:"groupIds,omitempty"`
+	GroupNames []string    `json:"groupNames,omitempty"`
+	PlanIDs    []uuid.UUID `json:"planIds,omitempty"`
+	PlanNames  []string    `json:"planNames,omitempty"`
 }
 
 // CardCounts are the cards of a batch by (derived) state.
@@ -329,6 +338,23 @@ func cardRecipients(ctx context.Context, q db.Querier, t *CardTarget, now time.T
 		args = append(args, *t.PlanID, now)
 		sql += ` AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND s.plan_id = $2
 			AND s.status = 'active' AND s.ends_at > $3)`
+	case CardTargetFilter:
+		var err error
+		if t.GroupNames, err = namesOf(ctx, q, "user_groups", "用户组", t.GroupIDs); err != nil {
+			return nil, err
+		}
+		if t.PlanNames, err = namesOf(ctx, q, "plans", "套餐", t.PlanIDs); err != nil {
+			return nil, err
+		}
+		if len(t.GroupIDs) > 0 {
+			args = append(args, t.GroupIDs)
+			sql += fmt.Sprintf(` AND u.group_id = ANY($%d)`, len(args))
+		}
+		if len(t.PlanIDs) > 0 {
+			args = append(args, t.PlanIDs, now)
+			sql += fmt.Sprintf(` AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND s.plan_id = ANY($%d)
+			AND s.status = 'active' AND s.ends_at > $%d)`, len(args)-1, len(args))
+		}
 	}
 	rows, err := q.Query(ctx, sql+` ORDER BY u.id`, args...)
 	if err != nil {
@@ -344,6 +370,40 @@ func cardRecipients(ctx context.Context, q db.Querier, t *CardTarget, now time.T
 		out = append(out, id)
 	}
 	return out, rows.Err()
+}
+
+// namesOf returns the names of ids in table (in ids order), failing with 404
+// when one is unknown.
+func namesOf(ctx context.Context, q db.Querier, table, what string, ids []uuid.UUID) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := q.Query(ctx, `SELECT id, name FROM `+table+` WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byID := map[uuid.UUID]string{}
+	for rows.Next() {
+		var id uuid.UUID
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		byID[id] = name
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		name, ok := byID[id]
+		if !ok {
+			return nil, apperr.NotFound(what)
+		}
+		out = append(out, name)
+	}
+	return out, nil
 }
 
 func validateIssue(in *IssueCardsInput, now time.Time) error {
@@ -380,9 +440,14 @@ func validateIssue(in *IssueCardsInput, now time.Time) error {
 		if t.PlanID == nil {
 			details["target"] = "planId 必填"
 		}
+	case CardTargetFilter:
+		t.GroupIDs, t.PlanIDs = dedupeUUIDs(t.GroupIDs), dedupeUUIDs(t.PlanIDs)
+		if len(t.GroupIDs) > maxBulkIDs || len(t.PlanIDs) > maxBulkIDs {
+			details["target"] = fmt.Sprintf("groupIds / planIds 最多 %d 个", maxBulkIDs)
+		}
 	case CardTargetAll:
 	default:
-		details["target"] = "type 必须为 users、group、plan 或 all"
+		details["target"] = "type 必须为 users、filter、group、plan 或 all"
 	}
 	if len(details) > 0 {
 		return apperr.Validation("参数校验失败", details)

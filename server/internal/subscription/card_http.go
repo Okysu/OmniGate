@@ -130,20 +130,22 @@ type issueCardsBody struct {
 }
 
 type cardTargetBody struct {
-	Type    string   `json:"type"`
-	UserIDs []string `json:"userIds"`
-	GroupID *string  `json:"groupId"`
-	PlanID  *string  `json:"planId"`
+	Type     string   `json:"type"`
+	UserIDs  []string `json:"userIds"`
+	GroupID  *string  `json:"groupId"`
+	PlanID   *string  `json:"planId"`
+	GroupIDs []string `json:"groupIds"`
+	PlanIDs  []string `json:"planIds"`
 }
 
-// parseCardTarget decodes {type: users, userIds} | {type: group, groupId} |
-// {type: plan, planId} | {type: all}.
+// parseCardTarget decodes {type: users, userIds} | {type: filter, groupIds?,
+// planIds?} | {type: group, groupId} | {type: plan, planId} | {type: all}.
 func parseCardTarget(raw json.RawMessage, details map[string]any) CardTarget {
 	var b cardTargetBody
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if isNullJSON(raw) || dec.Decode(&b) != nil {
-		details["target"] = "必填：{type: users, userIds} | {type: group, groupId} | {type: plan, planId} | {type: all}"
+		details["target"] = "必填：{type: users, userIds} | {type: filter, groupIds?, planIds?} | {type: group, groupId} | {type: plan, planId} | {type: all}"
 		return CardTarget{}
 	}
 	t := CardTarget{Type: b.Type}
@@ -171,6 +173,20 @@ func parseCardTarget(raw json.RawMessage, details map[string]any) CardTarget {
 	case CardTargetPlan:
 		if b.PlanID != nil {
 			t.PlanID = parse(*b.PlanID, "planId")
+		}
+	case CardTargetFilter:
+		for _, list := range []struct {
+			in   []string
+			out  *[]uuid.UUID
+			what string
+		}{{b.GroupIDs, &t.GroupIDs, "groupIds"}, {b.PlanIDs, &t.PlanIDs, "planIds"}} {
+			for _, v := range list.in {
+				id := parse(v, list.what)
+				if id == nil {
+					return CardTarget{}
+				}
+				*list.out = append(*list.out, *id)
+			}
 		}
 	}
 	return t

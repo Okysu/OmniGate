@@ -1146,7 +1146,8 @@ export interface GrantInput {
  * Bulk subscription target (phase7-api.md §3): explicit subscription ids, or every active
  * subscription of a plan (`planId: null` = every plan).
  */
-export type SubscriptionTarget = { ids: string[] } | { planId: string | null, status: 'active' }
+/** Explicit subscriptions, or every active one matching the filters (any of planIds AND a member of any of groupIds; [] = no restriction). */
+export type SubscriptionTarget = { ids: string[] } | { status: 'active', planIds: string[], groupIds: string[] }
 
 /** `POST /api/admin/billing/subscriptions/reset-quota` body. */
 export interface ResetQuotaInput {
@@ -1187,6 +1188,8 @@ export type ResetCardTarget =
   | { type: 'group', groupId: string, groupName?: string }
   | { type: 'plan', planId: string, planName?: string }
   | { type: 'all' }
+  /** Any of the groups AND an active subscription of any of the plans ([] = no restriction). */
+  | { type: 'filter', groupIds?: string[], planIds?: string[], groupNames?: string[], planNames?: string[] }
 
 export interface ResetCardCounts {
   issued: number

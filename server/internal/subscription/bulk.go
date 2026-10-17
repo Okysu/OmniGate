@@ -35,12 +35,14 @@ const (
 )
 
 // Target selects subscriptions: explicit ids, or every active subscription
-// of a plan (PlanID nil = every plan). Only active, unexpired subscriptions
-// are ever affected.
+// matching the filters — any of PlanIDs (empty = every plan) AND held by a
+// member of any of GroupIDs (empty = every group). Only active, unexpired
+// subscriptions are ever affected.
 type Target struct {
-	IDs    []uuid.UUID
-	ByPlan bool
-	PlanID *uuid.UUID
+	IDs      []uuid.UUID
+	ByPlan   bool // filter mode
+	PlanIDs  []uuid.UUID
+	GroupIDs []uuid.UUID
 }
 
 // auditJSON renders the target as in the request.
@@ -48,7 +50,28 @@ func (t Target) auditJSON() map[string]any {
 	if !t.ByPlan {
 		return map[string]any{"ids": t.IDs}
 	}
-	return map[string]any{"planId": t.PlanID, "status": StatusActive}
+	nonNil := func(ids []uuid.UUID) []uuid.UUID {
+		if ids == nil {
+			return []uuid.UUID{}
+		}
+		return ids
+	}
+	return map[string]any{"planIds": nonNil(t.PlanIDs), "groupIds": nonNil(t.GroupIDs), "status": StatusActive}
+}
+
+// checkExist fails with 404 when an id of table is unknown.
+func checkExist(ctx context.Context, q db.Querier, table, what string, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	var n int
+	if err := q.QueryRow(ctx, `SELECT count(*) FROM `+table+` WHERE id = ANY($1)`, ids).Scan(&n); err != nil {
+		return err
+	}
+	if n != len(ids) {
+		return apperr.NotFound(what)
+	}
+	return nil
 }
 
 // ResetInput is the body of POST /admin/billing/subscriptions/reset-quota.
@@ -97,6 +120,9 @@ func validateTarget(t Target, details map[string]any) {
 	if !t.ByPlan && (len(t.IDs) == 0 || len(t.IDs) > maxBulkIDs) {
 		details["target"] = fmt.Sprintf("ids 必须有 1 到 %d 个订阅 ID", maxBulkIDs)
 	}
+	if len(t.PlanIDs) > maxBulkIDs || len(t.GroupIDs) > maxBulkIDs {
+		details["target"] = fmt.Sprintf("planIds / groupIds 最多 %d 个", maxBulkIDs)
+	}
 }
 
 func validateNote(note string, details map[string]any) string {
@@ -115,16 +141,21 @@ func (s *Service) targetSubs(ctx context.Context, q db.Querier, t Target, now ti
 	case !t.ByPlan:
 		args = append(args, t.IDs)
 		where += ` AND s.id = ANY($2)`
-	case t.PlanID != nil:
-		var exists bool
-		if err := q.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM plans WHERE id = $1)`, *t.PlanID).Scan(&exists); err != nil {
+	default:
+		if err := checkExist(ctx, q, "plans", "套餐", t.PlanIDs); err != nil {
 			return nil, err
 		}
-		if !exists {
-			return nil, apperr.NotFound("套餐")
+		if err := checkExist(ctx, q, "user_groups", "用户组", t.GroupIDs); err != nil {
+			return nil, err
 		}
-		args = append(args, *t.PlanID)
-		where += ` AND s.plan_id = $2`
+		if len(t.PlanIDs) > 0 {
+			args = append(args, t.PlanIDs)
+			where += fmt.Sprintf(` AND s.plan_id = ANY($%d)`, len(args))
+		}
+		if len(t.GroupIDs) > 0 {
+			args = append(args, t.GroupIDs)
+			where += fmt.Sprintf(` AND s.user_id IN (SELECT id FROM users WHERE group_id = ANY($%d))`, len(args))
+		}
 	}
 	sql := `SELECT ` + subCols + subFrom + where + ` ORDER BY s.created_at, s.id`
 	if lock {

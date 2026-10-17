@@ -71,7 +71,8 @@ interface ResetCardBatch {
   quantity: number
   recipients: number
   target: { type: 'users'; userIds: string[] } | { type: 'group'; groupId: string; groupName: string }
-        | { type: 'plan'; planId: string; planName: string } | { type: 'all' }   // 名称为发放时的快照
+        | { type: 'plan'; planId: string; planName: string } | { type: 'all' }
+        | { type: 'filter'; groupIds?: string[]; planIds?: string[]; groupNames?: string[]; planNames?: string[] }  // 用户组与持有套餐取交集，空 = 不限；名称为发放时的快照
   plans: { id: string; name: string }[]     // 限定套餐（当前名称）；[] = 不限
   expiresAt: string | null
   note: string

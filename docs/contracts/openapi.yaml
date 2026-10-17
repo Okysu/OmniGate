@@ -3924,7 +3924,7 @@ paths:
       summary: 批量重置套餐额度（Round 6 续）
       description: |
         清空目标订阅所选规则的**当前窗口**用量（`docs/contracts/phase7-api.md` §3.1，“发福利”）。
-        - 目标：`target.ids`（1–1000 个订阅 ID，重复的去重）或 `target: {planId, status: "active"}`（`planId` 为 null = 全部套餐）。
+        - 目标：`target.ids`（1–1000 个订阅 ID，重复的去重）或 `target: {status: "active", planIds?, groupIds?}`：任一 `planIds` 套餐、且订阅者属于任一 `groupIds` 用户组的有效订阅（两个条件取交集，空数组或省略 = 不限；仍接受旧写法 `planId`，null = 全部套餐）。
           **只处理 `active` 且 `endsAt` 晚于当前时间的订阅**，`ids` 中已取消 / 已过期 / 不存在的订阅被忽略（不报错）。
         - `rules`：只重置这些规则 ID（1–50 个）；null 或省略 = 全部规则。`includeLifetime` 为 false（默认）时 `lifetime` 规则不重置。
           一份订阅至少有一条被选中且可重置的规则时才计入 `affected`。
@@ -11735,6 +11735,22 @@ components:
           required: [type]
           properties:
             type: { type: string, const: all }
+        - type: object
+          title: 按条件
+          description: 属于任一 groupIds 用户组，且持有任一 planIds 套餐有效订阅的用户（两个条件取交集；空数组或省略 = 不限）。管理后台只用这一种和「指定用户」；group / plan / all 保留兼容。
+          required: [type]
+          properties:
+            type: { type: string, const: filter }
+            groupIds:
+              type: array
+              maxItems: 1000
+              items: { type: string, format: uuid }
+            planIds:
+              type: array
+              maxItems: 1000
+              items: { type: string, format: uuid }
+            groupNames: { type: array, items: { type: string }, readOnly: true }
+            planNames: { type: array, items: { type: string }, readOnly: true }
 
     ResetCardIssueRequest:
       type: object
