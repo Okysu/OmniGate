@@ -366,19 +366,19 @@ func (s *Service) Redeem(ctx context.Context, actor Actor, code string, meta Req
 		if kind != BatchKindWalletCredit || amt == nil {
 			return fmt.Errorf("billing: unsupported redeem batch kind %q", kind)
 		}
-		// The wallet lock also serializes this user's redemptions, which makes the
-		// per-user count below race-free across different codes of one batch.
+		// The code row lock taken above serializes redemptions of this code, which
+		// makes the per-user count below race-free.
 		w, err := s.lockWallet(ctx, tx, actor.ID, true)
 		if err != nil {
 			return err
 		}
 		var mine int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM redemptions WHERE batch_id = $1 AND user_id = $2`,
-			batchID, actor.ID).Scan(&mine); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM redemptions WHERE code_id = $1 AND user_id = $2`,
+			codeID, actor.ID).Scan(&mine); err != nil {
 			return err
 		}
 		if mine >= perUser {
-			return redeemConflict("redeem_user_limit", "已达到该批次的兑换次数上限")
+			return redeemConflict("redeem_user_limit", "你已兑换过这个兑换码")
 		}
 		redemptionID, err := uuid.NewV7()
 		if err != nil {
@@ -416,20 +416,21 @@ func (s *Service) Redeem(ctx context.Context, actor Actor, code string, meta Req
 }
 
 // redeemPlan finishes a plan redemption inside Redeem's transaction: the
-// per-user advisory lock serializes this user's redemptions (making the
-// per-user count race-free), then the plan is granted or renewed.
+// per-user advisory lock serializes this user's redemptions, the code row
+// lock makes the per-user count of this code race-free, then the plan is
+// granted or renewed.
 func (s *Service) redeemPlan(ctx context.Context, tx db.Tx, actor Actor, meta RequestMeta, res *RedeemResult,
 	codeID, batchID uuid.UUID, prefix string, perUser int, planID uuid.UUID, periods int, now time.Time) error {
 	if err := subscription.LockUser(ctx, tx, actor.ID); err != nil {
 		return err
 	}
 	var mine int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM redemptions WHERE batch_id = $1 AND user_id = $2`,
-		batchID, actor.ID).Scan(&mine); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM redemptions WHERE code_id = $1 AND user_id = $2`,
+		codeID, actor.ID).Scan(&mine); err != nil {
 		return err
 	}
 	if mine >= perUser {
-		return redeemConflict("redeem_user_limit", "已达到该批次的兑换次数上限")
+		return redeemConflict("redeem_user_limit", "你已兑换过这个兑换码")
 	}
 	redemptionID, err := uuid.NewV7()
 	if err != nil {

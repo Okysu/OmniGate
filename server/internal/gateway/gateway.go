@@ -1324,7 +1324,11 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, st *reqState, r
 	}
 
 	usage, ok := proc.Usage()
-	if !protocol.IsImages(st.dialect) && !protocol.IsAudio(st.dialect) && (!ok || (usage.Output == 0 && proc.OutputBytes() > 0)) {
+	// A stream the client hung up on is billed only by the usage the upstream
+	// actually reported: an estimate from the request size ignores prompt
+	// caching and overcharges agent clients that cancel often.
+	clientClosed := streamErr != nil && streamErr.Class == protocol.ErrClientClosed
+	if !clientClosed && !protocol.IsImages(st.dialect) && !protocol.IsAudio(st.dialect) && (!ok || (usage.Output == 0 && proc.OutputBytes() > 0)) {
 		if !ok {
 			usage.Input = protocol.EstimateTokens(len(st.body))
 		}

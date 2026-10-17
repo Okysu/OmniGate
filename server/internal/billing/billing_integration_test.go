@@ -181,7 +181,7 @@ func TestRedeemRules(t *testing.T) {
 	f := newFixture(t)
 	u := f.user(identity.RoleUser)
 
-	// Multi-use codes with per-user limit 2.
+	// Multi-use codes: each user may redeem each code twice.
 	_, codes := f.batch(BatchInput{Amount: amt("1.5"), Count: 3, MaxRedemptionsPerCode: 5, PerUserLimit: 2})
 	res, err := f.svc.Redeem(f.ctx, u, codes[0], RequestMeta{})
 	if err != nil || res.Amount != amt("1.5") || res.Wallet.Balance != amt("1.5") {
@@ -191,10 +191,14 @@ func TestRedeemRules(t *testing.T) {
 	if _, err := f.svc.Redeem(f.ctx, u, " og"+lower(stripHyphens(codes[0][2:]))+" ", RequestMeta{}); err != nil {
 		t.Fatalf("second redeem (normalized input): %v", err)
 	}
-	if _, err := f.svc.Redeem(f.ctx, u, codes[1], RequestMeta{}); errCode(err) != "redeem_user_limit" {
-		t.Fatalf("third redeem: want redeem_user_limit, got %v", err)
+	if _, err := f.svc.Redeem(f.ctx, u, codes[0], RequestMeta{}); errCode(err) != "redeem_user_limit" {
+		t.Fatalf("third redeem of one code: want redeem_user_limit, got %v", err)
 	}
-	if w := f.wallet(u.ID); w.Balance != amt("3") {
+	// The limit is per code: another code of the same batch still works.
+	if _, err := f.svc.Redeem(f.ctx, u, codes[1], RequestMeta{}); err != nil {
+		t.Fatalf("other code of the batch: %v", err)
+	}
+	if w := f.wallet(u.ID); w.Balance != amt("4.5") {
 		t.Fatalf("balance %s", w.Balance)
 	}
 
@@ -723,7 +727,7 @@ func TestRedeemPlan(t *testing.T) {
 		t.Fatalf("unknown plan: %v", err)
 	}
 
-	b, codes := f.batch(BatchInput{Kind: BatchKindPlan, PlanID: &plan.ID, Periods: 2, Count: 3, PerUserLimit: 2})
+	b, codes := f.batch(BatchInput{Kind: BatchKindPlan, PlanID: &plan.ID, Periods: 2, Count: 3, MaxRedemptionsPerCode: 2, PerUserLimit: 1})
 	if b.Kind != BatchKindPlan || *b.Periods != 2 || *b.PlanID != plan.ID || *b.PlanName != "Pro" || b.Amount != 0 {
 		t.Fatalf("batch %+v", b)
 	}
@@ -744,8 +748,8 @@ func TestRedeemPlan(t *testing.T) {
 	if !res2.Renewed || res2.Subscription.ID != sv.ID || !res2.Subscription.EndsAt.Equal(sv.EndsAt.Add(60*24*time.Hour)) {
 		t.Fatalf("renew %+v", res2.Subscription)
 	}
-	if _, err := f.svc.Redeem(f.ctx, u, codes[2], RequestMeta{}); errCode(err) != "redeem_user_limit" {
-		t.Fatalf("per-user limit: %v", err)
+	if _, err := f.svc.Redeem(f.ctx, u, codes[0], RequestMeta{}); errCode(err) != "redeem_user_limit" {
+		t.Fatalf("per-user limit of one code: %v", err)
 	}
 	var wallets, linked int
 	_ = f.pool.QueryRow(f.ctx, `SELECT (SELECT count(*) FROM wallets),

@@ -277,7 +277,7 @@ const adjustOpen = ref(false)
                   {{ b.redeemed }} / {{ b.count * b.maxRedemptionsPerCode }}
                 </TableCell>
                 <TableCell class="text-muted-foreground hidden text-xs md:table-cell">
-                  每码 {{ b.maxRedemptionsPerCode }} 次 · 每人 {{ b.perUserLimit }} 次
+                  每码 {{ b.maxRedemptionsPerCode }} 次 · 每人每码 {{ b.perUserLimit }} 次
                 </TableCell>
                 <TableCell class="hidden text-xs lg:table-cell" :class="isExpired(b) ? 'text-destructive' : ''">
                   {{ validity(b) }}

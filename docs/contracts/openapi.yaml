@@ -10823,7 +10823,7 @@ components:
           type: integer
         perUserLimit:
           type: integer
-          description: 同一用户在本批次内最多兑换的次数
+          description: 同一用户对同一个码最多兑换的次数（同一批次的不同码分别计数）
         validFrom:
           type: [string, "null"]
           format: date-time

@@ -212,7 +212,7 @@ async function submit() {
           <FormField label="每个码可兑换次数" for="b-max" :error="errors.maxRedemptionsPerCode" hint="默认 1（一次性码）">
             <Input id="b-max" v-model="form.maxRedemptionsPerCode" type="number" min="1" step="1" />
           </FormField>
-          <FormField label="每用户可兑换次数" for="b-user" :error="errors.perUserLimit" hint="同一用户在本批次内的上限">
+          <FormField label="每人每码可兑换次数" for="b-user" :error="errors.perUserLimit" hint="同一用户对同一个码的上限；同一批次的不同码可以分别兑换">
             <Input id="b-user" v-model="form.perUserLimit" type="number" min="1" step="1" />
           </FormField>
           <FormField label="生效时间" for="b-from" :error="errors.validFrom" hint="留空表示立即生效">

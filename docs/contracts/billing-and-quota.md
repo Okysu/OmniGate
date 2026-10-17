@@ -109,7 +109,7 @@ interface RedeemBatch {
   payload: { amount: string } | { planId: string; periods: number }
   count: number
   maxRedemptionsPerCode: number              // 通常为 1
-  perUserLimit: number                       // 同一用户在本批次最多兑换次数
+  perUserLimit: number                       // 同一用户对同一个码最多兑换次数（不同码分别计数）
   validFrom?: string
   expiresAt?: string
   note?: string
