@@ -294,10 +294,14 @@ export interface ChannelConfig {
   supportsCompletions?: boolean
   timeoutSeconds?: number
   maxTokensField?: MaxTokensField
+  /** Exempt from the circuit breaker: requests always reach the channel. */
+  alwaysOn?: boolean
 }
 
 export interface ChannelHealth {
   state: HealthState
+  /** The channel is always on (never turned away by the breaker). */
+  alwaysOn?: boolean
   consecutiveFailures: number
   lastError: string | null
   lastCheckedAt: string | null

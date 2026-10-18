@@ -8594,6 +8594,9 @@ components:
           type: string
           enum: [max_tokens, max_completion_tokens]
           description: 仅 openai 渠道：由 Anthropic / Responses 请求转换为 Chat Completions 时输出上限字段的名称，默认 `max_tokens`（o 系列等新模型需要 `max_completion_tokens`）
+        alwaysOn:
+          type: boolean
+          description: 永远在线：不受熔断限制，请求总会发往此渠道（失败仍记录在健康状态中），见 ADR-0011
 
     SecretInfo:
       type: object
@@ -8643,6 +8646,9 @@ components:
         rejectedRequests:
           type: integer
           description: 进程启动以来被该渠道（含其模型）的熔断拦截的请求数
+        alwaysOn:
+          type: boolean
+          description: 渠道开启了「永远在线」（config.alwaysOn）：state 照常反映失败，但请求从不被拦截
         models:
           type: array
           description: 在该渠道上有独立问题的模型

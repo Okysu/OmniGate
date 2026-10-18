@@ -458,6 +458,9 @@ const HEALTH_DOT: Record<HealthState, string> = {
                         </TooltipTrigger>
                         <TooltipContent class="flex-col items-start">
                           <p>连续失败 {{ c.health.consecutiveFailures }} 次</p>
+                          <p v-if="c.health.alwaysOn">
+                            永远在线：不熔断，只记录健康状态
+                          </p>
                           <p v-if="c.health.lastCheckedAt">
                             最近检查：{{ formatRelative(c.health.lastCheckedAt) }}
                           </p>

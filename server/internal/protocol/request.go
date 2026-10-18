@@ -438,6 +438,16 @@ func ChatToAnthropicRequest(body []byte, upstreamModel string, compat Compat) ([
 			is.unsupportedField("tool_choice")
 		}
 	}
+	if c := out.ToolChoice; c != nil && (c.Type == "tool" || c.Type == "any") {
+		names := make([]string, 0, len(out.Tools))
+		for _, t := range out.Tools {
+			names = append(names, t.Name)
+		}
+		if danglingToolChoice(c.Name, true, names) {
+			is.drop("tool_choice")
+			out.ToolChoice = nil
+		}
+	}
 	if req.ParallelToolCalls != nil && !*req.ParallelToolCalls && len(out.Tools) > 0 {
 		if out.ToolChoice == nil {
 			out.ToolChoice = &AnthropicChoice{Type: "auto"}
@@ -799,6 +809,7 @@ func anthropicToChatPivot(body []byte, upstreamModel, maxTokensField string, com
 		default:
 			is.unsupportedField("tool_choice")
 		}
+		dropDanglingChatToolChoice(&out, &is)
 		if d := req.ToolChoice.DisableParallelToolUse; d != nil && *d && len(out.Tools) > 0 {
 			f := false
 			out.ParallelToolCalls = &f

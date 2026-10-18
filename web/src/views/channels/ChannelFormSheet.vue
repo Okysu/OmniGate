@@ -549,6 +549,15 @@ function setScope(v: unknown) {
             </div>
             <Switch id="ch-completions" v-model="form.supportsCompletions" />
           </div>
+          <div class="flex items-start justify-between gap-4 rounded-lg border p-3">
+            <div class="space-y-1">
+              <Label for="ch-always-on">永远在线（不熔断）</Label>
+              <p class="text-muted-foreground text-xs">
+                开启后，无论失败多少次，请求都会照常发往此渠道，熔断器只记录健康状态、不拦截。适合只有这一个渠道、宁可让请求自己失败也不想被拦截的场景。
+              </p>
+            </div>
+            <Switch id="ch-always-on" v-model="form.alwaysOn" />
+          </div>
           <div class="grid gap-4 sm:grid-cols-2">
             <FormField label="超时（秒）" for="ch-timeout" :error="errors['config.timeoutSeconds']" hint="等待上游响应头的超时；0 表示默认 60 秒，最大 600。">
               <Input id="ch-timeout" v-model.number="form.timeoutSeconds" type="number" min="0" max="600" step="1" />

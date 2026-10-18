@@ -35,6 +35,7 @@ type Breaker struct {
 	now      func() time.Time
 	channels map[uuid.UUID]*circuit
 	models   map[Target]*circuit
+	alwaysOn map[uuid.UUID]bool // channels exempt from blocking
 
 	// OnTransition, when set, is called (outside the lock) when a channel's
 	// circuit opens (unhealthy = true, with the last error) and when an open
@@ -251,11 +252,23 @@ func (b *Breaker) blocked(c *circuit, now time.Time) (blocked, probe bool) {
 	return true, c.inflight < b.cfg.HalfOpenProbes
 }
 
+// SetAlwaysOn replaces the set of channels exempt from the breaker
+// (Config.AlwaysOn): their outcomes are still recorded for their health,
+// but Allow, Blocked and ForceAllow never refuse them.
+func (b *Breaker) SetAlwaysOn(ids map[uuid.UUID]bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.alwaysOn = ids
+}
+
 // Allow reports whether a request may be sent to t. Once an open circuit's
 // cooldown has elapsed up to HalfOpenProbes requests pass at a time.
 func (b *Breaker) Allow(t Target) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.alwaysOn[t.Channel] {
+		return true
+	}
 	now := b.now()
 	cs := b.scopes(t)
 	var probes []*circuit
@@ -280,6 +293,9 @@ func (b *Breaker) Allow(t Target) bool {
 func (b *Breaker) Blocked(t Target) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.alwaysOn[t.Channel] {
+		return false
+	}
 	now := b.now()
 	for _, c := range b.scopes(t) {
 		if bl, probe := b.blocked(c, now); bl && !probe {
@@ -296,6 +312,9 @@ func (b *Breaker) Blocked(t Target) bool {
 func (b *Breaker) ForceAllow(t Target) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.alwaysOn[t.Channel] {
+		return true
+	}
 	now := b.now()
 	var held []*circuit
 	for _, c := range b.scopes(t) {
@@ -442,6 +461,9 @@ func (b *Breaker) Release(t Target) {
 func (b *Breaker) RetryAt(t Target) time.Time {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.alwaysOn[t.Channel] {
+		return time.Time{}
+	}
 	now := b.now()
 	var at time.Time
 	for _, c := range b.scopes(t) {
@@ -466,7 +488,7 @@ func (b *Breaker) State(id uuid.UUID) string {
 	defer b.mu.Unlock()
 	c, ok := b.channels[id]
 	switch {
-	case !ok || !c.open:
+	case !ok || !c.open || b.alwaysOn[id]:
 		return "closed"
 	case b.now().Before(c.openUntil):
 		return "open"
@@ -480,7 +502,7 @@ func (b *Breaker) Health(id uuid.UUID) Health {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	now := b.now()
-	h := Health{State: "healthy", Models: []ModelHealth{}}
+	h := Health{State: "healthy", Models: []ModelHealth{}, AlwaysOn: b.alwaysOn[id]}
 	c, ok := b.channels[id]
 	if ok {
 		fails, _, _ := b.stats(c, now)

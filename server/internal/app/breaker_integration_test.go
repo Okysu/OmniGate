@@ -2,7 +2,11 @@ package app_test
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -78,5 +82,60 @@ func TestBreakerOpenAnswers503(t *testing.T) {
 	code, body, raw := readBody(resp)
 	if code != 503 || ra == "" || ra == "0" || errCode(body) != "upstream_unavailable" || up.hits.Load() != hits {
 		t.Fatalf("open circuit = %d retry-after=%q %s (hits %d→%d)", code, ra, raw, hits, up.hits.Load())
+	}
+}
+
+// An always-on channel keeps receiving requests while its circuit would be
+// open.
+func TestBreakerAlwaysOnChannel(t *testing.T) {
+	bc := channel.DefaultBreakerConfig()
+	bc.NoMerge, bc.MinFailSeconds, bc.MaxForced = true, 1, 0
+	bc.BaseCooldown, bc.MaxCooldown = 30*time.Second, 30*time.Second
+	e := setupGatewayWith(t, app.Options{Breaker: &bc})
+	base := e.h.srv.URL
+	up := newModelUpstream(t, 500)
+	e.platformChannel(map[string]any{"name": "pool", "type": "openai", "baseUrl": up.srv.URL + "/v1", "models": models("m1"),
+		"config": map[string]any{"alwaysOn": true}})
+	_, key := e.key(e.admin, map[string]any{"name": "k"})
+	for i := 0; i < 3; i++ {
+		if code, _, _ := readBody(gwPost(t, context.Background(), base, "/v1/chat/completions", key, chat("m1"))); code != 502 {
+			t.Fatalf("request %d = %d, want the upstream's 502", i, code)
+		}
+	}
+	// Every request reached the upstream (each with its same-channel retries).
+	if up.hits.Load() < 3*3 {
+		t.Fatalf("hits = %d", up.hits.Load())
+	}
+}
+
+// Reasoning the upstream cannot verify is stripped and the request retried
+// once on the same channel; the channel's health is untouched.
+func TestReasoningVerificationRetry(t *testing.T) {
+	e := setupGateway(t)
+	base := e.h.srv.URL
+	var hits atomic.Int64
+	var lastBody atomic.Value
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		b, _ := io.ReadAll(r.Body)
+		lastBody.Store(string(b))
+		if strings.Contains(string(b), `"type":"reasoning"`) {
+			http.Error(w, `{"error":{"message":"The encrypted content for item rs_1 could not be verified. Reason: reasoning hydration failed: Encrypted content item_id did not match the target item id."}}`, http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","object":"response","status":"completed","model":"up-m1","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":3,"output_tokens":1}}`))
+	}))
+	t.Cleanup(up.Close)
+	chID := e.platformChannel(map[string]any{"name": "pool", "type": "openai", "baseUrl": up.URL + "/v1", "models": models("m1"),
+		"config": map[string]any{"supportsResponses": true}})
+	_, key := e.key(e.admin, map[string]any{"name": "k"})
+	body := `{"model":"m1","input":[{"role":"user","content":"hi"},{"type":"reasoning","summary":[],"encrypted_content":"gAAAA-other-account"},{"role":"assistant","content":"x"},{"role":"user","content":"again"}]}`
+	code, _, raw := readBody(gwPost(t, context.Background(), base, "/v1/responses", key, body))
+	if code != 200 || hits.Load() != 2 || strings.Contains(lastBody.Load().(string), "reasoning") {
+		t.Fatalf("retry = %d %s (hits %d)", code, raw, hits.Load())
+	}
+	if _, ch := e.admin.do(http.MethodGet, "/api/channels/"+chID, nil); ch["health"].(map[string]any)["state"] != "healthy" {
+		t.Fatalf("health = %v", ch["health"])
 	}
 }

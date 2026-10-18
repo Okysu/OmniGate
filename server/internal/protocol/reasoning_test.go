@@ -41,7 +41,9 @@ func TestReasoningAnthropicClientResponsesUpstream(t *testing.T) {
 	if strings.Join(rr.Include, ",") != "reasoning.encrypted_content" {
 		t.Errorf("include = %v", rr.Include)
 	}
-	if len(rr.Input) != 4 || rr.Input[1]["type"] != "reasoning" || rr.Input[1]["id"] != "rs_1" || rr.Input[1]["encrypted_content"] != "gAAAA-blob" ||
+	// The item id is never sent: the encrypted content carries its own and a
+	// mismatch is rejected ("item_id did not match the target item id").
+	if len(rr.Input) != 4 || rr.Input[1]["type"] != "reasoning" || rr.Input[1]["id"] != nil || rr.Input[1]["encrypted_content"] != "gAAAA-blob" ||
 		rr.Input[2]["type"] != "function_call" {
 		t.Fatalf("input = %s", req)
 	}
@@ -197,6 +199,46 @@ func TestReasoningCrossProvider(t *testing.T) {
 	}
 }
 
+// Reasoning the upstream cannot verify (another pool account, …) is stripped
+// for a retry.
+func TestStripReasoning(t *testing.T) {
+	if !IsReasoningVerificationError([]byte(`{"error":{"message":"The encrypted content for item rs_1 could not be verified. Reason: reasoning hydration failed"}}`)) ||
+		!IsReasoningVerificationError([]byte(`{"error":{"message":"messages.1.content.0: Invalid signature in thinking block"}}`)) ||
+		IsReasoningVerificationError([]byte(`{"error":{"message":"bad request"}}`)) {
+		t.Fatal("verification error detection")
+	}
+	r := StripReasoning(OpenAIResponses, []byte(`{"model":"g","input":[{"type":"reasoning","encrypted_content":"x","summary":[]},{"role":"user","content":"hi"}]}`))
+	if strings.Contains(string(r), "reasoning") || !strings.Contains(string(r), `"content":"hi"`) {
+		t.Fatalf("responses = %s", r)
+	}
+	a := StripReasoning(Anthropic, []byte(`{"model":"c","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"t","signature":"s"},{"type":"text","text":"x"}]}]}`))
+	if strings.Contains(string(a), "thinking") || !strings.Contains(string(a), `"text":"x"`) {
+		t.Fatalf("anthropic = %s", a)
+	}
+}
+
+// A tool_choice naming a dropped tool (Claude Code's web_search server tool
+// in lenient mode) is dropped with it.
+func TestDanglingToolChoice(t *testing.T) {
+	body := `{"model":"c","max_tokens":10,"messages":[{"role":"user","content":"search"}],
+	  "tools":[{"type":"web_search_20250305","name":"web_search","max_uses":5}],"tool_choice":{"type":"tool","name":"web_search"}}`
+	for _, up := range []string{OpenAIChat, OpenAIResponses} {
+		out, warns, err := ConvertRequest(Anthropic, up, []byte(body), "g", "max_tokens", Lenient)
+		if err != nil || strings.Contains(string(out), "tool_choice") || !strings.Contains(strings.Join(warns, ","), "tool_choice") {
+			t.Fatalf("%s: %s %v %v", up, out, warns, err)
+		}
+	}
+	chat := `{"model":"c","messages":[{"role":"user","content":"x"}],"tools":[{"type":"web_search"}],"tool_choice":"required"}`
+	if out, _, err := ConvertRequest(OpenAIChat, Anthropic, []byte(chat), "c", "", Lenient); err != nil || strings.Contains(string(out), "tool_choice") {
+		t.Fatalf("chat → anthropic: %s %v", out, err)
+	}
+	// A valid tool_choice is kept.
+	ok := `{"model":"c","max_tokens":10,"messages":[{"role":"user","content":"x"}],"tools":[{"name":"f","input_schema":{"type":"object"}}],"tool_choice":{"type":"tool","name":"f"}}`
+	if out, _, _ := ConvertRequest(Anthropic, OpenAIResponses, []byte(ok), "g", "", Strict); !strings.Contains(string(out), `"tool_choice":{"name":"f","type":"function"}`) {
+		t.Fatalf("kept = %s", out)
+	}
+}
+
 // A converted conversation that continues on a native channel gets the
 // provider's own blobs back and loses the rest.
 func TestUnwrapReasoningForPassthrough(t *testing.T) {
@@ -221,7 +263,7 @@ func TestUnwrapReasoningForPassthrough(t *testing.T) {
 	rbody := `{"model":"r","input":[{"type":"reasoning","id":"rs_z","summary":[],"encrypted_content":"` + oai + `"},
 	  {"type":"reasoning","id":"rs_q","summary":[],"encrypted_content":"` + anth + `"},{"role":"user","content":"x"}]}`
 	out, _ = RewriteForPassthrough(OpenAIResponses, []byte(rbody), "gpt", false)
-	if s := string(out); strings.Count(s, `"type":"reasoning"`) != 1 || !strings.Contains(s, `"encrypted_content":"gAAAA"`) || !strings.Contains(s, `"id":"rs_1"`) {
+	if s := string(out); strings.Count(s, `"type":"reasoning"`) != 1 || !strings.Contains(s, `"encrypted_content":"gAAAA"`) || strings.Contains(s, `"id"`) {
 		t.Fatalf("responses = %s", s)
 	}
 }

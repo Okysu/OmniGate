@@ -80,6 +80,70 @@ func reasoningBlocksText(bs []ReasoningBlock) string {
 	return strings.Join(parts, "\n\n")
 }
 
+// IsReasoningVerificationError reports whether an upstream error rejects
+// reasoning handed back in the history (Responses encrypted_content or an
+// Anthropic thinking signature that cannot be verified, e.g. made by another
+// account of a pool). The request itself is fine without that reasoning.
+func IsReasoningVerificationError(raw []byte) bool {
+	m := strings.ToLower(string(raw))
+	return strings.Contains(m, "encrypted content") && (strings.Contains(m, "could not be verified") || strings.Contains(m, "could not be decrypted")) ||
+		strings.Contains(m, "signature") && strings.Contains(m, "thinking") && strings.Contains(m, "invalid")
+}
+
+// StripReasoning removes the reasoning handed back in a converted upstream
+// request (Responses reasoning items, Anthropic thinking blocks), for a retry
+// after IsReasoningVerificationError: the model then reasons afresh.
+func StripReasoning(upstreamDialect string, body []byte) []byte {
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(body, &raw) != nil {
+		return body
+	}
+	switch upstreamDialect {
+	case OpenAIResponses:
+		var items []map[string]json.RawMessage
+		if json.Unmarshal(raw["input"], &items) != nil {
+			return body
+		}
+		kept := items[:0]
+		for _, it := range items {
+			var typ string
+			_ = json.Unmarshal(it["type"], &typ)
+			if typ != "reasoning" {
+				kept = append(kept, it)
+			}
+		}
+		raw["input"], _ = json.Marshal(kept)
+	case Anthropic:
+		var msgs []map[string]json.RawMessage
+		if json.Unmarshal(raw["messages"], &msgs) != nil {
+			return body
+		}
+		for i, m := range msgs {
+			var blocks []map[string]json.RawMessage
+			if json.Unmarshal(m["content"], &blocks) != nil {
+				continue
+			}
+			kept := blocks[:0]
+			for _, bl := range blocks {
+				var typ string
+				_ = json.Unmarshal(bl["type"], &typ)
+				if typ != "thinking" && typ != "redacted_thinking" {
+					kept = append(kept, bl)
+				}
+			}
+			msgs[i]["content"], _ = json.Marshal(kept)
+		}
+		raw["messages"], _ = json.Marshal(msgs)
+	default:
+		return body
+	}
+	out, err := json.Marshal(raw)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
 // hasEnvelope reports whether a body may contain an OmniGate envelope.
 func hasEnvelope(body []byte) bool { return strings.Contains(string(body), envelopePrefix) }
 
@@ -154,9 +218,7 @@ func UnwrapReasoningForPassthrough(dialect string, body []byte) []byte {
 			changed = true
 			if b, ok := openEnvelope(enc, ReasoningOpenAI); ok && b.Provider == ReasoningOpenAI && b.Blob != "" {
 				it["encrypted_content"], _ = json.Marshal(b.Blob)
-				if b.ID != "" {
-					it["id"], _ = json.Marshal(b.ID)
-				}
+				delete(it, "id") // the client's id is ours, not the upstream's
 				kept = append(kept, it)
 			}
 		}

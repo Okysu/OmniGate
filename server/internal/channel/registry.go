@@ -448,6 +448,13 @@ func (g *Registry) Reload(ctx context.Context) error {
 	g.mu.Lock()
 	g.all, g.byID = all, byID
 	g.mu.Unlock()
+	alwaysOn := map[uuid.UUID]bool{}
+	for _, rt := range all {
+		if rt.Config.AlwaysOn {
+			alwaysOn[rt.ID] = true
+		}
+	}
+	g.Breaker.SetAlwaysOn(alwaysOn)
 	if g.OnReload != nil {
 		g.OnReload()
 	}

@@ -24,6 +24,8 @@ export interface ChannelFormState {
   supportsCompletions: boolean
   /** 0 = backend default (60 s). */
   timeoutSeconds: number
+  /** Exempt from the circuit breaker. */
+  alwaysOn: boolean
   maxTokensField: MaxTokensField
   scope: ChannelScope
   /** phase8 §1.2: user ids and group ids. */
@@ -47,6 +49,7 @@ export function emptyChannelForm(): ChannelFormState {
     supportsResponses: false,
     supportsCompletions: false,
     timeoutSeconds: 0,
+    alwaysOn: false,
     maxTokensField: 'max_tokens',
     scope: 'private',
     sharedWith: { users: [], groups: [] },
@@ -101,6 +104,7 @@ export function formFromChannel(c: Channel): ChannelFormState {
     supportsResponses: c.config.supportsResponses ?? false,
     supportsCompletions: c.config.supportsCompletions ?? false,
     timeoutSeconds: c.config.timeoutSeconds ?? 0,
+    alwaysOn: c.config.alwaysOn ?? false,
     maxTokensField: c.config.maxTokensField ?? 'max_tokens',
     scope: c.scope,
     sharedWith: normalizeSharedWith(c.sharedWith),
@@ -152,6 +156,8 @@ export function buildChannelPayload(form: ChannelFormState, original?: Channel):
   }
   if (form.timeoutSeconds > 0)
     config.timeoutSeconds = Math.floor(form.timeoutSeconds)
+  if (form.alwaysOn)
+    config.alwaysOn = true
 
   const body: ChannelInput = {
     name: form.name.trim(),

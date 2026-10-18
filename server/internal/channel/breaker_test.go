@@ -213,3 +213,24 @@ func TestStatusFailKind(t *testing.T) {
 		t.Error("404 says nothing about health")
 	}
 }
+
+// An always-on channel is never refused, whatever its circuits; its failures
+// are still recorded for its health.
+func TestBreakerAlwaysOn(t *testing.T) {
+	b, now := testBreaker()
+	id := uuid.New()
+	tg := Target{Channel: id, Model: "m"}
+	b.SetAlwaysOn(map[uuid.UUID]bool{id: true})
+	failSeconds(b, now, tg, FailTransient, 5)
+	b.Failure(tg, FailRateLimit, "429", time.Minute)
+	if !b.Allow(tg) || b.Blocked(tg) || !b.RetryAt(tg).IsZero() || b.State(id) != "closed" {
+		t.Fatal("always-on channels are never blocked")
+	}
+	if h := b.Health(id); !h.AlwaysOn || h.State != "open" || h.LastError == nil {
+		t.Fatalf("health still reports the failures: %+v", h)
+	}
+	b.SetAlwaysOn(nil)
+	if b.Allow(tg) {
+		t.Fatal("without the flag the open circuit applies again")
+	}
+}

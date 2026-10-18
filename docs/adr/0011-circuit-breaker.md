@@ -68,7 +68,19 @@
 连最后手段都无法尝试（各熔断的探测名额已满）时，返回 **`503 upstream_unavailable`** 和 `Retry-After`（最早恢复的熔断剩余秒数，至少 1 秒），
 OpenAI / Anthropic SDK、Codex、Claude Code 会据此自动退避重试。
 
-### 8. 可观测性
+### 8. 永远在线
+
+渠道配置 `config.alwaysOn = true` 时不受熔断限制：`Allow` / `ForceAllow` 永远放行，`Blocked` 永远为否，限流暂停也不生效。
+失败仍然记录，健康状态照常显示（带 `alwaysOn` 标记）。适合只有这一个渠道、宁可让请求自己失败也不想被拦截的场景。
+
+### 9. 历史推理无法验证
+
+上游拒绝历史中的推理（Responses `encrypted_content` "could not be verified"、Anthropic thinking 签名无效——例如来自号池里的另一个账号）时，
+网关去掉请求体里的推理（`protocol.StripReasoning`）后在同一渠道立即重试一次，按 400 处理、**不计入健康状态**。
+转换出的 Responses 推理输入项不再带 `id`：加密内容自带它对应的 item id，id 不一致会被拒绝（`item_id did not match the target item id`）；
+Codex 与 AxonHub 也都不发送这个 id。
+
+### 10. 可观测性
 
 渠道的 `health` 增加 `reason`（`failures` / `auth`）、`retryAt`、`rejectedRequests` 与 `models`（每个模型的 `open` / `paused` / `degraded`、恢复时间、最近错误）。
 管理后台的渠道列表与详情页显示这些信息。渠道级打开 / 恢复照常发送 `channel.unhealthy` / `channel.recovered` 通知；模型级状态不发通知。

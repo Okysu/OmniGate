@@ -380,6 +380,9 @@ const HEALTH_CLASSES: Record<string, string> = {
                 <Badge variant="outline" :class="HEALTH_CLASSES[channel.health.state]">
                   {{ HEALTH_LABELS[channel.health.state] ?? channel.health.state }}
                 </Badge>
+                <Badge v-if="channel.health.alwaysOn" variant="outline" class="ml-1.5" data-testid="health-always-on">
+                  永远在线
+                </Badge>
                 <p class="text-muted-foreground">
                   连续失败 {{ channel.health.consecutiveFailures }} 次<template v-if="channel.health.lastCheckedAt">
                     · 最近检查 {{ formatRelative(channel.health.lastCheckedAt) }}
@@ -569,6 +572,10 @@ const HEALTH_CLASSES: Record<string, string> = {
                   超时
                 </dt>
                 <dd>{{ full.config.timeoutSeconds ? `${full.config.timeoutSeconds} 秒` : '默认（60 秒）' }}</dd>
+                <dt class="text-muted-foreground">
+                  熔断
+                </dt>
+                <dd>{{ full.config.alwaysOn ? '永远在线：不熔断，只记录健康状态' : '按失败自动熔断与恢复' }}</dd>
                 <dt class="text-muted-foreground">
                   自定义请求头
                 </dt>

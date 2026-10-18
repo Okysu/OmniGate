@@ -526,15 +526,18 @@ type reqState struct {
 	pending     *pendingFailure
 	// retryAfter is the upstream's Retry-After of the last failed attempt.
 	retryAfter time.Duration
-	dialect    string
-	start      time.Time
-	auth       *keys.Auth
-	info       protocol.RequestInfo
-	body       []byte
-	compat     protocol.Compat
-	entry      *requestlog.Entry
-	written    bool
-	warnings   []string
+	// stripReasoning removes the reasoning handed back in the history from
+	// the upstream body (set after the upstream could not verify it).
+	stripReasoning bool
+	dialect        string
+	start          time.Time
+	auth           *keys.Auth
+	info           protocol.RequestInfo
+	body           []byte
+	compat         protocol.Compat
+	entry          *requestlog.Entry
+	written        bool
+	warnings       []string
 	// subscription covering this request (wallet is skipped when set)
 	subscription *uuid.UUID
 	// reserved is set once balance was reserved for the request.
@@ -842,6 +845,12 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 					st.pending = nil // this attempt's failure was recorded directly
 				}
 				lastErr = gerr
+				if class == retryReasoning && !st.stripReasoning && !st.written && r.Context().Err() == nil &&
+					attempts < routing.HardAttemptCap && (g.reg.Breaker.Allow(target) || g.reg.Breaker.ForceAllow(target)) {
+					st.stripReasoning = true
+					retries-- // not a transient-failure retry: keeps its backoff schedule
+					continue
+				}
 				// Strict session affinity: the bound channel's error is returned
 				// without trying another channel.
 				if st.affinity.StopAfter(c.rt.ID) || !policy.Allows(class) || st.written || r.Context().Err() != nil {
@@ -891,6 +900,10 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 	}
 	return lastErr
 }
+
+// retryReasoning is the retry class of an upstream rejecting the reasoning
+// in the history: the same channel is retried once without it.
+const retryReasoning = "reasoning_rejected"
 
 // Same-channel retry of a transient failure (see route): backoff per retry
 // and the total time a request may wait.
@@ -1172,6 +1185,9 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 			g.reg.Breaker.Release(target)
 			return convertError(err), ""
 		}
+		if st.stripReasoning {
+			body = protocol.StripReasoning(upDialect, body)
+		}
 		st.warnings = warnings
 		st.entry.CompatWarnings = nil
 		if len(warnings) > 0 {
@@ -1321,6 +1337,14 @@ func openAIText(dialect string) bool {
 // status-based class.
 func classifyUpstream(status int, raw []byte) (*protocol.GatewayError, string, bool) {
 	msg := "upstream: " + protocol.UpstreamErrorMessage(raw)
+	if protocol.IsReasoningVerificationError(raw) {
+		// Reasoning in the history the upstream cannot verify (made by another
+		// pool account, …): the request is retried without it; never a
+		// channel failure, whatever status the upstream used.
+		e := protocol.NewError(protocol.ErrUpstreamBadRequest, msg)
+		e.Status = http.StatusBadRequest
+		return e, retryReasoning, false
+	}
 	if status != http.StatusTooManyRequests && status != http.StatusUnauthorized && status != http.StatusForbidden &&
 		protocol.IsContextLengthError(raw) {
 		return protocol.NewError(protocol.ErrContextLengthExceeded, msg), "", false

@@ -246,6 +246,7 @@ func responsesToChatPivot(body []byte, upstreamModel, maxTokensField string, com
 		default:
 			is.unsupportedField("tool_choice")
 		}
+		dropDanglingChatToolChoice(&out, &is)
 	}
 	if req.Text != nil && len(req.Text.Format) > 0 && !isNull(req.Text.Format) {
 		var f map[string]json.RawMessage
@@ -426,11 +427,10 @@ func ChatToResponsesRequest(body []byte, upstreamModel string, compat Compat) ([
 				if b.Text != "" {
 					summary = append(summary, map[string]string{"type": "summary_text", "text": b.Text})
 				}
-				item := map[string]any{"type": "reasoning", "summary": summary, "encrypted_content": b.Blob}
-				if b.ID != "" {
-					item["id"] = b.ID
-				}
-				items = append(items, item)
+				// No id: the encrypted content carries the item id it was made
+				// for, and a different id is rejected ("item_id did not match").
+				// Codex and AxonHub send reasoning items without an id too.
+				items = append(items, map[string]any{"type": "reasoning", "summary": summary, "encrypted_content": b.Blob})
 				kept++
 			}
 			if kept < len(m.OGReasoning) || len(m.OGReasoning) == 0 && m.reasoningText() != "" {
@@ -511,6 +511,16 @@ func ChatToResponsesRequest(body []byte, upstreamModel string, compat Compat) ([
 			out["tool_choice"] = map[string]string{"type": "function", "name": obj.Function.Name}
 		default:
 			is.unsupportedField("tool_choice")
+		}
+		if name, required := toolChoiceTarget(req.ToolChoice); out["tool_choice"] != nil {
+			names := make([]string, 0, len(tools))
+			for _, t := range tools {
+				names = append(names, t["name"].(string))
+			}
+			if danglingToolChoice(name, required, names) {
+				is.drop("tool_choice")
+				delete(out, "tool_choice")
+			}
 		}
 	}
 	if rf, ok := raw["response_format"]; ok && !isNull(rf) {

@@ -51,6 +51,10 @@ type Config struct {
 	// MaxTokensField selects how converted requests to an openai channel carry
 	// the output limit: "max_tokens" (default) or "max_completion_tokens".
 	MaxTokensField string `json:"maxTokensField,omitempty"`
+	// AlwaysOn exempts the channel from the circuit breaker: requests are
+	// always sent to it, whatever its failures (ADR-0011). Failures are still
+	// shown in its health.
+	AlwaysOn bool `json:"alwaysOn,omitempty"`
 }
 
 type SecretInfo struct {
@@ -68,6 +72,9 @@ type Health struct {
 	ConsecutiveFailures int        `json:"consecutiveFailures"`
 	LastError           *string    `json:"lastError"`
 	LastCheckedAt       *time.Time `json:"lastCheckedAt"`
+	// AlwaysOn: the channel is exempt from the breaker (Config.AlwaysOn);
+	// State still reports its failures but requests are never turned away.
+	AlwaysOn bool `json:"alwaysOn,omitempty"`
 	// Reason of an open circuit: failures | auth; RetryAt is when it lets
 	// requests through again (both null unless open).
 	Reason  string     `json:"reason,omitempty"`
