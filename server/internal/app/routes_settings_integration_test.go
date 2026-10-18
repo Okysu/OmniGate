@@ -31,7 +31,7 @@ type modelUpstream struct {
 	// failFirst > 0 answers that many requests with 502 first.
 	failFirst atomic.Int64
 	mu        sync.Mutex
-	models []string
+	models    []string
 }
 
 func newModelUpstream(t *testing.T, status int) *modelUpstream {
