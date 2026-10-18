@@ -308,7 +308,8 @@ func (g *Gateway) countTokens(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, rt := range order(cands, protocol.Anthropic, req.Model) {
-		if rt.Type != channel.TypeAnthropic || !g.reg.Breaker.Allow(rt.ID) {
+		target := channel.Target{Channel: rt.ID, Model: req.Model}
+		if rt.Type != channel.TypeAnthropic || !g.reg.Breaker.Allow(target) {
 			continue
 		}
 		up, _ := rt.UpstreamModel(req.Model)
@@ -323,7 +324,7 @@ func (g *Gateway) countTokens(w http.ResponseWriter, r *http.Request) {
 			if resp, err := g.reg.Do(rt, ureq); err == nil {
 				raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 				resp.Body.Close()
-				g.reg.Breaker.Release(rt.ID)
+				g.reg.Breaker.Release(target)
 				var probe struct {
 					InputTokens *int64 `json:"input_tokens"`
 				}
@@ -334,10 +335,10 @@ func (g *Gateway) countTokens(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			} else {
-				g.reg.Breaker.Release(rt.ID)
+				g.reg.Breaker.Release(target)
 			}
 		} else {
-			g.reg.Breaker.Release(rt.ID)
+			g.reg.Breaker.Release(target)
 		}
 		cancel()
 		break
@@ -518,15 +519,22 @@ func (g *Gateway) rank(ctx context.Context, cands []routeCand, model string, rul
 
 // reqState carries everything about one gateway request.
 type reqState struct {
-	dialect  string
-	start    time.Time
-	auth     *keys.Auth
-	info     protocol.RequestInfo
-	body     []byte
-	compat   protocol.Compat
-	entry    *requestlog.Entry
-	written  bool
-	warnings []string
+	// deferHealth is set while an attempt may still be retried on the same
+	// channel: its transient failure is held in pending instead of counting
+	// against the channel, so one request's retries count once.
+	deferHealth bool
+	pending     *pendingFailure
+	// retryAfter is the upstream's Retry-After of the last failed attempt.
+	retryAfter time.Duration
+	dialect    string
+	start      time.Time
+	auth       *keys.Auth
+	info       protocol.RequestInfo
+	body       []byte
+	compat     protocol.Compat
+	entry      *requestlog.Entry
+	written    bool
+	warnings   []string
 	// subscription covering this request (wallet is skipped when set)
 	subscription *uuid.UUID
 	// reserved is set once balance was reserved for the request.
@@ -704,6 +712,7 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 		Path: r.URL.Path, Dialect: st.dialect, UserAgent: r.UserAgent(), Client: st.client.ID, Header: r.Header, Body: st.body})
 
 	var lastErr *protocol.GatewayError
+	var allBlocked []channel.Target
 	attempts := 0
 	for i, model := range models {
 		if attempts >= routing.HardAttemptCap {
@@ -747,8 +756,24 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 		if i == 0 {
 			ordered = g.pin(st, ordered) // fallback models are never pinned
 		}
+		// Candidates whose circuit is open (or paused) are skipped. When that
+		// leaves the model without a single attempt, the blocked candidates
+		// are tried once more as a last resort, soonest to recover first
+		// (Breaker.ForceAllow): an upstream that is already back then serves
+		// the request instead of the client getting an error.
+		var blocked []routeCand
+		queue, modelAttempts, lastResort := ordered, 0, false
 	attemptLoop:
-		for _, c := range ordered {
+		for qi := 0; ; qi++ {
+			if qi == len(queue) {
+				if lastResort || modelAttempts > 0 || len(blocked) == 0 {
+					break
+				}
+				lastResort = true
+				queue = append(queue, g.byRecovery(blocked, model)...)
+			}
+			c := queue[qi]
+			forced := qi >= len(ordered)
 			if attempts >= routing.HardAttemptCap {
 				break
 			}
@@ -779,31 +804,203 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 				}
 				policy = retry
 			}
-			if !g.reg.Breaker.Allow(c.rt.ID) {
+			target := channel.Target{Channel: c.rt.ID, Model: model}
+			if forced {
+				if !g.reg.Breaker.ForceAllow(target) {
+					continue
+				}
+			} else if !g.reg.Breaker.Allow(target) {
+				blocked = append(blocked, c)
+				allBlocked = append(allBlocked, target)
 				continue
 			}
-			if c.tier == channel.TierPlatform {
-				platformAttempts++
-			}
-			attempts++
-			st.affinity.Attempted()
-			gerr, class := g.attempt(w, r, st, c.rt, c.tier)
-			if gerr == nil {
-				st.affinity.Served(c.rt.ID, i == 0)
-				return nil
-			}
-			lastErr = gerr
-			// Strict session affinity: the bound channel's error is returned
-			// without trying another channel.
-			if st.affinity.StopAfter(c.rt.ID) || !policy.Allows(class) || st.written || r.Context().Err() != nil {
-				return gerr
+			// A transient failure (connection error, 5xx) is retried on the
+			// same channel after a short backoff when nothing else is left —
+			// no other candidate and no fallback model: a quick upstream
+			// restart then only delays the request. Retries count against the
+			// tier's maxAttempts like any other attempt.
+			alone := i == len(models)-1 && !g.hasAlternative(queue[qi+1:], model)
+			var waited time.Duration
+			for retries := 0; ; retries++ {
+				if c.tier == channel.TierPlatform {
+					platformAttempts++
+				}
+				attempts++
+				modelAttempts++
+				st.affinity.Attempted()
+				canRetry := alone && retries < len(sameChannelBackoff) && attempts < routing.HardAttemptCap &&
+					(c.tier != channel.TierPlatform || platformAttempts < policy.MaxAttempts)
+				st.deferHealth, st.retryAfter = canRetry, 0
+				gerr, class := g.attempt(w, r, st, c.rt, c.tier)
+				st.deferHealth = false
+				if gerr == nil {
+					st.pending = nil // recovered within the request
+					st.affinity.Served(c.rt.ID, i == 0)
+					return nil
+				}
+				if !canRetry {
+					st.pending = nil // this attempt's failure was recorded directly
+				}
+				lastErr = gerr
+				// Strict session affinity: the bound channel's error is returned
+				// without trying another channel.
+				if st.affinity.StopAfter(c.rt.ID) || !policy.Allows(class) || st.written || r.Context().Err() != nil {
+					g.flushPending(st)
+					return gerr
+				}
+				if !canRetry || (class != routing.RetryNetwork && class != routing.RetryServerError) {
+					g.flushPending(st)
+					break
+				}
+				wait := jitter(sameChannelBackoff[retries])
+				if st.retryAfter > wait {
+					wait = st.retryAfter
+				}
+				if waited+wait > sameChannelBudget {
+					g.flushPending(st)
+					break
+				}
+				select {
+				case <-r.Context().Done():
+					g.flushPending(st)
+					return gerr
+				case <-time.After(wait):
+				}
+				waited += wait
+				if !g.reg.Breaker.Allow(target) && !g.reg.Breaker.ForceAllow(target) {
+					g.flushPending(st)
+					break
+				}
 			}
 		}
 	}
 	if lastErr == nil {
-		return protocol.NewError(protocol.ErrUpstreamUnavailable, "all channels for this model are temporarily unavailable (circuit open)")
+		// Nothing could be attempted: every circuit is open and the last-resort
+		// slots are taken. 503 + Retry-After lets clients back off and retry.
+		retry := time.Second
+		now := time.Now()
+		for i, t := range allBlocked {
+			if at := g.reg.Breaker.RetryAt(t); !at.IsZero() && (i == 0 || at.Sub(now) < retry) {
+				retry = max(at.Sub(now), time.Second)
+			}
+		}
+		e := protocol.NewError(protocol.ErrUpstreamUnavailable,
+			fmt.Sprintf("all channels for this model are temporarily unavailable; retry after %ds", int(math.Ceil(retry.Seconds()))))
+		e.Status, e.RetryAfter = http.StatusServiceUnavailable, retry
+		return e
 	}
 	return lastErr
+}
+
+// Same-channel retry of a transient failure (see route): backoff per retry
+// and the total time a request may wait.
+var (
+	sameChannelBackoff = []time.Duration{500 * time.Millisecond, 1500 * time.Millisecond, 3 * time.Second}
+	sameChannelBudget  = 6 * time.Second
+)
+
+// jitter spreads d by ±20% so retries of concurrent requests do not align.
+func jitter(d time.Duration) time.Duration {
+	return d + time.Duration((rand.Float64()*0.4-0.2)*float64(d))
+}
+
+type pendingFailure struct {
+	target  channel.Target
+	kind    channel.FailKind
+	message string
+}
+
+// flushPending records a failure held back for a same-channel retry.
+func (g *Gateway) flushPending(st *reqState) {
+	if p := st.pending; p != nil {
+		st.pending = nil
+		g.reg.Breaker.Failure(p.target, p.kind, p.message, 0)
+	}
+}
+
+// hasAlternative reports whether a remaining candidate would accept the
+// request for model.
+func (g *Gateway) hasAlternative(rest []routeCand, model string) bool {
+	for _, c := range rest {
+		if !g.reg.Breaker.Blocked(channel.Target{Channel: c.rt.ID, Model: model}) {
+			return true
+		}
+	}
+	return false
+}
+
+// byRecovery orders blocked candidates soonest to recover first.
+func (g *Gateway) byRecovery(cands []routeCand, model string) []routeCand {
+	out := slices.Clone(cands)
+	at := make(map[uuid.UUID]time.Time, len(out))
+	for _, c := range out {
+		at[c.rt.ID] = g.reg.Breaker.RetryAt(channel.Target{Channel: c.rt.ID, Model: model})
+	}
+	slices.SortStableFunc(out, func(a, b routeCand) int { return at[a.rt.ID].Compare(at[b.rt.ID]) })
+	return out
+}
+
+// healthFailure records an attempt's health-relevant failure on its channel
+// and model (or holds it back while a same-channel retry is possible).
+func (g *Gateway) healthFailure(st *reqState, rt *channel.Runtime, e *protocol.GatewayError, status int) {
+	t := channel.Target{Channel: rt.ID, Model: st.info.Model}
+	kind := failKind(e, status)
+	if st.deferHealth && (kind == channel.FailTransient || kind == channel.FailTimeout) {
+		g.reg.Breaker.Release(t)
+		if st.pending == nil {
+			st.pending = &pendingFailure{target: t, kind: kind, message: e.Message}
+		}
+		return
+	}
+	g.reg.Breaker.Failure(t, kind, e.Message, st.retryAfter)
+}
+
+// failKind classifies a health-relevant failure for the breaker: rate limits
+// and exhausted quotas pause the model, 403 is model-specific, 401 concerns
+// the channel's credentials, timeouts count half.
+func failKind(e *protocol.GatewayError, status int) channel.FailKind {
+	switch e.Class {
+	case protocol.ErrUpstreamTimeout:
+		return channel.FailTimeout
+	case protocol.ErrUpstreamRateLimited:
+		return channel.FailRateLimit
+	case protocol.ErrUpstreamAuth:
+		if status == http.StatusForbidden {
+			return channel.FailModel
+		}
+		return channel.FailAuth
+	}
+	if quotaMessage(e.Message) {
+		return channel.FailRateLimit
+	}
+	return channel.FailTransient
+}
+
+// quotaMessage reports whether an upstream error says a quota or usage limit
+// is exhausted (pool gateways answer that with 5xx as well as 429).
+func quotaMessage(msg string) bool {
+	m := strings.ToLower(msg)
+	for _, s := range []string{"quota", "usage limit", "rate limit", "exhausted", "too many requests"} {
+		if strings.Contains(m, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseRetryAfter reads a Retry-After header (seconds or HTTP date).
+func parseRetryAfter(v string) time.Duration {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		return time.Duration(n) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		return max(time.Until(t), 0)
+	}
+	return 0
 }
 
 // pin puts the session's bound channel first within its tier (session
@@ -943,6 +1140,7 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 	upDialect := rt.Dialect(st.dialect, st.info.Model)
 	upstreamModel, _ := rt.UpstreamModel(st.info.Model)
 	att := requestlog.Attempt{ChannelID: rt.ID, ChannelName: rt.Name}
+	target := channel.Target{Channel: rt.ID, Model: st.info.Model}
 	attStart := time.Now()
 	st.entry.ChannelID, st.entry.ChannelName, st.entry.UpstreamModel = &rt.ID, &rt.Name, &upstreamModel
 	st.entry.ChannelTier = string(tier)
@@ -958,9 +1156,9 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 			att.StatusCode = e.Status
 		}
 		if health {
-			g.reg.Breaker.Failure(rt.ID, e.Message)
+			g.healthFailure(st, rt, e, att.StatusCode)
 		} else {
-			g.reg.Breaker.Release(rt.ID)
+			g.reg.Breaker.Release(target)
 		}
 		return e, class
 	}
@@ -971,7 +1169,7 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 		var err error
 		body, warnings, err = st.buildBody(rt, upDialect, upstreamModel)
 		if err != nil {
-			g.reg.Breaker.Release(rt.ID)
+			g.reg.Breaker.Release(target)
 			return convertError(err), ""
 		}
 		st.warnings = warnings
@@ -984,7 +1182,7 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 			// Session affinity's per-conversation prompt_cache_key (every
 			// attempt, before plugin hooks so they see and sign the final body).
 			if body, err = protocol.SetPromptCacheKey(body, k); err != nil {
-				g.reg.Breaker.Release(rt.ID)
+				g.reg.Breaker.Release(target)
 				return convertError(err), ""
 			}
 		}
@@ -1078,6 +1276,7 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			g.reg.ReportAuthFailure(rt.ID, resp.StatusCode)
 		}
+		st.retryAfter = parseRetryAfter(resp.Header.Get("Retry-After"))
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 		e, class, health := classifyUpstream(resp.StatusCode, raw)
 		return fail(e, class, health)
@@ -1091,6 +1290,10 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 	} else if st.info.Stream && (!protocol.IsImages(st.dialect) || strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream")) {
 		// Image models without streaming support (dall-e-*) may answer a
 		// stream request with plain JSON: that is served as a unary response.
+		// The upstream accepted the request: that is the channel's success
+		// (a long stream must not hold a half-open probe slot until it ends);
+		// a later mid-stream error is recorded as a failure on top.
+		g.reg.Breaker.Success(target)
 		gerr, class = g.stream(w, r, st, rt, resp, upDialect, upstreamModel, ttft, fail)
 	} else {
 		gerr, class = g.unary(w, st, rt, resp, upDialect, upstreamModel, ttft, fail)
@@ -1216,7 +1419,7 @@ func (g *Gateway) unary(w http.ResponseWriter, st *reqState, rt *channel.Runtime
 	if err != nil {
 		return fail(protocol.NewError(protocol.ErrUpstreamInvalid, "upstream returned a malformed response"), routing.RetryServerError, true)
 	}
-	g.reg.Breaker.Success(rt.ID)
+	g.reg.Breaker.Success(channel.Target{Channel: rt.ID, Model: st.info.Model})
 	g.writeHeaders(w, st, "application/json")
 	_, _ = w.Write(out)
 	st.entry.StatusCode = http.StatusOK
@@ -1341,13 +1544,9 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, st *reqState, r
 	}
 	if streamErr != nil && streamErr.Class != protocol.ErrClientClosed {
 		emit(protocol.EncodeStreamError(st.dialect, streamErr))
-		if streamErr.Class == protocol.ErrContextLengthExceeded {
-			g.reg.Breaker.Release(rt.ID)
-		} else {
-			g.reg.Breaker.Failure(rt.ID, streamErr.Message)
+		if streamErr.Class != protocol.ErrContextLengthExceeded {
+			g.reg.Breaker.Failure(channel.Target{Channel: rt.ID, Model: st.info.Model}, channel.FailTransient, streamErr.Message, 0)
 		}
-	} else {
-		g.reg.Breaker.Success(rt.ID)
 	}
 	st.entry.StatusCode = http.StatusOK
 	if streamErr != nil {

@@ -20,8 +20,10 @@ import (
 // anthropic channels, the plugin's health.check (else models.list) for
 // custom-protocol channels, the same checks as the connectivity test.
 
-// recoveryTick is a variable so tests can speed the prober up.
-var recoveryTick = 15 * time.Second
+// recoveryTick is a variable so tests can speed the prober up. Open circuits
+// cool down for 5 s at first, so the prober looks often: an upstream that
+// restarted is back in rotation within seconds.
+var recoveryTick = 3 * time.Second
 
 const (
 	// recoveryUnknownBackoff is how long a channel whose check is inconclusive
@@ -64,27 +66,29 @@ func (s *Service) RunRecoveryProber(ctx context.Context, log *slog.Logger) {
 			}
 			// Allow takes the single half-open probe slot, so real traffic
 			// keeps skipping the channel while it is being checked.
-			if !s.reg.Breaker.Allow(rt.ID) {
+			target := Target{Channel: rt.ID}
+			if !s.reg.Breaker.Allow(target) {
 				continue
 			}
 			select {
 			case sem <- struct{}{}:
 			case <-ctx.Done():
-				s.reg.Breaker.Release(rt.ID)
+				s.reg.Breaker.Release(target)
 				return
 			}
 			wg.Add(1)
 			go func(rt *Runtime) {
 				defer func() { <-sem; wg.Done() }()
-				outcome, msg := s.recoveryProbe(ctx, rt)
+				target := Target{Channel: rt.ID}
+				outcome, kind, msg := s.recoveryProbe(ctx, rt)
 				switch outcome {
 				case probeHealthy:
-					s.reg.Breaker.Success(rt.ID)
+					s.reg.Breaker.ProbeSuccess(rt.ID)
 					log.Info("channel recovered by active probe", "channel_id", rt.ID, "channel", rt.Name)
 				case probeUnhealthy:
-					s.reg.Breaker.Failure(rt.ID, msg)
+					s.reg.Breaker.Failure(target, kind, msg, 0)
 				default:
-					s.reg.Breaker.Release(rt.ID)
+					s.reg.Breaker.Release(target)
 					mu.Lock()
 					skipUntil[rt.ID] = time.Now().Add(recoveryUnknownBackoff)
 					mu.Unlock()
@@ -95,12 +99,18 @@ func (s *Service) RunRecoveryProber(ctx context.Context, log *slog.Logger) {
 }
 
 // recoveryProbe checks one channel's upstream.
-func (s *Service) recoveryProbe(ctx context.Context, rt *Runtime) (probeOutcome, string) {
+func (s *Service) recoveryProbe(ctx context.Context, rt *Runtime) (probeOutcome, FailKind, string) {
 	if rt.Type == TypeCustom {
-		return s.recoveryProbeCustom(ctx, rt)
+		o, msg := s.recoveryProbeCustom(ctx, rt)
+		return o, FailTransient, msg
 	}
 	status, body, _, err := s.probe(ctx, rt)
-	return classifyProbe(status, body, err)
+	o, msg := classifyProbe(status, body, err)
+	kind := FailTransient
+	if k, ok := StatusFailKind(status); ok && err == nil && k != FailRateLimit && k != FailModel {
+		kind = k
+	}
+	return o, kind, msg
 }
 
 // classifyProbe maps a model-list probe to a health outcome. Only the

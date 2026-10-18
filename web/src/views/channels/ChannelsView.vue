@@ -461,6 +461,12 @@ const HEALTH_DOT: Record<HealthState, string> = {
                           <p v-if="c.health.lastCheckedAt">
                             最近检查：{{ formatRelative(c.health.lastCheckedAt) }}
                           </p>
+                          <p v-if="c.health.state === 'open' && c.health.retryAt">
+                            {{ formatDateTime(c.health.retryAt) }} 起放行探测请求
+                          </p>
+                          <p v-if="c.health.models?.length">
+                            模型问题：{{ c.health.models.map(m => `${m.model}（${m.state === 'paused' ? '限流暂停' : m.state === 'open' ? '熔断' : '有失败'}）`).join('、') }}
+                          </p>
                           <p v-if="c.health.lastError" class="max-w-64 break-all">
                             最近错误：{{ c.health.lastError }}
                           </p>

@@ -55,11 +55,13 @@ func TestRecoveryProber(t *testing.T) {
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	reg := NewRegistry(nil, log, RegistryOptions{})
-	reg.Breaker = NewBreaker(1, time.Minute, 20*time.Millisecond)
+	cfg := DefaultBreakerConfig()
+	cfg.MinFailSeconds, cfg.BaseCooldown, cfg.MaxCooldown = 1, 20*time.Millisecond, 20*time.Millisecond
+	reg.Breaker = NewBreaker(cfg)
 	rt := &Runtime{Channel: Channel{ID: uuid.New(), Name: "up", Type: TypeOpenAI, BaseURL: up.URL + "/v1"}, APIKey: "k", AllowPrivate: true}
 	reg.all, reg.byID = []*Runtime{rt}, map[uuid.UUID]*Runtime{rt.ID: rt}
 	s := &Service{reg: reg, userAgent: "test"}
-	reg.Breaker.Failure(rt.ID, "boom")
+	reg.Breaker.Failure(Target{Channel: rt.ID}, FailTransient, "boom", 0)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

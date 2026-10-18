@@ -126,7 +126,7 @@ func (g *Gateway) audioUnary(w http.ResponseWriter, st *reqState, rt *channel.Ru
 			ct = "application/json"
 		}
 	}
-	g.reg.Breaker.Success(rt.ID)
+	g.reg.Breaker.Success(channel.Target{Channel: rt.ID, Model: st.info.Model})
 	g.writeHeaders(w, st, ct)
 	_, _ = w.Write(raw)
 	st.entry.StatusCode = http.StatusOK
@@ -195,9 +195,9 @@ func (g *Gateway) audioBinary(w http.ResponseWriter, r *http.Request, st *reqSta
 	}
 	if streamErr != nil && streamErr.Class != protocol.ErrClientClosed {
 		// A binary body cannot carry an in-band error.
-		g.reg.Breaker.Failure(rt.ID, streamErr.Message)
+		g.reg.Breaker.Failure(channel.Target{Channel: rt.ID, Model: st.info.Model}, channel.FailTransient, streamErr.Message, 0)
 	} else {
-		g.reg.Breaker.Success(rt.ID)
+		g.reg.Breaker.Success(channel.Target{Channel: rt.ID, Model: st.info.Model})
 	}
 	st.entry.StatusCode = http.StatusOK
 	if streamErr != nil {

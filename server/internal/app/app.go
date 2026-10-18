@@ -94,6 +94,8 @@ type Options struct {
 	// UpstreamTransport replaces the upstream network policy for all channels
 	// (tests: regular users' channels may then reach loopback fake upstreams).
 	UpstreamTransport http.RoundTripper
+	// Breaker tunes the channel circuit breaker (nil = production defaults).
+	Breaker *channel.BreakerConfig
 	// WebhookTransport replaces the SSRF-guarded transport of notification
 	// webhooks (tests: lets webhooks reach loopback fakes).
 	WebhookTransport http.RoundTripper
@@ -152,7 +154,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *db.DB,
 	chStore := channel.NewStore(pool, channelBox)
 	reg := channel.NewRegistry(chStore, log, channel.RegistryOptions{
 		AllowPrivateNetwork: cfg.ChannelsAllowPrivateNetwork, Proxy: cfg.UpstreamProxy, Plugins: plugins,
-		Transport: opts.UpstreamTransport,
+		Transport: opts.UpstreamTransport, Breaker: opts.Breaker,
 	})
 	plugins.OnChange = func() {
 		_ = plugins.RefreshStatus(context.Background())

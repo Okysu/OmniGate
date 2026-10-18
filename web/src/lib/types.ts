@@ -301,6 +301,23 @@ export interface ChannelHealth {
   consecutiveFailures: number
   lastError: string | null
   lastCheckedAt: string | null
+  /** Why the circuit is open: failures | auth (absent unless open / older backends). */
+  reason?: string
+  /** When an open circuit lets requests through again. */
+  retryAt?: string | null
+  /** Requests the channel's circuits turned away since the process started. */
+  rejectedRequests?: number
+  /** Models with their own trouble on this channel (open / paused by a rate limit / recent failures). */
+  models?: ChannelModelHealth[]
+}
+
+export interface ChannelModelHealth {
+  model: string
+  state: 'degraded' | 'open' | 'paused'
+  reason?: string
+  retryAt: string | null
+  lastError: string | null
+  rejectedRequests: number
 }
 
 /** The plugin version a channel is pinned to (Phase 2). */

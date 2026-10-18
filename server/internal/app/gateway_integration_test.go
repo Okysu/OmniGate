@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"omnigate/internal/app"
+	"omnigate/internal/channel"
 	"omnigate/internal/config"
 	"omnigate/internal/platform/db"
 )
@@ -183,6 +184,13 @@ func setupGatewayWith(t *testing.T, opts app.Options) *gwEnv {
 	t.Cleanup(pool.Close)
 	if err := db.Migrate(ctx, pool, log); err != nil {
 		t.Fatal(err)
+	}
+	if opts.Breaker == nil {
+		// Integration tests fire failures within the same second: count each
+		// on its own and open after five, with a cooldown no test outlasts.
+		bc := channel.DefaultBreakerConfig()
+		bc.NoMerge, bc.MinFailSeconds, bc.BaseCooldown, bc.MaxCooldown = true, 5, 30*time.Second, 30*time.Second
+		opts.Breaker = &bc
 	}
 	a, err := app.New(ctx, cfg, log, pool, opts)
 	if err != nil {

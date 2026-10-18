@@ -68,6 +68,26 @@ type Health struct {
 	ConsecutiveFailures int        `json:"consecutiveFailures"`
 	LastError           *string    `json:"lastError"`
 	LastCheckedAt       *time.Time `json:"lastCheckedAt"`
+	// Reason of an open circuit: failures | auth; RetryAt is when it lets
+	// requests through again (both null unless open).
+	Reason  string     `json:"reason,omitempty"`
+	RetryAt *time.Time `json:"retryAt"`
+	// RejectedRequests counts requests the channel's circuits turned away
+	// (since the process started).
+	RejectedRequests int64 `json:"rejectedRequests"`
+	// Models lists the models with their own trouble on this channel
+	// (open, paused by a rate limit, or recent failures).
+	Models []ModelHealth `json:"models"`
+}
+
+// ModelHealth is one model's circuit on a channel.
+type ModelHealth struct {
+	Model            string     `json:"model"`
+	State            string     `json:"state"` // degraded | open | paused
+	Reason           string     `json:"reason,omitempty"`
+	RetryAt          *time.Time `json:"retryAt"`
+	LastError        *string    `json:"lastError"`
+	RejectedRequests int64      `json:"rejectedRequests"`
 }
 
 // Channel is the full (owner/admin) view.

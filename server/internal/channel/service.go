@@ -408,17 +408,19 @@ func (s *Service) Test(ctx context.Context, p *authz.Principal, id uuid.UUID) (*
 	case err != nil:
 		msg := describeNetErr(err)
 		res.Error = &msg
-		s.reg.Breaker.Failure(c.ID, msg)
+		s.reg.Breaker.Failure(Target{Channel: c.ID}, FailTransient, msg, 0)
 	case status != 200:
 		msg := fmt.Sprintf("上游返回 %d：%s", status, upstreamMsg(body))
 		res.Error = &msg
 		if status == 401 || status == 403 {
 			s.reg.ReportAuthFailure(c.ID, status)
 		}
-		s.reg.Breaker.Failure(c.ID, msg)
+		if kind, ok := StatusFailKind(status); ok {
+			s.reg.Breaker.Failure(Target{Channel: c.ID}, kind, msg, 0)
+		}
 	default:
 		res.OK = true
-		s.reg.Breaker.Success(c.ID)
+		s.reg.Breaker.Success(Target{Channel: c.ID})
 	}
 	return res, nil
 }
@@ -493,17 +495,17 @@ func (s *Service) testCustom(ctx context.Context, c *Channel) (*TestResult, erro
 	case res.Error != nil:
 		msg := "插件能力执行失败：" + *res.Error
 		out.Error, out.StatusCode = &msg, 0
-		s.reg.Breaker.Failure(c.ID, msg)
+		s.reg.Breaker.Failure(Target{Channel: c.ID}, FailTransient, msg, 0)
 	case health.OK != nil && !*health.OK:
 		msg := "健康检查未通过"
 		if health.Message != "" {
 			msg += "：" + health.Message
 		}
 		out.Error = &msg
-		s.reg.Breaker.Failure(c.ID, msg)
+		s.reg.Breaker.Failure(Target{Channel: c.ID}, FailTransient, msg, 0)
 	default:
 		out.OK = true
-		s.reg.Breaker.Success(c.ID)
+		s.reg.Breaker.Success(Target{Channel: c.ID})
 	}
 	return out, nil
 }

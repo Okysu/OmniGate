@@ -28,7 +28,9 @@ type modelUpstream struct {
 	srv    *httptest.Server
 	hits   atomic.Int64
 	status atomic.Int64
-	mu     sync.Mutex
+	// failFirst > 0 answers that many requests with 502 first.
+	failFirst atomic.Int64
+	mu        sync.Mutex
 	models []string
 }
 
@@ -44,6 +46,11 @@ func newModelUpstream(t *testing.T, status int) *modelUpstream {
 		u.mu.Lock()
 		u.models = append(u.models, req.Model)
 		u.mu.Unlock()
+		if u.failFirst.Add(-1) >= 0 {
+			http.Error(w, `{"error":{"message":"restarting"}}`, http.StatusBadGateway)
+			return
+		}
+		u.failFirst.Store(0)
 		if s := int(u.status.Load()); s != 0 {
 			http.Error(w, `{"error":{"message":"failing on purpose"}}`, s)
 			return
@@ -288,8 +295,10 @@ func TestRouteFallbackAndRetry(t *testing.T) {
 	}
 	e.mustDo(e.admin, http.MethodPatch, "/api/admin/routes/"+rule["id"].(string), map[string]any{"version": 1,
 		"retry": map[string]any{"retryOn": []string{"server_error"}}, "fallbackModels": []string{}}, 200)
+	// Two channels, maxAttempts 3: the third attempt retries the last channel
+	// after a short backoff (no other candidate, no fallback model).
 	code, _, _ = readBody(gwPost(t, context.Background(), base, "/v1/chat/completions", key, chat("m3")))
-	if code != 502 || bad3.hits.Load()+bad4.hits.Load() != 3 {
+	if code != 502 || bad3.hits.Load()+bad4.hits.Load() != 4 {
 		t.Fatalf("retryable class = %d (hits %d+%d)", code, bad3.hits.Load(), bad4.hits.Load())
 	}
 }

@@ -335,6 +335,8 @@ type RegistryOptions struct {
 	// Transport replaces the network-policy transports for every channel
 	// (tests only: lets regular users' channels reach local fake upstreams).
 	Transport http.RoundTripper
+	// Breaker tunes the circuit breaker (nil = DefaultBreakerConfig).
+	Breaker *BreakerConfig
 }
 
 // Registry is the data plane's view of channels: an immutable snapshot swapped
@@ -367,12 +369,19 @@ func (g *Registry) ReportAuthFailure(id uuid.UUID, status int) {
 	}
 }
 
+func breakerConfig(c *BreakerConfig) BreakerConfig {
+	if c != nil {
+		return *c
+	}
+	return DefaultBreakerConfig()
+}
+
 func NewRegistry(store *Store, log *slog.Logger, opts RegistryOptions) *Registry {
 	if opts.RefreshInterval == 0 {
 		opts.RefreshInterval = 15 * time.Second
 	}
 	g := &Registry{
-		store: store, log: log, opts: opts, Breaker: NewBreaker(5, time.Minute, 30*time.Second),
+		store: store, log: log, opts: opts, Breaker: NewBreaker(breakerConfig(opts.Breaker)),
 		guarded: &http.Client{Transport: netguard.NewTransport(netguard.Options{Proxy: opts.Proxy}), CheckRedirect: netguard.NoRedirect},
 		open:    &http.Client{Transport: netguard.NewTransport(netguard.Options{AllowPrivate: true, Proxy: opts.Proxy}), CheckRedirect: netguard.NoRedirect},
 		byID:    map[uuid.UUID]*Runtime{},

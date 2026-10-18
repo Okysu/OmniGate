@@ -22,7 +22,7 @@ import { normalizeSharedWith } from '@/lib/channelForm'
 import { declinedShares, SHARE_STATUS_CLASSES, SHARE_STATUS_LABELS, shareIndex } from '@/lib/shares'
 import { adminApi, channelsApi, pluginsApi } from '@/lib/endpoints'
 import { formatDateTime, formatMs, formatRelative } from '@/lib/format'
-import { CAPABILITY_LABELS, CAPABILITY_OUTPUT_LABELS, CHANNEL_TYPE_LABELS, HEALTH_LABELS, SCOPE_LABELS } from '@/lib/labels'
+import { CAPABILITY_LABELS, CAPABILITY_OUTPUT_LABELS, CHANNEL_TYPE_LABELS, HEALTH_LABELS, HEALTH_REASON_LABELS, MODEL_HEALTH_LABELS, SCOPE_LABELS } from '@/lib/labels'
 import { isFullChannel } from '@/lib/types'
 import { useAuthStore } from '@/stores/auth'
 import { useGroupsStore } from '@/stores/groups'
@@ -385,9 +385,29 @@ const HEALTH_CLASSES: Record<string, string> = {
                     · 最近检查 {{ formatRelative(channel.health.lastCheckedAt) }}
                   </template>
                 </p>
+                <p v-if="channel.health.state === 'open' && channel.health.retryAt" class="text-muted-foreground" data-testid="health-retry">
+                  {{ HEALTH_REASON_LABELS[channel.health.reason ?? ''] ?? '熔断' }} · {{ formatDateTime(channel.health.retryAt) }} 起放行探测请求（失败会加倍冷却，最长 1 分钟）
+                </p>
+                <p v-if="channel.health.rejectedRequests" class="text-muted-foreground">
+                  熔断期间拦截 {{ channel.health.rejectedRequests }} 个请求（进程启动以来）
+                </p>
                 <p v-if="channel.health.lastError" class="text-destructive font-mono text-xs break-all">
                   {{ channel.health.lastError }}
                 </p>
+                <div v-if="channel.health.models?.length" class="space-y-1.5 border-t pt-2" data-testid="health-models">
+                  <p class="text-muted-foreground text-xs">
+                    单个模型的状态（只影响该模型，不影响渠道上的其他模型）
+                  </p>
+                  <div v-for="m in channel.health.models" :key="m.model" class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                    <span class="font-mono">{{ m.model }}</span>
+                    <Badge variant="outline" :class="m.state === 'degraded' ? HEALTH_CLASSES.degraded : HEALTH_CLASSES.open">
+                      {{ MODEL_HEALTH_LABELS[m.state] ?? m.state }}
+                    </Badge>
+                    <span v-if="m.retryAt" class="text-muted-foreground">至 {{ formatDateTime(m.retryAt) }}</span>
+                    <span v-if="m.rejectedRequests" class="text-muted-foreground">· 拦截 {{ m.rejectedRequests }} 次</span>
+                    <span v-if="m.lastError" class="text-destructive w-full font-mono break-all">{{ m.lastError }}</span>
+                  </div>
+                </div>
               </CardContent>
             </Card>
 

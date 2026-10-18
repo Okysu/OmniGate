@@ -106,8 +106,13 @@ info:
       连接失败 / 被网络策略拒绝 / 流式在首个事件前读取中断（`network`）、等待响应头超时（渠道 `config.timeoutSeconds`，默认 60 秒）与上游 408（`timeout`）、
       上游 429（`rate_limit`）、上游 401/403（`auth_error`）、上游 404（`not_found`）、上游 5xx、3xx、畸形响应、流式不完整、渠道插件的请求 Hook 失败
       （`server_error`）、上游其他 4xx（`client_error`，默认不重试）。不重试时以对应错误返回（其他 4xx 为 `upstream_bad_request`，状态码透传，422 改为 400）。
-    - 熔断：同一渠道连续 3 次健康类失败（上游 404 不计）→ `open` 30 秒 → 放行 1 个探测请求。
-      全部候选都处于熔断时返回 `502 upstream_unavailable`。
+    - 熔断（ADR-0011）：渠道级与「渠道 × 模型」级两层。连接失败 / 5xx 计入渠道，响应头超时按半次计，401 计入渠道（冷却更长），
+      403 只计入该模型；429 与额度用尽**不熔断**，只按 `Retry-After`（默认 10 秒）暂停该渠道 × 模型。60 秒内按 1 秒合并后的失败秒数 ≥ 3
+      且失败率 ≥ 50% 时打开，冷却 5 秒起、每次探测失败翻倍（最长 60 秒），之后同时放行最多 3 个探测请求，流式请求收到 200 响应头即算成功；
+      后台每 3 秒主动探测冷却结束的渠道。
+    - 没有其他候选渠道与回退模型时，`network` / `server_error` 类失败在同一渠道退避重试（0.5 / 1.5 / 3 秒，总计 ≤ 6 秒，计入 `maxAttempts`）。
+      全部候选都处于熔断时先按最快恢复的顺序做「最后手段」尝试（每个熔断同时最多 3 个），仍无法尝试才返回
+      `503 upstream_unavailable` 并带 `Retry-After`。
     - 计费检查延后（Round 5 续）：套餐配额判断与钱包预留推迟到**第一次尝试 platform 档渠道之前**才执行；请求完全由 own / shared 渠道完成时，
       即使余额为 0、套餐用完也能成功。own / shared 尝试都失败而 platform 档被配额或余额拦下时返回 `429` / `402`（同下文）。
       请求日志 `channelTier` 记录实际提供服务的渠道档位（失败请求取最后一次尝试的渠道），只有 platform 档的请求结算与计入配额。
@@ -8613,13 +8618,13 @@ components:
 
     ChannelHealth:
       type: object
-      description: 进程内熔断状态（被动健康：真实流量与手动测试）。多实例部署时各实例独立，重启后归零。
-      required: [state, consecutiveFailures, lastError, lastCheckedAt]
+      description: 进程内熔断状态（ADR-0011；真实流量、手动测试与后台主动探测）。多实例部署时各实例独立，重启后归零。
+      required: [state, consecutiveFailures, lastError, lastCheckedAt, retryAt, rejectedRequests, models]
       properties:
         state:
           type: string
           enum: [healthy, degraded, open]
-          description: healthy = 无连续失败；degraded = 1–2 次连续失败；open = ≥3 次，熔断 30 秒后放行一个探测请求
+          description: healthy = 窗口内无失败；degraded = 有失败但未达阈值，或有模型处于熔断 / 限流暂停；open = 渠道级熔断
         consecutiveFailures:
           type: integer
         lastError:
@@ -8627,6 +8632,30 @@ components:
         lastCheckedAt:
           type: [string, "null"]
           format: date-time
+        reason:
+          type: string
+          enum: [failures, auth]
+          description: 渠道级熔断的原因（仅 open 时出现）
+        retryAt:
+          type: [string, "null"]
+          format: date-time
+          description: 渠道级熔断结束冷却、开始放行探测请求的时间
+        rejectedRequests:
+          type: integer
+          description: 进程启动以来被该渠道（含其模型）的熔断拦截的请求数
+        models:
+          type: array
+          description: 在该渠道上有独立问题的模型
+          items:
+            type: object
+            required: [model, state, retryAt, lastError, rejectedRequests]
+            properties:
+              model: { type: string }
+              state: { type: string, enum: [degraded, open, paused] }
+              reason: { type: string, enum: [failures, rate_limit] }
+              retryAt: { type: [string, "null"], format: date-time }
+              lastError: { type: [string, "null"] }
+              rejectedRequests: { type: integer }
 
     Channel:
       type: object

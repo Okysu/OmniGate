@@ -41,6 +41,20 @@ export const HEALTH_LABELS: Record<HealthState, string> = {
   open: '熔断',
 }
 
+/** Why a circuit is open (channel or model). */
+export const HEALTH_REASON_LABELS: Record<string, string> = {
+  failures: '连续失败',
+  auth: '凭据失效（401）',
+  rate_limit: '上游限流 / 额度用尽',
+}
+
+/** A model's own state on a channel. */
+export const MODEL_HEALTH_LABELS: Record<string, string> = {
+  degraded: '有失败',
+  open: '熔断',
+  paused: '限流暂停',
+}
+
 export const INBOUND_LABELS: Record<string, string> = {
   'openai.chat': 'OpenAI Chat',
   'openai.responses': 'OpenAI Responses',

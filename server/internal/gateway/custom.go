@@ -67,6 +67,7 @@ func truncateMsg(s string) string {
 func (g *Gateway) attemptCustom(w http.ResponseWriter, r *http.Request, st *reqState, rt *channel.Runtime, tier channel.Tier) (*protocol.GatewayError, string) {
 	upstreamModel, _ := rt.UpstreamModel(st.info.Model)
 	att := requestlog.Attempt{ChannelID: rt.ID, ChannelName: rt.Name}
+	target := channel.Target{Channel: rt.ID, Model: st.info.Model}
 	attStart := time.Now()
 	st.entry.ChannelID, st.entry.ChannelName, st.entry.UpstreamModel = &rt.ID, &rt.Name, &upstreamModel
 	st.entry.ChannelTier = string(tier)
@@ -82,9 +83,9 @@ func (g *Gateway) attemptCustom(w http.ResponseWriter, r *http.Request, st *reqS
 			att.StatusCode = e.Status
 		}
 		if health {
-			g.reg.Breaker.Failure(rt.ID, e.Message)
+			g.healthFailure(st, rt, e, att.StatusCode)
 		} else {
-			g.reg.Breaker.Release(rt.ID)
+			g.reg.Breaker.Release(target)
 		}
 		return e, class
 	}
@@ -102,7 +103,7 @@ func (g *Gateway) attemptCustom(w http.ResponseWriter, r *http.Request, st *reqS
 		chatBody, st.warnings, err = protocol.ConvertRequest(st.dialect, protocol.OpenAIChat, st.body, upstreamModel, "max_tokens", st.compat)
 	}
 	if err != nil {
-		g.reg.Breaker.Release(rt.ID)
+		g.reg.Breaker.Release(target)
 		return convertError(err), ""
 	}
 
@@ -228,7 +229,7 @@ func (g *Gateway) customUnary(ctx context.Context, w http.ResponseWriter, r *htt
 		// Billing uses reported usage only (ADR-0006): no estimate.
 		g.log.Warn("plugin response without usage: not billed by tokens", "request_id", st.entry.RequestID, "channel", rt.Name, "model", st.info.Model)
 	}
-	g.reg.Breaker.Success(rt.ID)
+	g.reg.Breaker.Success(channel.Target{Channel: rt.ID, Model: st.info.Model})
 	g.writeHeaders(w, st, "application/json")
 	_, _ = w.Write(final)
 	st.entry.StatusCode = http.StatusOK
@@ -348,9 +349,9 @@ func (g *Gateway) customStream(ctx context.Context, w http.ResponseWriter, r *ht
 	}
 	if streamErr != nil && streamErr.Class != protocol.ErrClientClosed {
 		emit(protocol.EncodeStreamError(st.dialect, streamErr))
-		g.reg.Breaker.Failure(rt.ID, streamErr.Message)
+		g.reg.Breaker.Failure(channel.Target{Channel: rt.ID, Model: st.info.Model}, channel.FailTransient, streamErr.Message, 0)
 	} else {
-		g.reg.Breaker.Success(rt.ID)
+		g.reg.Breaker.Success(channel.Target{Channel: rt.ID, Model: st.info.Model})
 	}
 	st.entry.StatusCode = http.StatusOK
 	if streamErr != nil {
