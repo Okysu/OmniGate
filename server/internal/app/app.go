@@ -193,7 +193,7 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *db.DB,
 		return nil, err
 	}
 	gw := gateway.New(keySvc, reg, prices, gatewayBilling(bill, opts), subs, logs, log, gateway.Options{UserAgent: ua, Limits: r5.settings, Routes: r5.routes,
-		Usage: r7.limits, Journal: jrn, Affinity: r5.affinity})
+		Usage: r7.limits, Journal: jrn, Affinity: r5.affinity, Account: accountSource{bill: bill, subs: subs}})
 	handleJournal(jrn, gw, logs)
 	r5.routesH = routing.NewHandler(r5.routes, users, gw)
 	var web http.Handler
@@ -322,6 +322,12 @@ func (a *App) Handler() http.Handler {
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(httpx.AccessLog(a.log, "data"))
 		a.gw.Routes(r)
+	})
+	// OpenAI's legacy billing endpoints without the /v1 prefix (some clients
+	// that show a balance call them so).
+	r.Group(func(r chi.Router) {
+		r.Use(httpx.AccessLog(a.log, "data"))
+		a.gw.DashboardRoutes(r)
 	})
 
 	// Control plane.

@@ -5915,6 +5915,92 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /v1/account:
+    get:
+      tags: [gateway]
+      operationId: getGatewayAccount
+      summary: 用 API Key 查询余额与套餐额度
+      description: |
+        只凭模型 API Key（`Authorization: Bearer og-…` 或 `x-api-key`）查询所属账号的钱包余额、当前 Key 的消费限额与已用、
+        额度用完后的处理方式（Key 自己的设置优先，否则用账号设置）、**有效订阅按实际使用顺序**排列（每条规则带已用、剩余与重置时间），
+        以及用户组的限额与用量。计入 Key 的 `rpm` 限额，不写请求日志。错误为 OpenAI 格式。
+      security:
+        - gatewayKey: []
+        - gatewayApiKey: []
+      x-required-permission: null
+      responses:
+        "200":
+          description: 账号额度
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [object, user, key, wallet, quotaOverflow, subscriptions, limits]
+                properties:
+                  object: { type: string, const: account }
+                  user:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      displayName: { type: string }
+                  key:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      name: { type: string }
+                      expiresAt: { type: [string, "null"], format: date-time }
+                      spendLimit: { type: [object, "null"], description: 'Key 的消费限额（`{amount, window}`）' }
+                      spent: { type: [string, "null"], description: 当前窗口内已消费（无限额时为 null） }
+                      resetsAt: { type: [string, "null"], format: date-time }
+                  wallet:
+                    type: object
+                    properties:
+                      balance: { type: string }
+                      reserved: { type: string, description: 进行中的请求预留的金额 }
+                      available: { type: string }
+                      currency: { type: string }
+                  quotaOverflow: { type: string, enum: [block, wallet] }
+                  subscriptions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Subscription"
+                  limits:
+                    type: [object, "null"]
+                    description: 用户组限额与用量（同 `GET /api/billing/limits`，`keys` 只含当前 Key）
+        "401":
+          description: Key 无效或缺失（`invalid_api_key`）
+
+  /v1/dashboard/billing/subscription:
+    get:
+      tags: [gateway]
+      operationId: getLegacyBillingSubscription
+      summary: OpenAI 兼容的余额查询（旧版 dashboard 接口）
+      description: |
+        供显示余额的客户端（Cherry Studio、NextChat 等）使用，也可不带 `/v1` 前缀访问。`hard_limit_usd` 为钱包**可用余额**
+        （套餐额度无法用这个格式表达，请用 `GET /v1/account`），`access_until` 为 Key 的过期时间（Unix 秒，0 = 不过期）。
+        与 `/v1/dashboard/billing/usage`（`total_usage` 恒为 0）配合，客户端显示的「剩余」即可用余额。
+      security:
+        - gatewayKey: []
+        - gatewayApiKey: []
+      x-required-permission: null
+      responses:
+        "200":
+          description: '`{object: billing_subscription, hard_limit_usd, soft_limit_usd, system_hard_limit_usd, has_payment_method, access_until}`'
+
+  /v1/dashboard/billing/usage:
+    get:
+      tags: [gateway]
+      operationId: getLegacyBillingUsage
+      summary: OpenAI 兼容的用量查询（旧版 dashboard 接口）
+      description: 恒返回 `{object: list, total_usage: 0}`（忽略 start_date / end_date），也可不带 `/v1` 前缀访问。
+      security:
+        - gatewayKey: []
+        - gatewayApiKey: []
+      x-required-permission: null
+      responses:
+        "200":
+          description: '`{object: list, total_usage: 0}`'
+
   /v1/models:
     get:
       tags: [gateway]

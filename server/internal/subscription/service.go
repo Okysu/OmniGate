@@ -707,6 +707,16 @@ func (s *Service) ListMine(ctx context.Context, userID uuid.UUID) ([]*Subscripti
 	return s.Recent(ctx, userID, mySubsLimit)
 }
 
+// ActiveViews returns the user's subscriptions valid at now, with current
+// usage, in the order requests use them (GET /v1/account).
+func (s *Service) ActiveViews(ctx context.Context, userID uuid.UUID, now time.Time) ([]*SubscriptionView, error) {
+	subs, err := s.LiveSubscriptions(ctx, userID, now)
+	if err != nil || len(subs) == 0 {
+		return []*SubscriptionView{}, err
+	}
+	return describe(ctx, s.pool, subs, now)
+}
+
 // SetUseOrder sets the order in which the user's active subscriptions are
 // used: ids lists active subscriptions of the user, first used first;
 // active subscriptions left out follow, soonest to expire first.

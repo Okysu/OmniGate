@@ -86,6 +86,9 @@ type Options struct {
 	// Affinity pins client sessions to channels and passes session headers
 	// through (phase12-api.md; nil = off).
 	Affinity *affinity.Service
+	// Account serves GET /v1/account and the legacy dashboard billing
+	// endpoints (nil: they answer 404).
+	Account AccountSource
 }
 
 type Gateway struct {
@@ -170,6 +173,7 @@ func (g *Gateway) Routes(r chi.Router) {
 	r.Post("/audio/speech", g.handle(protocol.OpenAIAudioSpeech))
 	r.Post("/messages", g.handle(protocol.Anthropic))
 	r.Post("/messages/count_tokens", g.countTokens)
+	g.AccountRoutes(r)
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, dialectFor(r), protocol.NewError(protocol.ErrInvalidRequest, "unknown endpoint "+r.URL.Path))
 	})
