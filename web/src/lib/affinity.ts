@@ -102,6 +102,26 @@ export function omnigatePresets(): AffinityRule[] {
       param_override_template: passTemplate(CLAUDE_HEADERS),
       session_mode: 'prefer',
     },
+    {
+      // Every other request (any model and path, e.g. a Chat client on a domestic
+      // model with two channels): an explicit session key when sent, else the
+      // conversation anchor; bound per model, injecting nothing upstream.
+      ...emptyRule(),
+      name: 'generic session',
+      model_regex: ['.*'],
+      path_regex: [],
+      key_sources: [
+        { type: 'gjson', path: 'prompt_cache_key' },
+        { type: 'request_header', key: 'Session_id' },
+        { type: 'request_header', key: 'Session-Id' },
+        { type: 'gjson', path: 'metadata.user_id' },
+        { type: 'request_header', key: 'X-Claude-Code-Session-Id' },
+        { type: 'gjson', path: 'user' },
+        { type: 'anchor' },
+      ],
+      session_mode: 'prefer',
+      include_model_name: true,
+    },
   ]
 }
 

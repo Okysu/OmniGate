@@ -793,3 +793,39 @@ func TestRecordConcurrentExactSums(t *testing.T) {
 		t.Fatalf("used %s / %s", rules[0].Used, rules[1].Used)
 	}
 }
+
+// Users choose the order their active subscriptions are used in; without a
+// choice the one expiring first is used first.
+func TestSubscriptionUseOrder(t *testing.T) {
+	f := newFixture(t)
+	u := f.user(identity.RoleUser)
+	long := f.plan(PlanInput{Name: "Month", Rules: []Rule{sessionRule("10")}})
+	short := f.plan(PlanInput{Name: "Week", Duration: "7d", Stackable: true, Rules: []Rule{sessionRule("10")}})
+	lv, _ := f.grant(u.ID, long.ID, 1)
+	sv, _ := f.grant(u.ID, short.ID, 1)
+	admitted(t, f.decide(u.ID, "m", f.now), sv.ID)
+
+	views, err := f.svc.SetUseOrder(f.ctx, u.ID, []uuid.UUID{lv.ID}, f.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted(t, f.decide(u.ID, "m", f.now), lv.ID)
+	for _, v := range views {
+		if want := v.ID == lv.ID; (v.UseOrder != nil && *v.UseOrder == 0) != want {
+			t.Fatalf("use order of %s = %v", v.Plan.Name, v.UseOrder)
+		}
+	}
+	// A full reorder replaces the previous one.
+	if _, err := f.svc.SetUseOrder(f.ctx, u.ID, []uuid.UUID{sv.ID, lv.ID}, f.now); err != nil {
+		t.Fatal(err)
+	}
+	admitted(t, f.decide(u.ID, "m", f.now), sv.ID)
+	// Only the user's own active subscriptions, each once.
+	other := f.user(identity.RoleUser)
+	ov, _ := f.grant(other.ID, long.ID, 1)
+	for _, ids := range [][]uuid.UUID{{ov.ID}, {lv.ID, lv.ID}, {uuid.New()}} {
+		if _, err := f.svc.SetUseOrder(f.ctx, u.ID, ids, f.now); errCode(err) != "validation_failed" {
+			t.Fatalf("ids %v: %v", ids, err)
+		}
+	}
+}

@@ -212,6 +212,9 @@ describe('usage', () => {
     const c = sub({ id: 'c', endsAt: '2026-11-15T00:00:00Z', rules: [usage({ id: 'y', used: '90', limit: '100' })] })
     const d = sub({ id: 'd', status: 'cancelled', createdAt: '2026-10-05T00:00:00Z', rules: [usage({ id: 'z', used: '100', limit: '100', exceeded: true })] })
     expect(sortSubscriptions([a, b, c, d]).map(s => s.id)).toEqual(['c', 'b', 'd', 'a'])
+    // The user's use order comes first among active ones, then soonest to expire.
+    expect(sortSubscriptions([a, b, c, { ...d, status: 'active', useOrder: 1 }, { ...b, id: 'e', useOrder: 0 }]).map(s => s.id))
+      .toEqual(['e', 'd', 'c', 'b', 'a'])
     const best = mostUsedRule([a, b, c, d])
     expect(best?.subscription.id).toBe('c')
     expect(best?.rule.id).toBe('y')

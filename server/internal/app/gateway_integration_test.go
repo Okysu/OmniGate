@@ -308,8 +308,10 @@ func TestGatewayStreamingAndFallback(t *testing.T) {
 	_, key := e.key(e.admin, map[string]any{"name": "k"})
 
 	t.Run("fallback on 5xx then circuit opens", func(t *testing.T) {
+		// Distinct conversations: the same one would stick to the good
+		// channel after its first fallback (session affinity).
 		for i := 0; i < 5; i++ {
-			code, body, raw := readBody(gwPost(t, context.Background(), base, "/v1/chat/completions", key, chatBody))
+			code, body, raw := readBody(gwPost(t, context.Background(), base, "/v1/chat/completions", key, fmt.Sprintf(`{"model":"m1","messages":[{"role":"user","content":"hi %d"}]}`, i)))
 			if code != 200 || body["choices"] == nil {
 				t.Fatalf("attempt %d = %d %s", i, code, raw)
 			}
@@ -764,9 +766,11 @@ func TestGatewayClientErrorRetry(t *testing.T) {
 	st := e.mustDo(e.admin, http.MethodGet, "/api/admin/settings", nil, 200)
 	e.mustDo(e.admin, http.MethodPatch, "/api/admin/settings", map[string]any{"version": st["version"], "settings": map[string]any{
 		"gateway": map[string]any{"retryOn": []string{"rate_limit", "server_error", "timeout", "network", "auth_error", "not_found", "client_error"}}}}, 200)
-	for _, msg := range []string{`{"error":{"message":"model not found: m1"}}`, `{"error":{"message":"messages: field required"}}`} {
+	for i, msg := range []string{`{"error":{"message":"model not found: m1"}}`, `{"error":{"message":"messages: field required"}}`} {
 		badMsg.Store(msg)
-		if code, _, raw := readBody(gwPost(t, context.Background(), base, "/v1/chat/completions", key, chatBody)); code != 200 {
+		// A new conversation each time (the same one would stick to relay-b).
+		body := fmt.Sprintf(`{"model":"m1","messages":[{"role":"user","content":"retry %d"}]}`, i)
+		if code, _, raw := readBody(gwPost(t, context.Background(), base, "/v1/chat/completions", key, body)); code != 200 {
 			t.Fatalf("client_error retry (%s) = %d %s", msg, code, raw)
 		}
 		l := latestLog()

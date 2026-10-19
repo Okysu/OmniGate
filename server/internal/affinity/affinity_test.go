@@ -94,14 +94,24 @@ func TestDecodeNewAPITemplate(t *testing.T) {
 
 func TestDefault(t *testing.T) {
 	c := Default()
-	if !c.Enabled || c.SessionMode != ModePrefer || len(c.Rules) != 3 {
+	if !c.Enabled || c.SessionMode != ModePrefer || len(c.Rules) != 4 {
 		t.Fatalf("default = %+v", c)
 	}
-	if c.Rules[0].Name != "gpt session" || c.Rules[1].Name != "codex cli trace" || c.Rules[2].Name != "claude cli trace" {
-		t.Fatalf("preset order = %s, %s, %s", c.Rules[0].Name, c.Rules[1].Name, c.Rules[2].Name)
+	if c.Rules[0].Name != "gpt session" || c.Rules[1].Name != "codex cli trace" || c.Rules[2].Name != "claude cli trace" || c.Rules[3].Name != "generic session" {
+		t.Fatalf("preset order = %s, %s, %s, %s", c.Rules[0].Name, c.Rules[1].Name, c.Rules[2].Name, c.Rules[3].Name)
+	}
+	// The generic session rule catches every other request (a Chat client on
+	// a domestic model) by its conversation anchor, injecting nothing.
+	generic := c.Rules[3]
+	chat := Request{Model: "glm-5.2", Path: "/v1/chat/completions", Dialect: "openai.chat",
+		Body: []byte(`{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}]}`)}
+	if m := c.Match(chat); m == nil || m.Rule.Name != "generic session" || generic.InjectPromptCacheKey || generic.InjectSessionHeader != "" || generic.Pass() != nil {
+		t.Errorf("generic session = %+v", m)
 	}
 	for _, r := range c.Rules {
-		if r.Mode(c.SessionMode) != ModePrefer || !r.IncludeUsingGroup || !r.IncludeRuleName || r.IncludeModelName {
+		// Only "generic session" binds per model: other models of the
+		// conversation may live on other channels.
+		if r.Mode(c.SessionMode) != ModePrefer || !r.IncludeUsingGroup || !r.IncludeRuleName || r.IncludeModelName != (r.Name == "generic session") {
 			t.Errorf("%s: %+v", r.Name, r)
 		}
 	}

@@ -234,7 +234,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		l.audio_seconds, l.audio_input_tokens, l.audio_output_tokens, l.input_characters, l.price_tier, l.affinity, l.affinity_rule,
 		l.client, l.client_version, l.compat_warnings
 		FROM request_logs l LEFT JOIN users u ON u.id = l.user_id`+f.sql()+
-		` ORDER BY l.started_at DESC LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
+		` ORDER BY l.started_at DESC, l.id DESC LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

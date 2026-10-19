@@ -161,15 +161,15 @@ describe('affinity table helpers', () => {
   it('merges templates by name, duplicates and moves rules', () => {
     const current = [{ ...emptyRule(), name: 'codex cli trace', ttl_seconds: 5, model_regex: ['^gpt-.*$'] }, { ...emptyRule(), name: 'mine' }]
     const { rules, replaced, added } = mergeRules(current, omnigatePresets())
-    expect([replaced, added]).toEqual([1, 2])
-    // "gpt session" goes above the codex rule it must precede; claude is appended.
-    expect(rules.map(r => r.name)).toEqual(['gpt session', 'codex cli trace', 'mine', 'claude cli trace'])
+    expect([replaced, added]).toEqual([1, 3])
+    // "gpt session" goes above the codex rule it must precede; claude and the catch-all are appended.
+    expect(rules.map(r => r.name)).toEqual(['gpt session', 'codex cli trace', 'mine', 'claude cli trace', 'generic session'])
     expect(rules[1]!.model_regex).toEqual(['.*'])
     expect(current[0]!.ttl_seconds).toBe(5) // inputs untouched
     expect(uniqueName('mine', rules)).toBe('mine (副本)')
     expect(uniqueName('mine', [...rules, { ...emptyRule(), name: 'mine (副本)' }])).toBe('mine (副本 2)')
-    expect(moveRule(rules, 3, 0).map(r => r.name)).toEqual(['claude cli trace', 'gpt session', 'codex cli trace', 'mine'])
-    expect(moveRule(rules, 0, 5)).toEqual(rules)
+    expect(moveRule(rules, 3, 0).map(r => r.name)).toEqual(['claude cli trace', 'gpt session', 'codex cli trace', 'mine', 'generic session'])
+    expect(moveRule(rules, 0, 9)).toEqual(rules)
   })
 
   it('computes affinity and cache hit rates', () => {
@@ -186,7 +186,7 @@ describe('affinity table helpers', () => {
 describe('affinity OmniGate extensions', () => {
   it('ships "gpt session" first with the anchor fallback and upstream identity', () => {
     const presets = omnigatePresets()
-    expect(presets.map(r => r.name)).toEqual(['gpt session', 'codex cli trace', 'claude cli trace'])
+    expect(presets.map(r => r.name)).toEqual(['gpt session', 'codex cli trace', 'claude cli trace', 'generic session'])
     const gpt = presets[0]!
     expect(gpt.model_regex).toEqual(['^gpt-'])
     expect(gpt.path_regex).toEqual([])
@@ -218,7 +218,7 @@ describe('affinity OmniGate extensions', () => {
   })
 
   it('round-trips client_include (phase13 §5) and keeps the presets client-agnostic', () => {
-    expect(omnigatePresets().map(r => r.client_include)).toEqual([[], [], []])
+    expect(omnigatePresets().map(r => r.client_include)).toEqual([[], [], [], []])
     const raw = `{"rules":[{"name":"cc","client_include":[" claude-code ","codex","claude-code",""],"key_sources":[{"type":"anchor"}]},
       {"name":"any","client_include":null,"key_sources":[{"type":"anchor"}]}]}`
     const c = parseConfigJson(raw).config!
@@ -252,24 +252,24 @@ describe('affinity OmniGate extensions', () => {
   })
 
   it('fills presets in order into empty and partial rule lists', () => {
-    expect(mergeRules([], omnigatePresets()).rules.map(r => r.name)).toEqual(['gpt session', 'codex cli trace', 'claude cli trace'])
-    // A stored setting with the previous presets: only "gpt session" is new, inserted on top.
-    const previous = omnigatePresets().slice(1)
+    expect(mergeRules([], omnigatePresets()).rules.map(r => r.name)).toEqual(['gpt session', 'codex cli trace', 'claude cli trace', 'generic session'])
+    // A stored setting with the previous presets: "gpt session" is inserted on top, the catch-all appended.
+    const previous = omnigatePresets().slice(1, 3)
     const res = mergeRules(previous, omnigatePresets())
-    expect(res.rules.map(r => r.name)).toEqual(['gpt session', 'codex cli trace', 'claude cli trace'])
-    expect([res.replaced, res.added]).toEqual([2, 1])
+    expect(res.rules.map(r => r.name)).toEqual(['gpt session', 'codex cli trace', 'claude cli trace', 'generic session'])
+    expect([res.replaced, res.added]).toEqual([2, 2])
     // Own rules ahead of the presets keep their place.
     const own = [{ ...emptyRule(), name: 'mine', key_sources: [{ type: 'gjson', path: 'k' }] }, ...previous]
-    expect(mergeRules(own, omnigatePresets()).rules.map(r => r.name)).toEqual(['mine', 'gpt session', 'codex cli trace', 'claude cli trace'])
+    expect(mergeRules(own, omnigatePresets()).rules.map(r => r.name)).toEqual(['mine', 'gpt session', 'codex cli trace', 'claude cli trace', 'generic session'])
   })
 })
 
 describe('affinity rule copies', () => {
   it('merges reactive rule lists (structuredClone cannot clone proxies)', async () => {
     const { reactive } = await import('vue')
-    const current = reactive(omnigatePresets().slice(1))
+    const current = reactive(omnigatePresets().slice(1, 3))
     const { rules } = mergeRules(current, omnigatePresets())
-    expect(rules.map(r => r.name)).toEqual(['gpt session', 'codex cli trace', 'claude cli trace'])
+    expect(rules.map(r => r.name)).toEqual(['gpt session', 'codex cli trace', 'claude cli trace', 'generic session'])
     expect(rules[1]).toEqual(omnigatePresets()[1])
   })
 })

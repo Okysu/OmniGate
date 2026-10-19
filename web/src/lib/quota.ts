@@ -400,8 +400,14 @@ export function sortSubscriptions(subs: Subscription[]): Subscription[] {
     const ba = b.status === 'active' ? 0 : 1
     if (aa !== ba)
       return aa - ba
-    if (aa === 0)
+    if (aa === 0) {
+      // The order requests use them in: the user's order, then soonest to expire.
+      const ao = a.useOrder ?? Number.POSITIVE_INFINITY
+      const bo = b.useOrder ?? Number.POSITIVE_INFINITY
+      if (ao !== bo)
+        return ao - bo
       return new Date(a.endsAt).getTime() - new Date(b.endsAt).getTime()
+    }
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   })
 }

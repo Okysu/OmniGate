@@ -465,6 +465,9 @@ type Subscription struct {
 	CancelNote  *string
 	CreatedAt   time.Time
 	Version     int
+	// UseOrder is the user's chosen position among their active
+	// subscriptions (0 = used first); nil = after the ordered ones.
+	UseOrder *int
 }
 
 // StatusAt derives the API status (active | expired | cancelled) at now.
@@ -480,14 +483,18 @@ func (s *Subscription) StatusAt(now time.Time) string {
 }
 
 const subCols = `s.id, s.user_id, u.display_name, s.plan_id, s.plan_name, s.models, s.rules, s.starts_at, s.ends_at,
-	s.status, s.source, s.source_ref, s.cancelled_at, s.cancel_note, s.created_at, s.version`
+	s.status, s.source, s.source_ref, s.cancelled_at, s.cancel_note, s.created_at, s.version, s.use_order`
+
+// liveOrder is the order subscriptions are used in: the user's chosen order
+// first, then soonest to expire first.
+const liveOrder = ` ORDER BY s.use_order IS NULL, s.use_order, s.ends_at, s.id`
 
 const subFrom = ` FROM subscriptions s JOIN users u ON u.id = s.user_id`
 
 func scanSub(row db.Row) (*Subscription, error) {
 	var s Subscription
 	if err := row.Scan(&s.ID, &s.UserID, &s.UserName, &s.PlanID, &s.PlanName, &s.Models, &s.Rules, &s.StartsAt,
-		&s.EndsAt, &s.State, &s.Source, &s.SourceRef, &s.CancelledAt, &s.CancelNote, &s.CreatedAt, &s.Version); err != nil {
+		&s.EndsAt, &s.State, &s.Source, &s.SourceRef, &s.CancelledAt, &s.CancelNote, &s.CreatedAt, &s.Version, &s.UseOrder); err != nil {
 		return nil, err
 	}
 	if s.Models == nil {
@@ -700,6 +707,45 @@ func (s *Service) ListMine(ctx context.Context, userID uuid.UUID) ([]*Subscripti
 	return s.Recent(ctx, userID, mySubsLimit)
 }
 
+// SetUseOrder sets the order in which the user's active subscriptions are
+// used: ids lists active subscriptions of the user, first used first;
+// active subscriptions left out follow, soonest to expire first.
+func (s *Service) SetUseOrder(ctx context.Context, userID uuid.UUID, ids []uuid.UUID, now time.Time) ([]*SubscriptionView, error) {
+	if len(ids) > mySubsLimit {
+		return nil, invalid(map[string]any{"ids": fmt.Sprintf("最多 %d 个订阅", mySubsLimit)})
+	}
+	err := db.InTx(ctx, s.pool, func(tx db.Tx) error {
+		live, err := LiveSubscriptionsTx(ctx, tx, userID, now)
+		if err != nil {
+			return err
+		}
+		ok := map[uuid.UUID]bool{}
+		for _, sub := range live {
+			ok[sub.ID] = true
+		}
+		seen := map[uuid.UUID]bool{}
+		for _, id := range ids {
+			if !ok[id] || seen[id] {
+				return invalid(map[string]any{"ids": "只能包含你当前有效的订阅，且不能重复"})
+			}
+			seen[id] = true
+		}
+		if _, err := tx.Exec(ctx, `UPDATE subscriptions SET use_order = NULL WHERE user_id = $1 AND use_order IS NOT NULL`, userID); err != nil {
+			return err
+		}
+		for i, id := range ids {
+			if _, err := tx.Exec(ctx, `UPDATE subscriptions SET use_order = $2 WHERE id = $1`, id, i); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.ListMine(ctx, userID)
+}
+
 // Recent returns the user's newest limit subscriptions (any status) with
 // current usage.
 func (s *Service) Recent(ctx context.Context, userID uuid.UUID, limit int) ([]*SubscriptionView, error) {
@@ -805,12 +851,11 @@ func (s *Service) ActivePlans(ctx context.Context) ([]PlanCoverage, error) {
 	return out, rows.Err()
 }
 
-// LiveSubscriptions returns the user's subscriptions valid at now, the one
-// expiring first first (the order Decide uses).
+// LiveSubscriptions returns the user's subscriptions valid at now in the
+// order Decide uses them (liveOrder).
 func (s *Service) LiveSubscriptions(ctx context.Context, userID uuid.UUID, now time.Time) ([]*Subscription, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+subCols+subFrom+`
-		WHERE s.user_id = $1 AND s.status = 'active' AND s.ends_at > $2 AND s.starts_at <= $2
-		ORDER BY s.ends_at, s.id`, userID, now)
+		WHERE s.user_id = $1 AND s.status = 'active' AND s.ends_at > $2 AND s.starts_at <= $2`+liveOrder, userID, now)
 	if err != nil {
 		return nil, err
 	}

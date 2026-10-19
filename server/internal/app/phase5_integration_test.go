@@ -53,6 +53,9 @@ func (e *gwEnv) credit(userID, amount string) {
 // lastLog returns the newest request log entry visible to c (after a flush).
 func (e *gwEnv) lastLog(c *client, query string) map[string]any {
 	e.t.Helper()
+	// The gateway logs a request after its response was written: give the
+	// last request time to reach the log buffer before flushing it.
+	time.Sleep(50 * time.Millisecond)
 	if err := e.app.FlushLogs(context.Background()); err != nil {
 		e.t.Fatal(err)
 	}

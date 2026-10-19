@@ -223,6 +223,24 @@ func (r *Runtime) Timeout() time.Duration {
 	return 60 * time.Second
 }
 
+// anthropicAuth reports which headers carry an anthropic channel's key
+// (Config.AuthHeader).
+func (r *Runtime) anthropicAuth() (apiKey, bearer bool) {
+	switch r.Config.AuthHeader {
+	case AuthHeaderAPIKey:
+		return true, false
+	case AuthHeaderBearer:
+		return false, true
+	case AuthHeaderBoth:
+		return true, true
+	}
+	if u, err := url.Parse(r.BaseURL); err == nil && (u.Hostname() == "anthropic.com" || strings.HasSuffix(u.Hostname(), ".anthropic.com")) {
+		// Anthropic reads a Bearer token as OAuth: send the API key only.
+		return true, false
+	}
+	return true, true
+}
+
 // MaxTokensField for converted requests to openai channels.
 func (r *Runtime) MaxTokensField() string {
 	if r.Config.MaxTokensField != "" {
@@ -295,7 +313,13 @@ func (r *Runtime) NewRequestBody(ctx context.Context, dialect string, body io.Re
 	req.Header.Set("User-Agent", userAgent)
 	if r.Type == TypeAnthropic {
 		if o == nil || !o.SkipAuth {
-			req.Header.Set("x-api-key", r.APIKey)
+			apiKey, bearer := r.anthropicAuth()
+			if apiKey {
+				req.Header.Set("x-api-key", r.APIKey)
+			}
+			if bearer {
+				req.Header.Set("Authorization", "Bearer "+r.APIKey)
+			}
 		}
 		if clientHeader != nil {
 			for _, h := range passthroughAnthropicHeaders {

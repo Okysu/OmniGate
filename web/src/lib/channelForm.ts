@@ -1,5 +1,5 @@
 // Pure helpers for the channel create / edit form.
-import type { Channel, ChannelInput, ChannelScope, ChannelType, EnabledStatus, MaxTokensField, ModelMapping, SharedWith } from './types'
+import type { AnthropicAuthHeader, Channel, ChannelInput, ChannelScope, ChannelType, EnabledStatus, MaxTokensField, ModelMapping, SharedWith } from './types'
 import { fromNano, isValidAmount, toNano } from './money'
 
 export interface HeaderRow {
@@ -26,6 +26,8 @@ export interface ChannelFormState {
   timeoutSeconds: number
   /** Exempt from the circuit breaker. */
   alwaysOn: boolean
+  /** Anthropic channels: how the key is sent. */
+  authHeader: AnthropicAuthHeader
   maxTokensField: MaxTokensField
   scope: ChannelScope
   /** phase8 §1.2: user ids and group ids. */
@@ -50,6 +52,7 @@ export function emptyChannelForm(): ChannelFormState {
     supportsCompletions: false,
     timeoutSeconds: 0,
     alwaysOn: false,
+    authHeader: 'auto',
     maxTokensField: 'max_tokens',
     scope: 'private',
     sharedWith: { users: [], groups: [] },
@@ -105,6 +108,7 @@ export function formFromChannel(c: Channel): ChannelFormState {
     supportsCompletions: c.config.supportsCompletions ?? false,
     timeoutSeconds: c.config.timeoutSeconds ?? 0,
     alwaysOn: c.config.alwaysOn ?? false,
+    authHeader: c.config.authHeader ?? 'auto',
     maxTokensField: c.config.maxTokensField ?? 'max_tokens',
     scope: c.scope,
     sharedWith: normalizeSharedWith(c.sharedWith),
@@ -154,6 +158,8 @@ export function buildChannelPayload(form: ChannelFormState, original?: Channel):
     if (form.maxTokensField !== 'max_tokens')
       config.maxTokensField = form.maxTokensField
   }
+  if (form.type === 'anthropic' && form.authHeader !== 'auto')
+    config.authHeader = form.authHeader
   if (form.timeoutSeconds > 0)
     config.timeoutSeconds = Math.floor(form.timeoutSeconds)
   if (form.alwaysOn)

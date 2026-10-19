@@ -180,8 +180,13 @@ var (
 // affinity on every inbound protocol (falling back to the conversation
 // anchor) and their OpenAI-format upstream requests carry a stable
 // per-conversation prompt_cache_key and Session_id. The client presets match
-// any other model (their key sources only exist for those clients) and all
-// prefer the bound channel without giving up failover.
+// any other model (their key sources only exist for those clients). The
+// last rule, "generic session", gives every other request — any model, any
+// path, e.g. a Chat client on a domestic model with two channels — the same
+// stickiness: an explicit session key when the client sends one, else the
+// conversation anchor. It injects nothing into upstream requests (strict
+// OpenAI-compatible upstreams may reject prompt_cache_key). All prefer the
+// bound channel without giving up failover.
 func Default() Config {
 	raw, _ := json.Marshal(defaults())
 	c, msg := Decode(raw)
@@ -205,6 +210,10 @@ func defaults() Config {
 			{Name: "claude cli trace", ModelRegex: []string{".*"}, PathRegex: []string{"^/v1/messages"}, UserAgentInclude: []string{},
 				KeySources:            []KeySource{{Type: SourceGJSON, Path: "metadata.user_id"}, {Type: SourceHeader, Key: "X-Claude-Code-Session-Id"}},
 				ParamOverrideTemplate: passTemplate(claudeHeaders...), SessionMode: ModePrefer, IncludeUsingGroup: true, IncludeRuleName: true},
+			{Name: "generic session", ModelRegex: []string{".*"}, PathRegex: []string{}, UserAgentInclude: []string{},
+				KeySources: []KeySource{{Type: SourceGJSON, Path: "prompt_cache_key"}, {Type: SourceHeader, Key: "Session_id"}, {Type: SourceHeader, Key: "Session-Id"},
+					{Type: SourceGJSON, Path: "metadata.user_id"}, {Type: SourceHeader, Key: "X-Claude-Code-Session-Id"}, {Type: SourceGJSON, Path: "user"}, {Type: SourceAnchor}},
+				SessionMode: ModePrefer, IncludeUsingGroup: true, IncludeRuleName: true, IncludeModelName: true},
 		}}
 }
 

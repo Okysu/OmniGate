@@ -356,7 +356,7 @@ function setGlobalMode(v: unknown) {
               </TabsTrigger>
             </TabsList>
           </Tabs>
-          <Button variant="outline" size="sm" :disabled="disabled" title="加入内置的 GPT 会话、Codex CLI、Claude Code 预设（优先保持）；同名规则会被替换，其他规则保留，新规则按预设顺序插入" data-testid="affinity-template" @click="fillTemplate">
+          <Button variant="outline" size="sm" :disabled="disabled" title="加入内置的 GPT 会话、Codex CLI、Claude Code 与通用会话预设（优先保持）；同名规则会被替换，其他规则保留，新规则按预设顺序插入" data-testid="affinity-template" @click="fillTemplate">
             <Sparkles />
             填充模板
           </Button>
@@ -461,7 +461,7 @@ function setGlobalMode(v: unknown) {
             <TableBody>
               <TableRow v-if="!rules.length">
                 <TableCell colspan="8" class="text-muted-foreground py-6 text-center">
-                  还没有规则。点击「添加规则」，或用「填充模板」加入内置的 GPT 会话、Codex CLI、Claude Code 预设。
+                  还没有规则。点击「添加规则」，或用「填充模板」加入内置的 GPT 会话、Codex CLI、Claude Code 与通用会话预设。
                 </TableCell>
               </TableRow>
               <TableRow v-for="(r, i) in rules" :key="`${i}:${r.name}`" :data-affinity-rule="r.name" :class="validation[`rules[${i}].name`] || Object.keys(validation).some(k => k.startsWith(`rules[${i}].`)) ? 'bg-destructive/5' : ''">

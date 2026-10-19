@@ -22,7 +22,7 @@ import { normalizeSharedWith } from '@/lib/channelForm'
 import { declinedShares, SHARE_STATUS_CLASSES, SHARE_STATUS_LABELS, shareIndex } from '@/lib/shares'
 import { adminApi, channelsApi, pluginsApi } from '@/lib/endpoints'
 import { formatDateTime, formatMs, formatRelative } from '@/lib/format'
-import { CAPABILITY_LABELS, CAPABILITY_OUTPUT_LABELS, CHANNEL_TYPE_LABELS, HEALTH_LABELS, HEALTH_REASON_LABELS, MODEL_HEALTH_LABELS, SCOPE_LABELS } from '@/lib/labels'
+import { AUTH_HEADER_LABELS, CAPABILITY_LABELS, CAPABILITY_OUTPUT_LABELS, CHANNEL_TYPE_LABELS, HEALTH_LABELS, HEALTH_REASON_LABELS, MODEL_HEALTH_LABELS, SCOPE_LABELS } from '@/lib/labels'
 import { isFullChannel } from '@/lib/types'
 import { useAuthStore } from '@/stores/auth'
 import { useGroupsStore } from '@/stores/groups'
@@ -572,6 +572,12 @@ const HEALTH_CLASSES: Record<string, string> = {
                   超时
                 </dt>
                 <dd>{{ full.config.timeoutSeconds ? `${full.config.timeoutSeconds} 秒` : '默认（60 秒）' }}</dd>
+                <template v-if="full.type === 'anthropic'">
+                  <dt class="text-muted-foreground">
+                    认证方式
+                  </dt>
+                  <dd>{{ AUTH_HEADER_LABELS[full.config.authHeader ?? 'auto'] }}</dd>
+                </template>
                 <dt class="text-muted-foreground">
                   熔断
                 </dt>

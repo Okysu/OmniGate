@@ -41,6 +41,14 @@ export const HEALTH_LABELS: Record<HealthState, string> = {
   open: '熔断',
 }
 
+/** Anthropic channels: how the API key is sent (config.authHeader). */
+export const AUTH_HEADER_LABELS: Record<string, string> = {
+  'auto': '自动（官方只发 x-api-key，第三方两种都发）',
+  'x-api-key': 'x-api-key',
+  'bearer': 'Authorization: Bearer',
+  'both': '两种都发',
+}
+
 /** Why a circuit is open (channel or model). */
 export const HEALTH_REASON_LABELS: Record<string, string> = {
   failures: '连续失败',

@@ -3058,6 +3058,41 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/billing/subscriptions/order:
+    put:
+      tags: [billing]
+      operationId: setMySubscriptionOrder
+      summary: 设置额度使用顺序
+      description: |
+        设置当前用户的有效订阅被请求使用的顺序：网关按此顺序使用第一个仍有额度、覆盖所请求模型的订阅。
+        `ids` 只能包含当前用户的有效订阅、不能重复；未列出的有效订阅排在后面，按先到期先用。返回同 `GET /api/billing/subscriptions`。
+      x-required-permission: billing.own
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  maxItems: 50
+                  items: { type: string, format: uuid }
+      responses:
+        "200":
+          description: 订阅列表（含新的 useOrder）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriptionList"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+
   /api/billing/reset-cards:
     get:
       tags: [billing]
@@ -8597,6 +8632,10 @@ components:
         alwaysOn:
           type: boolean
           description: 永远在线：不受熔断限制，请求总会发往此渠道（失败仍记录在健康状态中），见 ADR-0011
+        authHeader:
+          type: string
+          enum: [auto, x-api-key, bearer, both]
+          description: 仅 anthropic 渠道：密钥放在哪个请求头。auto（默认）= 发往 Anthropic 官方只用 x-api-key，发往第三方同时发送 x-api-key 与 Authorization Bearer
 
     SecretInfo:
       type: object
@@ -11627,6 +11666,9 @@ components:
         createdAt:
           type: string
           format: date-time
+        useOrder:
+          type: [integer, "null"]
+          description: 用户设置的额度使用顺序（0 = 最先使用）；null = 排在设置过的之后，按先到期先用
 
     SubscriptionList:
       allOf:
@@ -12401,8 +12443,8 @@ components:
       type: object
       description: |
         会话亲和（Round 12，`phase12-api.md` §1）。字段名与 new-api 的“渠道亲和”相同（snake_case），new-api 的 JSON 可直接写入：
-        未知字段忽略、`null` 数组视为空、缺少的全局字段取默认值。默认值为内置的 `gpt session`、`codex cli trace`、`claude cli trace`
-        三条规则（§1.1，按此顺序）。
+        未知字段忽略、`null` 数组视为空、缺少的全局字段取默认值。默认值为内置的 `gpt session`、`codex cli trace`、`claude cli trace`、
+        `generic session` 四条规则（§1.1，按此顺序；最后一条兜底所有模型与入口，按模型绑定，不向上游注入任何字段）。
         校验失败 → 422，`details["gateway.affinity"]` 列出字段路径（如 `rules[0].key_sources[0].type`）。
       required: [enabled, session_mode, switch_on_success, keep_on_channel_disabled, max_entries, default_ttl_seconds, rules]
       properties:

@@ -27,6 +27,7 @@ import { isAbortError, queryInt } from '@/lib/query'
 import { isQuotaOverflow, PLAN_ERROR_MESSAGES, QUOTA_OVERFLOW_OPTIONS, QUOTA_OVERFLOW_SHORT, sortSubscriptions } from '@/lib/quota'
 import { normalizeRedeemCode, REDEEM_ERROR_MESSAGES } from '@/lib/redeem'
 import ResetCardsSection from './reset-cards/ResetCardsSection.vue'
+import SubscriptionOrder from './SubscriptionOrder.vue'
 import UsageLimitsCard from './UsageLimitsCard.vue'
 
 const PAGE_SIZE = 20
@@ -362,6 +363,7 @@ function amountClass(v: string): string {
         <Skeleton v-for="i in 2" :key="i" class="h-48 w-full rounded-xl" />
       </div>
       <template v-else>
+        <SubscriptionOrder v-if="activeSubs.length > 1" :subscriptions="activeSubs" @saved="(items) => (subscriptions = sortSubscriptions(items))" />
         <div v-if="activeSubs.length" class="grid gap-4 lg:grid-cols-2">
           <SubscriptionCard v-for="s in activeSubs" :key="s.id" :subscription="s" :now="now.getTime()" :overflow="overflow" store-link />
         </div>

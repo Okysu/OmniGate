@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ChannelFormState } from '@/lib/channelForm'
 import type { PluginFormState } from './pluginForm'
-import type { Channel, ChannelScope, ChannelType, MaxTokensField, PluginManifest } from '@/lib/types'
+import type { AnthropicAuthHeader, Channel, ChannelScope, ChannelType, MaxTokensField, PluginManifest } from '@/lib/types'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { CircleAlert, Download, KeyRound, Loader2, Plus, RefreshCw, Trash2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
@@ -185,7 +185,7 @@ function validate(): Record<string, string> {
 }
 
 const otherErrors = computed(() => {
-  const known = new Set(['name', 'type', 'baseUrl', 'status', 'apiKey', 'models', 'priority', 'weight', 'config.headers', 'config.timeoutSeconds', 'config.maxTokensField', 'scope', 'sharedWith', 'sharedWith.users', 'sharedWith.groups', 'pluginVersionId', 'alerts', 'alerts.balanceBelow'])
+  const known = new Set(['name', 'type', 'baseUrl', 'status', 'apiKey', 'models', 'priority', 'weight', 'config.headers', 'config.timeoutSeconds', 'config.maxTokensField', 'config.authHeader', 'scope', 'sharedWith', 'sharedWith.users', 'sharedWith.groups', 'pluginVersionId', 'alerts', 'alerts.balanceBelow'])
   const schemaProps = pluginState.value.manifest?.configSchema?.properties ?? {}
   // Plugin config / secret errors render inline when the field is on screen.
   const inline = (k: string) => {
@@ -291,6 +291,12 @@ const discoverOpen = ref(false)
 function onDiscoverAdd(rows: ChannelFormState['models']) {
   form.models = rows
   toast.success('已添加到模型映射，保存后生效')
+}
+
+const AUTH_HEADERS: AnthropicAuthHeader[] = ['auto', 'x-api-key', 'bearer', 'both']
+function setAuthHeader(v: unknown) {
+  if (typeof v === 'string' && (AUTH_HEADERS as string[]).includes(v))
+    form.authHeader = v as AnthropicAuthHeader
 }
 
 function setMaxTokensField(v: unknown) {
@@ -579,6 +585,33 @@ function setScope(v: unknown) {
                   </SelectItem>
                   <SelectItem value="max_completion_tokens">
                     max_completion_tokens
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </FormField>
+            <FormField
+              v-if="form.type === 'anthropic'"
+              label="认证方式"
+              for="ch-auth"
+              :error="errors['config.authHeader']"
+              hint="密钥放在哪个请求头。第三方 Anthropic 兼容服务有的只认 x-api-key，有的只认 Authorization: Bearer（对应 Claude Code 的 ANTHROPIC_AUTH_TOKEN）。"
+            >
+              <Select :model-value="form.authHeader" @update:model-value="setAuthHeader">
+                <SelectTrigger id="ch-auth" class="w-full" data-testid="channel-auth-header">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">
+                    自动（官方只发 x-api-key，第三方两种都发）
+                  </SelectItem>
+                  <SelectItem value="x-api-key">
+                    x-api-key
+                  </SelectItem>
+                  <SelectItem value="bearer">
+                    Authorization: Bearer
+                  </SelectItem>
+                  <SelectItem value="both">
+                    两种都发
                   </SelectItem>
                 </SelectContent>
               </Select>

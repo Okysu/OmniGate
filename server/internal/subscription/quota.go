@@ -126,8 +126,7 @@ func compileSub(s *Subscription) (*loadedSub, error) {
 // keyOverflow is the API key's override ("" = follow the user's preference).
 func (s *Service) Decide(ctx context.Context, userID uuid.UUID, model string, keyOverflow string, now time.Time) (*Decision, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+subCols+subFrom+`
-		WHERE s.user_id = $1 AND s.status = 'active' AND s.ends_at > $2 AND s.starts_at <= $2
-		ORDER BY s.ends_at, s.id`, userID, now)
+		WHERE s.user_id = $1 AND s.status = 'active' AND s.ends_at > $2 AND s.starts_at <= $2`+liveOrder, userID, now)
 	if err != nil {
 		return nil, err
 	}
@@ -462,6 +461,9 @@ type SubscriptionView struct {
 	Models    []string    `json:"models"`
 	Rules     []RuleUsage `json:"rules"`
 	CreatedAt time.Time   `json:"createdAt"`
+	// UseOrder is the user's chosen position among their active
+	// subscriptions (0 = used first); null = after them, soonest to expire.
+	UseOrder *int `json:"useOrder"`
 }
 
 // DescribeTx renders sub with its current usage, reading through q (which may be
@@ -498,7 +500,7 @@ func describe(ctx context.Context, q db.Querier, subs []*Subscription, now time.
 		v := &SubscriptionView{
 			ID: ls.ID, User: UserRef{ID: ls.UserID, DisplayName: ls.UserName}, Plan: IDName{ID: ls.PlanID, Name: ls.PlanName},
 			Status: ls.StatusAt(now), StartsAt: ls.StartsAt, EndsAt: ls.EndsAt, Source: ls.Source, Models: ls.Models,
-			Rules: make([]RuleUsage, len(ls.rules)), CreatedAt: ls.CreatedAt,
+			Rules: make([]RuleUsage, len(ls.rules)), CreatedAt: ls.CreatedAt, UseOrder: ls.UseOrder,
 		}
 		for j, r := range ls.rules {
 			st := r.state(ls.StartsAt, now, usage[usageKey{ls.ID, r.ID}])

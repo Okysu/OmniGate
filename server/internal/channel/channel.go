@@ -55,7 +55,21 @@ type Config struct {
 	// always sent to it, whatever its failures (ADR-0011). Failures are still
 	// shown in its health.
 	AlwaysOn bool `json:"alwaysOn,omitempty"`
+	// AuthHeader (anthropic channels) selects how the API key is sent:
+	// "" / "auto" = x-api-key to Anthropic itself, x-api-key and
+	// Authorization: Bearer to everyone else (third-party Anthropic-compatible
+	// upstreams expect one or the other — Claude Code's ANTHROPIC_API_KEY vs
+	// ANTHROPIC_AUTH_TOKEN); "x-api-key", "bearer" or "both" force one.
+	AuthHeader string `json:"authHeader,omitempty"`
 }
+
+// Anthropic credential modes (Config.AuthHeader).
+const (
+	AuthHeaderAuto   = "auto"
+	AuthHeaderAPIKey = "x-api-key"
+	AuthHeaderBearer = "bearer"
+	AuthHeaderBoth   = "both"
+)
 
 type SecretInfo struct {
 	Set  bool    `json:"set"`
@@ -422,6 +436,11 @@ func (in *Input) apply(c *Channel, create bool) error {
 		}
 		if cfg.MaxTokensField != "" && cfg.MaxTokensField != "max_tokens" && cfg.MaxTokensField != "max_completion_tokens" {
 			details["config.maxTokensField"] = "只能是 max_tokens 或 max_completion_tokens"
+		}
+		switch cfg.AuthHeader {
+		case "", AuthHeaderAuto, AuthHeaderAPIKey, AuthHeaderBearer, AuthHeaderBoth:
+		default:
+			details["config.authHeader"] = "只能是 auto、x-api-key、bearer 或 both"
 		}
 		c.Config = cfg
 	}

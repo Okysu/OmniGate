@@ -91,8 +91,7 @@ func ActivePlansTx(ctx context.Context, q db.Querier, now time.Time) ([]*Plan, e
 // LiveSubscriptionsTx is LiveSubscriptions through q.
 func LiveSubscriptionsTx(ctx context.Context, q db.Querier, userID uuid.UUID, now time.Time) ([]*Subscription, error) {
 	rows, err := q.Query(ctx, `SELECT `+subCols+subFrom+`
-		WHERE s.user_id = $1 AND s.status = 'active' AND s.ends_at > $2 AND s.starts_at <= $2
-		ORDER BY s.ends_at, s.id`, userID, dbTime(now))
+		WHERE s.user_id = $1 AND s.status = 'active' AND s.ends_at > $2 AND s.starts_at <= $2`+liveOrder, userID, dbTime(now))
 	if err != nil {
 		return nil, err
 	}

@@ -30,6 +30,7 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 func (h *Handler) Routes(r chi.Router) {
 	r.Get("/plans", h.catalog)
 	r.With(auth.Require(authz.BillingOwn)).Get("/billing/subscriptions", h.mine)
+	r.With(auth.Require(authz.BillingOwn)).Put("/billing/subscriptions/order", h.reorderMine)
 	r.With(auth.Require(authz.BillingOwn)).Get("/billing/preferences", h.getPrefs)
 	r.With(auth.Require(authz.BillingOwn)).Put("/billing/preferences", h.putPrefs)
 	h.cardRoutes(r)
@@ -163,6 +164,33 @@ func (h *Handler) catalog(w http.ResponseWriter, r *http.Request) {
 	}
 	SortCatalog(items)
 	httpx.WriteJSON(w, http.StatusOK, httpx.List[CatalogPlanJSON]{Items: catalogViews(items), Total: total, Page: 1, PageSize: len(items)})
+}
+
+// reorderMine sets the order the user's active subscriptions are used in
+// ({ids}: first used first).
+func (h *Handler) reorderMine(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(body.IDs))
+	for _, v := range body.IDs {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			httpx.WriteError(w, r, invalid(map[string]any{"ids": "包含无效的订阅 ID：" + v}))
+			return
+		}
+		ids = append(ids, id)
+	}
+	items, err := h.svc.SetUseOrder(r.Context(), auth.PrincipalFrom(r.Context()).UserID, ids, time.Now())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, httpx.List[*SubscriptionView]{Items: items, Total: len(items), Page: 1, PageSize: mySubsLimit})
 }
 
 func (h *Handler) mine(w http.ResponseWriter, r *http.Request) {

@@ -1703,11 +1703,14 @@ curl -sS https://gateway.example.com/api/admin/prices \
 - 其他客户端（普通 OpenAI Chat 客户端等）什么都不发送时：**对话锚点**——开头的 system / developer 指令加第一条用户消息的指纹，
   同一段对话后续轮次不变，不同对话不同。
 
-默认开启，内置三条规则（都是“优先保持”：绑定的渠道失败时仍按正常重试规则换渠道，可用性优先），按顺序：
+默认开启，内置四条规则（都是“优先保持”：绑定的渠道失败时仍按正常重试规则换渠道，可用性优先），按顺序：
 
 1. `gpt session`：所有 `gpt-*` 模型，不限入口（Chat、Responses、Claude Code 走 `/v1/messages` 调用 GPT 也算），依次取上面的标识，
    最后用对话锚点兜底；并给 OpenAI 格式的上游请求补全会话标识（见 18.2）；
-2. `codex cli trace`、`claude cli trace`：其他模型的 Codex CLI / Claude Code 请求。
+2. `codex cli trace`、`claude cli trace`：其他模型的 Codex CLI / Claude Code 请求；
+3. `generic session`：兜底规则，所有模型、所有入口（例如 Zed、ai-sdk 等普通 OpenAI Chat 客户端调用国模），标识取法同 `gpt session`，
+   最后用对话锚点；**按模型分别绑定**（同一对话里换模型不受影响），不向上游注入任何字段（严格的 OpenAI 兼容上游可能拒绝 `prompt_cache_key`）。
+   已经保存过会话亲和设置的站点，可在「系统设置 → 会话亲和」里点「填充模板」加上（同名规则替换，其他规则保留）。
 
 规则命中时还会把会话相关的客户端请求头（`Session_id`、`X-Codex-Turn-Metadata`、`X-Stainless-*`、`Anthropic-Beta`、客户端的 `User-Agent` 等）
 转发给上游。

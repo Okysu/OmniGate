@@ -296,7 +296,12 @@ export interface ChannelConfig {
   maxTokensField?: MaxTokensField
   /** Exempt from the circuit breaker: requests always reach the channel. */
   alwaysOn?: boolean
+  /** Anthropic channels: how the key is sent (absent = auto). */
+  authHeader?: AnthropicAuthHeader
 }
+
+/** auto = x-api-key to Anthropic itself, both headers to third parties. */
+export type AnthropicAuthHeader = 'auto' | 'x-api-key' | 'bearer' | 'both'
 
 export interface ChannelHealth {
   state: HealthState
@@ -1022,6 +1027,8 @@ export interface Subscription {
   models: string[]
   rules: RuleUsage[]
   createdAt: string
+  /** The user's chosen position among their active subscriptions (0 = used first); null = after them. */
+  useOrder?: number | null
 }
 
 // ---------------------------------------------------------------------------

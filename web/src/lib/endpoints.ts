@@ -314,6 +314,8 @@ export const billingApi = {
   redeem: (code: string) => api.post<RedeemResult>('/api/billing/redeem', { code }),
   /** My subscriptions (newest 50, including expired / cancelled) with current usage. */
   subscriptions: (signal?: AbortSignal) => api.get<Paginated<Subscription>>('/api/billing/subscriptions', { signal }),
+  /** The order active subscriptions are used in (first used first); returns my subscriptions. */
+  reorderSubscriptions: (ids: string[]) => api.put<Paginated<Subscription>>('/api/billing/subscriptions/order', { ids }),
   /** Account billing preferences (what happens once subscription quota is used up). */
   preferences: (signal?: AbortSignal) => api.get<BillingPreferences>('/api/billing/preferences', { signal }),
   updatePreferences: (body: BillingPreferences) => api.put<BillingPreferences>('/api/billing/preferences', body),

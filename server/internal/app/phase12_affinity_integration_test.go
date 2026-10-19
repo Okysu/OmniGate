@@ -71,6 +71,7 @@ func (u *recUpstream) last() recRequest {
 // rule: without affinity, consecutive requests alternate between them.
 type affinityEnv struct {
 	*gwEnv
+	convs int // fresh conversations sent without a session identifier
 	key   string
 	up    map[string]*recUpstream // by channel id
 	names map[string]string       // channel id → name
@@ -93,15 +94,17 @@ func setupAffinity(t *testing.T) *affinityEnv {
 }
 
 // respond sends a Codex-style /v1/responses request; session = "" sends no
-// session identifier. It returns the status and the channel that received the
-// request (by upstream hit counts).
+// session identifier and starts a new conversation each time (a conversation
+// anchor of its own for the "generic session" rule). It returns the status
+// and the channel that received the request (by upstream hit counts).
 func (a *affinityEnv) respond(session string, headers ...string) (int, string) {
 	a.t.Helper()
 	before := map[string]int{}
 	for id, u := range a.up {
 		before[id] = u.count()
 	}
-	body := `{"model":"m1","input":"hi"}`
+	a.convs++
+	body := fmt.Sprintf(`{"model":"m1","input":"hi %d"}`, a.convs)
 	if session != "" {
 		body = `{"model":"m1","input":"hi","prompt_cache_key":"` + session + `"}`
 	}
@@ -155,12 +158,13 @@ func TestSessionAffinityRouting(t *testing.T) {
 	// The default setting ships the presets (enabled, prefer).
 	st := a.mustDo(a.admin, http.MethodGet, "/api/admin/settings", nil, 200)
 	aff := st["settings"].(map[string]any)["gateway"].(map[string]any)["affinity"].(map[string]any)
-	if aff["enabled"] != true || aff["session_mode"] != "prefer" || len(aff["rules"].([]any)) != 3 || st["sources"].(map[string]any)["gateway.affinity"] != "default" {
+	if aff["enabled"] != true || aff["session_mode"] != "prefer" || len(aff["rules"].([]any)) != 4 || st["sources"].(map[string]any)["gateway.affinity"] != "default" {
 		t.Fatalf("default affinity = %v", aff)
 	}
 
-	// Without a session identifier round robin alternates, and no session
-	// header is passed (no rule applies).
+	// Without a session identifier each new conversation is balanced
+	// (round robin), and no session header is passed ("generic session"
+	// binds by the conversation anchor and passes nothing).
 	seen := map[string]int{}
 	for i := 0; i < 4; i++ {
 		code, ch := a.respond("", "X-Codex-Turn-Metadata", "{}", "User-Agent", "codex_cli_rs/0.50")
@@ -297,7 +301,8 @@ func TestSessionAffinityRouting(t *testing.T) {
 		counts[o] = out["total"].(float64)
 		for _, it := range out["items"].([]any) {
 			l := it.(map[string]any)
-			if o != "any" && l["affinity"] != o || l["affinityRule"] != "codex cli trace" {
+			// Requests without a session identifier fall to "generic session".
+			if o != "any" && l["affinity"] != o || l["affinityRule"] != "codex cli trace" && l["affinityRule"] != "generic session" {
 				t.Fatalf("log %s: %v / %v", o, l["affinity"], l["affinityRule"])
 			}
 		}
@@ -306,7 +311,7 @@ func TestSessionAffinityRouting(t *testing.T) {
 		t.Fatalf("affinity outcomes = %v", counts)
 	}
 	all := a.mustDo(a.admin, http.MethodGet, "/api/logs?pageSize=200", nil, 200)
-	if counts["any"] != all["total"].(float64)-4 { // the four requests without a session
+	if counts["any"] != all["total"].(float64) { // without a session id: "generic session"
 		t.Fatalf("affinity=any = %v of %v", counts["any"], all["total"])
 	}
 	var leaked int
@@ -335,7 +340,10 @@ func TestSessionAffinityRouting(t *testing.T) {
 
 	// Binding stats and clearing (settings.read / settings.write, audited).
 	stats := a.mustDo(a.admin, http.MethodGet, "/api/admin/affinity/stats", nil, 200)
-	if stats["entries"].(float64) < 5 || stats["maxEntries"].(float64) != 1000 || stats["rules"].(map[string]any)["codex cli trace"].(float64) != stats["entries"].(float64) {
+	// The conversations sent without a session id are bound by "generic session".
+	byRule := stats["rules"].(map[string]any)
+	codex, generic := byRule["codex cli trace"].(float64), byRule["generic session"].(float64)
+	if stats["entries"].(float64) < 5 || stats["maxEntries"].(float64) != 1000 || codex+generic != stats["entries"].(float64) || generic < 1 {
 		t.Fatalf("stats = %v", stats)
 	}
 	if resp, _ := a.carol.do(http.MethodGet, "/api/admin/affinity/stats", nil); resp.StatusCode != 403 {
@@ -349,7 +357,7 @@ func TestSessionAffinityRouting(t *testing.T) {
 		t.Fatalf("clear other rule = %v", cl)
 	}
 	cl = a.mustDo(a.admin, http.MethodPost, "/api/admin/affinity/clear", map[string]any{"rule": "codex cli trace"}, 200)
-	if cl["cleared"].(float64) != stats["entries"].(float64) || cl["stats"].(map[string]any)["entries"].(float64) != 0 {
+	if cl["cleared"].(float64) != codex || cl["stats"].(map[string]any)["entries"].(float64) != generic {
 		t.Fatalf("clear = %v", cl)
 	}
 	a.mustDo(a.admin, http.MethodPost, "/api/admin/affinity/clear", nil, 200)
