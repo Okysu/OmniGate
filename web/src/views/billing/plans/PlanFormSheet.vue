@@ -39,9 +39,13 @@ const saving = ref(false)
 const reloading = ref(false)
 const current = ref<Plan | null>(null)
 const isEdit = computed(() => current.value !== null)
+/** Edit only: also give the plan's active subscriptions the new model list. */
+const syncModels = ref(false)
+const modelsChanged = computed(() => !!current.value && [...form.models].sort().join(',') !== [...current.value.models].sort().join(','))
 
 function reset(p: Plan | null) {
   current.value = p
+  syncModels.value = false
   Object.assign(form, p ? formFromPlan(p) : emptyPlanForm())
   errors.value = {}
   formError.value = null
@@ -140,7 +144,7 @@ async function submit() {
   try {
     const body = buildPlanPayload(form)
     const saved = current.value
-      ? await plansApi.update(current.value.id, { ...body, version: current.value.version })
+      ? await plansApi.update(current.value.id, { ...body, version: current.value.version, syncSubscriptionModels: modelsChanged.value && syncModels.value })
       : await plansApi.create(body)
     toast.success(current.value ? '套餐已保存' : '套餐已创建')
     emit('saved', saved, !current.value)
@@ -281,6 +285,15 @@ async function reloadLatest() {
           <FormField for="plan-models" :error="errors.models" hint="订阅只覆盖这些逻辑模型的请求；留空表示全部模型。未覆盖的模型照常从钱包扣费。可输入列表外的模型名。">
             <MultiSelect id="plan-models" v-model="form.models" :options="planModelOptions" :loading="modelsLoading" allow-custom empty-label="全部模型" placeholder="搜索或输入模型名" />
           </FormField>
+          <div v-if="isEdit && modelsChanged" class="flex items-start justify-between gap-4 rounded-lg border p-3" data-testid="plan-sync-models">
+            <div class="space-y-1">
+              <Label for="plan-sync-models">同时更新已开通的有效订阅</Label>
+              <p class="text-muted-foreground text-xs">
+                开启后，这个套餐现有的有效订阅也改用新的模型列表（例如新加的模型老用户也能用）；配额规则不变。不开启则只影响之后的新订阅。
+              </p>
+            </div>
+            <Switch id="plan-sync-models" v-model="syncModels" />
+          </div>
         </section>
 
         <Separator />

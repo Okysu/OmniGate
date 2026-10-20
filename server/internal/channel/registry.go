@@ -215,12 +215,28 @@ func (r *Runtime) UpstreamModel(model string) (string, bool) {
 	return m, ok
 }
 
-// Timeout is the response-header timeout for this channel.
+// Timeout is the response-header timeout for this channel; 0 = none
+// (Config.TimeoutSeconds = -1: image generation and large uploads may
+// legitimately take many minutes before the upstream answers).
 func (r *Runtime) Timeout() time.Duration {
-	if r.Config.TimeoutSeconds > 0 {
+	switch {
+	case r.Config.TimeoutSeconds > 0:
 		return time.Duration(r.Config.TimeoutSeconds) * time.Second
+	case r.Config.TimeoutSeconds < 0:
+		return 0
 	}
 	return 60 * time.Second
+}
+
+// HeaderTimer calls expire once the channel's response-header timeout has
+// elapsed (never without a timeout); the returned stop cancels it.
+func (r *Runtime) HeaderTimer(expire func()) (stop func()) {
+	d := r.Timeout()
+	if d <= 0 {
+		return func() {}
+	}
+	t := time.AfterFunc(d, expire)
+	return func() { t.Stop() }
 }
 
 // anthropicAuth reports which headers carry an anthropic channel's key

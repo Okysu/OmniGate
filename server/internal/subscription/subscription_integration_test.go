@@ -829,3 +829,24 @@ func TestSubscriptionUseOrder(t *testing.T) {
 		}
 	}
 }
+
+// Plan model changes reach existing subscriptions only when synced.
+func TestPlanModelSync(t *testing.T) {
+	f := newFixture(t)
+	admin := f.user(identity.RoleSystemAdmin)
+	u := f.user(identity.RoleUser)
+	p := f.plan(PlanInput{Rules: []Rule{sessionRule("10")}, Models: []string{"a"}})
+	v, _ := f.grant(u.ID, p.ID, 1)
+	models := []string{"a", "img"}
+	p2, err := f.svc.UpdatePlan(f.ctx, admin, p.ID, PlanPatch{Models: &models, Version: p.Version}, RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := f.decide(u.ID, "img", f.now); d.SubscriptionID != nil {
+		t.Fatal("without sync the subscription keeps its snapshot")
+	}
+	if _, err := f.svc.UpdatePlan(f.ctx, admin, p.ID, PlanPatch{Models: &models, Version: p2.Version, SyncSubscriptionModels: true}, RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	admitted(t, f.decide(u.ID, "img", f.now), v.ID)
+}

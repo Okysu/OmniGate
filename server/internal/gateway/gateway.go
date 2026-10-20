@@ -321,7 +321,11 @@ func (g *Gateway) countTokens(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			break
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), rt.Timeout())
+		timeout := rt.Timeout()
+		if timeout <= 0 {
+			timeout = time.Minute // count_tokens is a fast call even on channels without a timeout
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		ureq, err := rt.NewRequest(ctx, protocol.Anthropic, out, r.Header, g.opts.UserAgent)
 		if err == nil {
 			ureq.URL.Path += "/count_tokens"
@@ -1272,9 +1276,9 @@ func (g *Gateway) attempt(w http.ResponseWriter, r *http.Request, st *reqState, 
 		return fail(protocol.NewError(protocol.ErrInternal, "failed to build upstream request"), "", false)
 	}
 	errHeaderTimeout := errors.New("upstream header timeout")
-	timer := time.AfterFunc(rt.Timeout(), func() { cancel(errHeaderTimeout) })
+	stopTimer := rt.HeaderTimer(func() { cancel(errHeaderTimeout) })
 	resp, err := g.reg.Do(rt, req)
-	timer.Stop()
+	stopTimer()
 	if err != nil {
 		switch {
 		case r.Context().Err() != nil:

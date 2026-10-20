@@ -8708,9 +8708,8 @@ components:
             只有开启了它的渠道才是 `/v1/completions` 的候选；anthropic / custom 渠道忽略该字段。默认 false。
         timeoutSeconds:
           type: integer
-          minimum: 0
-          maximum: 600
-          description: 等待上游响应头的超时（秒），0 / 省略表示默认 60 秒；不限制流式响应的总时长
+          minimum: -1
+          description: 等待上游响应头的超时（秒），0 / 省略表示默认 60 秒，-1 表示不限制（画图、大文件上传等）；不限制流式响应的总时长
         maxTokensField:
           type: string
           enum: [max_tokens, max_completion_tokens]
@@ -11528,6 +11527,9 @@ components:
       required: [version]
       description: 省略的字段保持不变；`models`、`rules` 提交时整体替换；`listPrice` 显式为 null 时清除。
       properties:
+        syncSubscriptionModels:
+          type: boolean
+          description: 为 true 时，把套餐（修改后）的模型列表同时写入它现有的有效订阅（订阅默认保存开通时的快照）；配额规则不变，审计记录同步的订阅数
         name:
           type: string
           maxLength: 100

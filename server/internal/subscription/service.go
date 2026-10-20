@@ -179,6 +179,9 @@ type PlanPatch struct {
 	Group        *string
 	Status       *string
 	Version      int
+	// SyncSubscriptionModels also writes the (new) model list to the plan's
+	// active subscriptions; their rules stay as granted.
+	SyncSubscriptionModels bool
 }
 
 func validatePlan(in *PlanInput) error {
@@ -435,9 +438,18 @@ func (s *Service) UpdatePlan(ctx context.Context, actor Actor, id uuid.UUID, pat
 		if p, err = scanPlan(tx.QueryRow(ctx, `SELECT `+planCols+` FROM plans p WHERE p.id = $2`, now, id)); err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, actor, meta, ActionPlanUpdate, "plan", id.String(), map[string]any{
-			"before": planAudit(cur), "after": planAudit(p),
-		})
+		md := map[string]any{"before": planAudit(cur), "after": planAudit(p)}
+		if patch.SyncSubscriptionModels {
+			// Existing subscribers get the plan's current models too (new
+			// models added to a plan, e.g. image models).
+			tag, err := tx.Exec(ctx, `UPDATE subscriptions SET models = $2 WHERE plan_id = $1 AND status = 'active' AND ends_at > $3`,
+				id, models, now)
+			if err != nil {
+				return err
+			}
+			md["syncedSubscriptions"] = tag.RowsAffected()
+		}
+		return s.audit(ctx, tx, actor, meta, ActionPlanUpdate, "plan", id.String(), md)
 	})
 	if err != nil {
 		return nil, err

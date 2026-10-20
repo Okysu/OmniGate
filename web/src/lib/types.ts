@@ -999,7 +999,11 @@ export interface PlanInput {
   status?: PlanStatus
 }
 
-export type PlanPatch = Partial<PlanInput> & { version: number }
+export type PlanPatch = Partial<PlanInput> & {
+  version: number
+  /** Also write the model list to the plan's active subscriptions (they keep their grant-time snapshot otherwise). */
+  syncSubscriptionModels?: boolean
+}
 
 export interface RuleUsage extends QuotaRule {
   /** Weighted usage in the current window. */

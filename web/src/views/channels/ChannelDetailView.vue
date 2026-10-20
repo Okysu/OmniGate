@@ -571,7 +571,7 @@ const HEALTH_CLASSES: Record<string, string> = {
                 <dt class="text-muted-foreground">
                   超时
                 </dt>
-                <dd>{{ full.config.timeoutSeconds ? `${full.config.timeoutSeconds} 秒` : '默认（60 秒）' }}</dd>
+                <dd>{{ full.config.timeoutSeconds === -1 ? '不限制' : full.config.timeoutSeconds ? `${full.config.timeoutSeconds} 秒` : '默认（60 秒）' }}</dd>
                 <template v-if="full.type === 'anthropic'">
                   <dt class="text-muted-foreground">
                     认证方式

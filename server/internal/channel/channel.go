@@ -431,8 +431,8 @@ func (in *Input) apply(c *Channel, create bool) error {
 				details["config.headers"] = fmt.Sprintf("请求头 %q 不允许或格式无效", k)
 			}
 		}
-		if cfg.TimeoutSeconds < 0 || cfg.TimeoutSeconds > 600 {
-			details["config.timeoutSeconds"] = "范围为 0–600 秒（0 表示默认 60 秒）"
+		if cfg.TimeoutSeconds < -1 {
+			details["config.timeoutSeconds"] = "0 表示默认 60 秒，-1 表示不限制，其他为秒数"
 		}
 		if cfg.MaxTokensField != "" && cfg.MaxTokensField != "max_tokens" && cfg.MaxTokensField != "max_completion_tokens" {
 			details["config.maxTokensField"] = "只能是 max_tokens 或 max_completion_tokens"

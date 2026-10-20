@@ -142,9 +142,9 @@ func (g *Gateway) attemptCustom(w http.ResponseWriter, r *http.Request, st *reqS
 	}
 
 	errHeaderTimeout := errors.New("upstream header timeout")
-	timer := time.AfterFunc(rt.Timeout(), func() { cancel(errHeaderTimeout) })
+	stopTimer := rt.HeaderTimer(func() { cancel(errHeaderTimeout) })
 	resp, err := g.reg.Do(rt, req)
-	timer.Stop()
+	stopTimer()
 	if err != nil {
 		switch {
 		case r.Context().Err() != nil:

@@ -161,8 +161,8 @@ function validate(): Record<string, string> {
     e.priority = '范围为 -1000 到 1000 的整数'
   if (!Number.isInteger(form.weight) || form.weight < 1 || form.weight > 1000)
     e.weight = '范围为 1 到 1000 的整数'
-  if (!Number.isInteger(form.timeoutSeconds) || form.timeoutSeconds < 0 || form.timeoutSeconds > 600)
-    e['config.timeoutSeconds'] = '范围为 0–600 秒（0 表示默认 60 秒）'
+  if (!Number.isInteger(form.timeoutSeconds) || form.timeoutSeconds < -1)
+    e['config.timeoutSeconds'] = '填写秒数；0 表示默认 60 秒，-1 表示不限制'
   for (const h of form.headers) {
     const k = h.key.trim()
     if (!k && !h.value)
@@ -565,8 +565,8 @@ function setScope(v: unknown) {
             <Switch id="ch-always-on" v-model="form.alwaysOn" />
           </div>
           <div class="grid gap-4 sm:grid-cols-2">
-            <FormField label="超时（秒）" for="ch-timeout" :error="errors['config.timeoutSeconds']" hint="等待上游响应头的超时；0 表示默认 60 秒，最大 600。">
-              <Input id="ch-timeout" v-model.number="form.timeoutSeconds" type="number" min="0" max="600" step="1" />
+            <FormField label="超时（秒）" for="ch-timeout" :error="errors['config.timeoutSeconds']" hint="等待上游响应头的超时（不限制流式响应的总时长）。0 = 默认 60 秒，-1 = 不限制；画图、大文件上传等要很久才返回的渠道可设为不限制。">
+              <Input id="ch-timeout" v-model.number="form.timeoutSeconds" type="number" min="-1" step="1" />
             </FormField>
             <FormField
               v-if="form.type === 'openai'"

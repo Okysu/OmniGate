@@ -160,7 +160,8 @@ export function buildChannelPayload(form: ChannelFormState, original?: Channel):
   }
   if (form.type === 'anthropic' && form.authHeader !== 'auto')
     config.authHeader = form.authHeader
-  if (form.timeoutSeconds > 0)
+  // > 0 seconds; -1 = no limit (image generation, large uploads); 0 = the default 60 s.
+  if (form.timeoutSeconds > 0 || form.timeoutSeconds === -1)
     config.timeoutSeconds = Math.floor(form.timeoutSeconds)
   if (form.alwaysOn)
     config.alwaysOn = true
