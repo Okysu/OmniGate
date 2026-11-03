@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 env:
-  # go.mod 的 toolchain 行（go1.26.9，修复了标准库已知漏洞）高于 setup-go 安装的版本时自动下载该版本。
+  # go.mod 的 toolchain 行（go1.26.10，修复了标准库已知漏洞）高于 setup-go 安装的版本时自动下载该版本。
   GOTOOLCHAIN: auto
 
 jobs:

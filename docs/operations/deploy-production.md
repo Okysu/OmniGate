@@ -83,8 +83,8 @@ docker run --rm omnigate:v1.0.0 version
 docker save omnigate:v1.0.0 | gzip | ssh root@gate.example.com 'gunzip | docker load'
 ```
 
-然后在 `deploy/.env` 中设置 `OMNIGATE_IMAGE=omnigate:v1.0.0`（优先于 `OMNIGATE_TAG`）。构建器镜像固定为 `golang:1.26.9-alpine`、`node:24.21.0-alpine`（带摘要），
-产物用 Go 1.26.9 编译；arm64：`docker buildx build --platform linux/arm64 --build-arg VERSION=v1.0.0 -t omnigate:v1.0.0 --load .`
+然后在 `deploy/.env` 中设置 `OMNIGATE_IMAGE=omnigate:v1.0.0`（优先于 `OMNIGATE_TAG`）。构建器镜像固定为 `golang:1.26.10-alpine`、`node:24.21.0-alpine`（带摘要），
+产物用 Go 1.26.10 编译；arm64：`docker buildx build --platform linux/arm64 --build-arg VERSION=v1.0.0 -t omnigate:v1.0.0 --load .`
 
 **生产使用固定的版本标签**（`0.1.0`、`0.2.0`…），不要只用 `latest`：回滚时需要明确的旧版本。
 

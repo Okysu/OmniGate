@@ -51,8 +51,8 @@ docker build --build-arg VERSION=v0.3.0 -t omnigate:v0.3.0 .
 
 构建分三个阶段：Node（`pnpm install --frozen-lockfile`、`pnpm build`、预压缩）→ Go（把 `web/dist` 复制进
 `server/internal/webui/dist` 后 `CGO_ENABLED=0 go build`）→ distroless 运行时。`VERSION` 会写进二进制，即 `/api/system/info`
-返回的 `version`。三个基础镜像都固定到精确版本与摘要（`node:24.21.0-alpine`、`golang:1.26.9-alpine`、distroless），构建阶段设置
-`GOTOOLCHAIN=auto`，保证二进制不低于 `server/go.mod` 的 `toolchain go1.26.9`（`go version -m` 可核对；CI 同时运行 `govulncheck`）。`.dockerignore` 排除了 `.env*`、`*.local`、`.git`、`node_modules`、本地构建产物和文档，镜像中不包含任何密钥。
+返回的 `version`。三个基础镜像都固定到精确版本与摘要（`node:24.21.0-alpine`、`golang:1.26.10-alpine`、distroless），构建阶段设置
+`GOTOOLCHAIN=auto`，保证二进制不低于 `server/go.mod` 的 `toolchain go1.26.10`（`go version -m` 可核对；CI 同时运行 `govulncheck`）。`.dockerignore` 排除了 `.env*`、`*.local`、`.git`、`node_modules`、本地构建产物和文档，镜像中不包含任何密钥。
 
 发布的镜像：GitHub Actions 在 `main` 与 `v*` 标签上构建并推送 `ghcr.io/okysu/omnigate`（amd64 + arm64，见 README「CI / 发布」），
 构建参数 `VERSION`、`COMMIT`、`BUILD_TIME` 写进二进制（`omnigate version`、启动日志）。
