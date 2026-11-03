@@ -102,11 +102,11 @@ describe('the user\'s cards', () => {
 describe('ruleChange', () => {
   const now = new Date(2026, 9, 10, 9, 35).getTime() // local time
 
-  it('restarts a session window at now', () => {
-    const c = ruleChange(rule({ windowStart: new Date(2026, 9, 10, 9, 35 - 300).toISOString(), resetsAt: new Date(2026, 9, 10, 14, 35).toISOString() }), now, money)
+  it('preserves the existing session refresh time', () => {
+    const c = ruleChange(rule({ windowStart: new Date(2026, 9, 10, 8, 35).toISOString(), resetsAt: new Date(2026, 9, 10, 13, 35).toISOString() }), now, money)
     expect(c.title).toBe('5 小时')
-    expect(c.before).toBe('$18.200 / $30.000，14:35 刷新')
-    expect(c.after).toBe('$0.000 / $30.000，下次刷新 14:35（5 小时后）')
+    expect(c.before).toBe('$18.200 / $30.000，13:35 刷新')
+    expect(c.after).toBe('$0.000 / $30.000，13:35 刷新（时间不变）')
     expect(c.idle).toBe(false)
   })
 
@@ -115,13 +115,13 @@ describe('ruleChange', () => {
     const c = ruleChange(weekly, now, money)
     expect(c.title).toBe('7 天会话')
     expect(c.before).toBe('0 / 100，尚未开始')
-    expect(c.after).toBe('0 / 100，下次刷新 10-17 09:35（7 天后）')
+    expect(c.after).toBe('0 / 100，尚未开始')
     expect(c.idle).toBe(true)
   })
 
   it('clears a rolling window (no single refresh time)', () => {
     const roll = rule({ window: { kind: 'rolling', duration: '5h' }, resetsAt: new Date(2026, 9, 10, 11, 0).toISOString() })
-    expect(ruleChange(roll, now, money)).toMatchObject({ before: '$18.200 / $30.000，11:00 起逐步释放', after: '$0.000 / $30.000，窗口清空' })
+    expect(ruleChange(roll, now, money)).toMatchObject({ before: '$18.200 / $30.000，11:00 起逐步释放', after: '$0.000 / $30.000，11:00 起逐步释放（时间不变）' })
     expect(ruleChange({ ...roll, used: '0', resetsAt: null }, now, money).before).toBe('$0.000 / $30.000，窗口内暂无用量')
   })
 

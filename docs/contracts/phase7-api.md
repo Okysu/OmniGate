@@ -88,9 +88,9 @@
 ```
 
 语义：清空每份订阅所选规则的**当前窗口**用量——
-- `calendar` / `period`：删除当前窗口的计数；
-- `rolling`：删除窗口内的全部分桶；
-- `session`：从重置时刻 A 重新开始一个空的会话窗口（锚定式重置，[phase11-api.md §1](phase11-api.md#1-锚定式重置anchored-reset)）：用量为 0，下一次刷新为 A + 窗口时长（如 5 小时窗口在 A + 5h 刷新），与原来的刷新时间无关；之后的用量计入这一窗口；
+- `calendar` / `period`：清零当前窗口的计数，保留窗口边界；
+- `rolling`：清零活动分桶，保留原桶时间；
+- `session`：清零当前会话用量，保持原窗口起点和刷新时间；尚未开启的窗口仍从首次使用起计时，详见 [重置卡契约 §1](phase11-api.md#1-保留刷新时间的重置)。
 - `lifetime`：仅在 `includeLifetime` 时清零。
 被阻断的用户立即恢复可用。审计 `subscription.quota_reset`（记录目标、规则与数量），每位受影响用户收到通知 `subscription.quota_reset`（站内 + 邮件，默认开启）。
 

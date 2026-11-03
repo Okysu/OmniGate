@@ -98,7 +98,7 @@ function isExpired(b: ResetCardBatch): boolean {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="重置卡" description="（管理员）向用户发放 5 小时 / 周 / 双重置卡。用户使用后，对应额度窗口立即清零并从使用时起重新计时。">
+    <PageHeader title="重置卡" description="（管理员）向用户发放 5 小时 / 周 / 双重置卡。用户使用后，对应额度用量立即清零，保持原刷新时间。">
       <template #actions>
         <Button size="sm" data-testid="card-issue" @click="issueOpen = true">
           <Plus />

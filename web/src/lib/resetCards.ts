@@ -3,7 +3,7 @@
 // Pure functions: money formatting is injected (`useCurrency().money`).
 import type { MoneyFormatter } from './quota'
 import type { QuotaWindow, ResetCard, ResetCardIssueInput, ResetCardKind, ResetCardTarget, RuleUsage } from './types'
-import { durationMinutes, formatDuration, formatMeterAmount, formatRemaining, ruleTitle } from './quota'
+import { durationMinutes, formatMeterAmount, formatRemaining, ruleTitle } from './quota'
 import { fromLocalInput } from './timeRange'
 
 export const RESET_CARD_KINDS: ResetCardKind[] = ['5h', 'weekly', 'both']
@@ -16,8 +16,8 @@ export const RESET_CARD_KIND_LABELS: Record<ResetCardKind, string> = {
 
 /** What a card resets (window length decides, not the rule id). */
 export const RESET_CARD_KIND_HINTS: Record<ResetCardKind, string> = {
-  '5h': '清零 5 小时额度，从使用时起重新计时 5 小时',
-  'weekly': '清零每周（7 天）额度，从使用时起重新计时 7 天',
+  '5h': '清零 5 小时额度，保持原刷新时间',
+  'weekly': '清零每周（7 天）额度，保持原刷新时间',
   'both': '同时清零 5 小时与每周额度',
 }
 
@@ -153,9 +153,7 @@ export interface RuleChange {
 }
 
 /**
- * Before → after of one rule a card resets at `now`: usage drops to 0; a session
- * window restarts at `now` (refreshing one duration later), a rolling window loses
- * every bucket (it has no single refresh time).
+ * Before → after: usage drops to zero while the original refresh time remains.
  */
 export function ruleChange(rule: RuleUsage, now: number, money: MoneyFormatter): RuleChange {
   const limit = formatMeterAmount(rule.meter, rule.limit, money)
@@ -164,13 +162,11 @@ export function ruleChange(rule: RuleUsage, now: number, money: MoneyFormatter):
   let after = `${formatMeterAmount(rule.meter, '0', money)} / ${limit}`
   if (rule.window.kind === 'session') {
     before += rule.windowStart === null || !rule.resetsAt ? '，尚未开始' : `，${formatClock(rule.resetsAt, now)} 刷新`
-    const mins = durationMinutes(rule.window.duration)
-    if (mins !== null)
-      after += `，下次刷新 ${formatClock(now + mins * 60_000, now)}（${formatDuration(rule.window.duration)}后）`
+    after += rule.windowStart === null || !rule.resetsAt ? '，尚未开始' : `，${formatClock(rule.resetsAt, now)} 刷新（时间不变）`
   }
   else {
     before += rule.resetsAt ? `，${formatClock(rule.resetsAt, now)} 起逐步释放` : '，窗口内暂无用量'
-    after += '，窗口清空'
+    after += rule.resetsAt ? `，${formatClock(rule.resetsAt, now)} 起逐步释放（时间不变）` : '，窗口内暂无用量'
   }
   return { id: rule.id, title: ruleTitle(rule), before, after, idle: !(Number(rule.used) > 0) }
 }

@@ -57,6 +57,12 @@ func (s *Service) remember(key string) {
 // email / webhook deliveries according to their preferences. It returns
 // whether the event was new.
 func (s *Service) Emit(ctx context.Context, ev Event) (bool, error) {
+	return s.emit(ctx, ev, nil)
+}
+
+// after runs in the same transaction as the fan-out (admin sends need an
+// atomic audit record). It is not called for an already-emitted event.
+func (s *Service) emit(ctx context.Context, ev Event, after func(db.Tx, []uuid.UUID) error) (bool, error) {
 	meta, ok := Meta(ev.Type)
 	if !ok || ev.Key == "" {
 		return false, errors.New("notify: unknown event type or empty dedupe key")
@@ -156,6 +162,9 @@ func (s *Service) Emit(ctx context.Context, ev Event) (bool, error) {
 					return err
 				}
 			}
+		}
+		if after != nil {
+			return after(tx, ids)
 		}
 		return nil
 	})

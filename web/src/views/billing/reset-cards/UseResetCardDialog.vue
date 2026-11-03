@@ -74,7 +74,7 @@ async function submit() {
   try {
     const res = await resetCardsApi.use(c.id, target.value.id)
     const titles = changes.value.filter(x => res.rules.includes(x.id)).map(x => x.title).join('、')
-    toast.success(`已使用${RESET_CARD_KIND_LABELS[c.kind]}`, { description: `「${res.subscription.plan.name}」的${titles || '额度'}已清零，并从现在起重新计时。` })
+    toast.success(`已使用${RESET_CARD_KIND_LABELS[c.kind]}`, { description: `「${res.subscription.plan.name}」的${titles || '额度'}已清零，原刷新时间保持不变。` })
     emit('used', res)
     open.value = false
   }
@@ -151,7 +151,7 @@ async function submit() {
         </div>
         <p v-if="target && !target.hasUsage" class="flex gap-1.5 text-xs text-amber-700 dark:text-amber-400" role="status" data-testid="use-card-idle">
           <TriangleAlert class="mt-px size-3.5 shrink-0" />
-          <span>这些额度当前没有用量：使用后不会多出可用额度，只会让窗口从现在起重新计时。建议在额度快用完时再使用。</span>
+          <span>这些额度当前没有用量：使用后不会多出可用额度，也不会改变窗口刷新时间。建议在额度快用完时再使用。</span>
         </p>
       </div>
 

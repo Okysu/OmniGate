@@ -41,11 +41,13 @@ const current = ref<Plan | null>(null)
 const isEdit = computed(() => current.value !== null)
 /** Edit only: also give the plan's active subscriptions the new model list. */
 const syncModels = ref(false)
+const syncLimits = ref(false)
 const modelsChanged = computed(() => !!current.value && [...form.models].sort().join(',') !== [...current.value.models].sort().join(','))
 
 function reset(p: Plan | null) {
   current.value = p
   syncModels.value = false
+  syncLimits.value = false
   Object.assign(form, p ? formFromPlan(p) : emptyPlanForm())
   errors.value = {}
   formError.value = null
@@ -144,7 +146,7 @@ async function submit() {
   try {
     const body = buildPlanPayload(form)
     const saved = current.value
-      ? await plansApi.update(current.value.id, { ...body, version: current.value.version, syncSubscriptionModels: modelsChanged.value && syncModels.value })
+      ? await plansApi.update(current.value.id, { ...body, version: current.value.version, syncSubscriptionModels: modelsChanged.value && syncModels.value, syncSubscriptionLimits: syncLimits.value })
       : await plansApi.create(body)
     toast.success(current.value ? '套餐已保存' : '套餐已创建')
     emit('saved', saved, !current.value)
@@ -197,7 +199,7 @@ async function reloadLatest() {
       <SheetHeader class="border-b">
         <SheetTitle>{{ isEdit ? `编辑套餐：${current?.name}` : '新建套餐' }}</SheetTitle>
         <SheetDescription>
-          套餐由有效期、覆盖模型和若干配额规则组成。修改套餐不影响已开通的订阅（订阅保存开通时的模型与规则快照）。
+          套餐由有效期、覆盖模型和配额规则组成。编辑时可选择将模型或额度上限同步给已开通的有效订阅。
         </SheetDescription>
       </SheetHeader>
 
@@ -309,6 +311,15 @@ async function reloadLatest() {
           <p class="text-muted-foreground text-xs">
             所有适用规则都未超限时，请求才使用套餐额度（不扣钱包）。规则按其计量与窗口独立统计；失败的请求不计入。额度用完后是阻断（429）还是改用钱包按量计费，由用户在「钱包与订阅」中自行设置（默认阻断），API Key 也可单独覆盖。
           </p>
+          <div v-if="isEdit" class="flex items-start justify-between gap-4 rounded-lg border p-3" data-testid="plan-sync-limits">
+            <div class="space-y-1">
+              <Label for="plan-sync-limits">同步已有订阅的额度上限</Label>
+              <p class="text-muted-foreground text-xs">
+                将同 ID、同计量和窗口规则的上限同步给该套餐现有的有效订阅，保留已用量、刷新时间和到期时间。可用于已下架的老套餐。
+              </p>
+            </div>
+            <Switch id="plan-sync-limits" v-model="syncLimits" />
+          </div>
           <div class="bg-muted/40 space-y-2 rounded-lg border border-dashed p-3">
             <p class="flex items-center gap-1.5 text-xs font-medium">
               <Sparkles class="size-3.5" />

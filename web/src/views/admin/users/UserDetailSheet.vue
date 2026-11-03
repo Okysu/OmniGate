@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import { Ban, Cable, CalendarClock, Coins, ExternalLink, Hash, KeyRound, LogOut, Plus, RefreshCw, ShieldCheck, Sigma, UsersRound, Wallet } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import SendNotificationDialog from '@/components/notifications/SendNotificationDialog.vue'
 import CopyButton from '@/components/CopyButton.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import RuleUsageItem from '@/components/quota/RuleUsageItem.vue'
@@ -42,6 +43,7 @@ const emit = defineEmits<{ updated: [user: User] }>()
 const auth = useAuthStore()
 const { money } = useCurrency()
 const canWrite = computed(() => auth.can('users.write'))
+const notificationOpen = ref(false)
 const canBilling = computed(() => auth.can('billing.manage'))
 
 const detail = ref<AdminUserDetail | null>(null)
@@ -353,6 +355,9 @@ function onGranted(s: Subscription, renewed: boolean) {
                   <Wallet class="size-4" />
                   钱包
                 </h3>
+                <Button v-if="canWrite" variant="outline" size="sm" data-testid="ud-notify" @click="notificationOpen = true">
+                  发送通知
+                </Button>
                 <Button v-if="canBilling" variant="outline" size="sm" data-testid="ud-adjust" @click="adjustOpen = true">
                   调整余额
                 </Button>
@@ -537,6 +542,7 @@ function onGranted(s: Subscription, renewed: boolean) {
   </Sheet>
 
   <UserChangeDialogs ref="changes" @updated="onUserUpdated" @stale="load" />
+  <SendNotificationDialog v-if="canWrite && user" v-model:open="notificationOpen" :initial-user-ids="[user.id]" />
   <UserGroupDialog v-if="canWrite" v-model:open="groupDialogOpen" :user="user ? { id: user.id, displayName: user.displayName, group: userGroup } : null" @changed="onGroupChanged" />
 
   <ConfirmDialog

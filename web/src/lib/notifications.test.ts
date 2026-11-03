@@ -46,8 +46,11 @@ function prefs(over: Partial<NotificationPreferences> = {}): NotificationPrefere
 
 describe('event catalog', () => {
   it('covers every contract event once with categories', () => {
-    expect(EVENT_CATALOG).toHaveLength(23)
-    expect(new Set(EVENT_CATALOG.map(e => e.type)).size).toBe(23)
+    expect(EVENT_CATALOG).toHaveLength(24)
+    expect(new Set(EVENT_CATALOG.map(e => e.type)).size).toBe(24)
+    expect(categoryOf('admin.message')).toBe('account')
+    expect(defaultEvents()['admin.message']).toEqual({ email: false, webhook: false, inApp: true })
+    expect(isLocked('admin.message', 'inApp')).toBe(true)
     expect(categoryOf('upstream.balance_low')).toBe('channel')
     expect(categoryOf('quota.exhausted')).toBe('plan')
     expect(categoryOf('subscription.future_thing')).toBe('plan')
@@ -171,7 +174,7 @@ describe('preferences form', () => {
   })
 
   it('has defaults for every event', () => {
-    expect(Object.keys(defaultEvents())).toHaveLength(23)
+    expect(Object.keys(defaultEvents())).toHaveLength(24)
   })
 })
 
@@ -221,7 +224,7 @@ describe('phase7 events', () => {
     expect(categoryOf('account.future')).toBe('account')
     expect(eventLabel('subscription.quota_reset')).toBe('套餐额度已重置')
     expect(eventLabel('subscription.extended')).toBe('订阅已延期')
-    expect(typesParam('account')).toBe('account.status_changed,account.group_changed')
+    expect(typesParam('account')).toBe('account.status_changed,account.group_changed,admin.message')
     expect(typesParam('plan')!.split(',')).toEqual(expect.arrayContaining(['subscription.quota_reset', 'subscription.extended']))
     expect(CATEGORIES[0]).toBe('account')
     expect(CATEGORY_LABELS.account).toBe('账户')

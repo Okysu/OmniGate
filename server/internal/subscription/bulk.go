@@ -198,43 +198,24 @@ func resettable(sub *Subscription, in ResetInput) ([]*compiledRule, error) {
 	return out, nil
 }
 
-// resetRules clears the current window of rules of sub at now inside the
-// caller's transaction (phase7-api.md §3.1, phase11-api.md §1). Rows at or
-// after the start of the current window are exactly the ones the window's
-// state is computed from, so they are deleted: calendar / period / lifetime
-// windows lose their counter and rolling windows every live bucket (rolling
-// windows have no single refresh time to move). A session window is
-// re-anchored at now: an empty session row starting at now (truncated to the
-// second like recordWindow) becomes the live session, so the window refreshes
-// at now + duration and later usage is added to it. Sweep keeps empty rows
-// like any other until they are older than every window.
+// resetRules clears usage without changing window_start. Empty session and
+// rolling rows retain the original refresh schedule; an unused session stays
+// unopened. Reset cards use this same path.
 func resetRules(ctx context.Context, q db.Querier, sub *Subscription, rules []*compiledRule, now time.Time) error {
 	for _, r := range rules {
-		if _, err := q.Exec(ctx, `DELETE FROM quota_usage WHERE subscription_id = $1 AND rule_id = $2 AND window_start >= $3`,
-			sub.ID, r.ID, r.usageSince(sub.StartsAt, now)); err != nil {
-			return err
-		}
-		if r.Window.Kind != WindowSession {
-			continue
-		}
-		if _, err := q.Exec(ctx, `INSERT INTO quota_usage (subscription_id, rule_id, window_start, used, updated_at)
-			VALUES ($1, $2, $3, '0', $4)
-			ON CONFLICT (subscription_id, rule_id, window_start) DO UPDATE SET used = EXCLUDED.used, updated_at = EXCLUDED.updated_at`,
-			sub.ID, r.ID, sessionAnchor(now), now); err != nil {
+		if _, err := q.Exec(ctx, `UPDATE quota_usage SET used = '0', updated_at = $4
+			WHERE subscription_id = $1 AND rule_id = $2 AND window_start >= $3`,
+			sub.ID, r.ID, r.usageSince(sub.StartsAt, now), now); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// sessionAnchor is the start of the session a reset at now opens.
-func sessionAnchor(now time.Time) time.Time { return now.UTC().Truncate(time.Second) }
-
 // ResetQuota clears the current window of the selected rules of every target
 // subscription (§3.1, see resetRules): calendar / period windows lose their
-// current counter, rolling windows every bucket inside the window, a session
-// window restarts at the time of the reset (usage 0, refreshing one duration
-// later, like a global quota reset) and lifetime counters are only cleared
+// current usage, rolling windows every bucket inside the window, while session
+// windows keep their existing start and refresh time. Lifetime counters are only cleared
 // with IncludeLifetime. Subscriptions without a resettable rule are not
 // affected. Gateway quota decisions read the counters on every request, so
 // blocked users are admitted again immediately.

@@ -32,6 +32,7 @@ import { formatRemaining, PLAN_ERROR_MESSAGES, PLAN_STATUS_LABELS, SUBSCRIPTION_
 import ExtendDialog from './ExtendDialog.vue'
 import GrantDialog from './GrantDialog.vue'
 import ResetQuotaDialog from './ResetQuotaDialog.vue'
+import AdjustQuotaDialog from './AdjustQuotaDialog.vue'
 
 const PAGE_SIZE = 20
 const ALL = 'all'
@@ -248,6 +249,11 @@ function openReset(s: Subscription | null = null) {
   single.value = s
   resetOpen.value = true
 }
+const adjustQuotaOpen = ref(false)
+function openAdjustQuota(s: Subscription | null = null) {
+  single.value = s
+  adjustQuotaOpen.value = true
+}
 function openExtend(s: Subscription | null = null) {
   single.value = s
   extendOpen.value = true
@@ -267,7 +273,7 @@ function planLabel(id: string): string {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="订阅管理" description="（管理员）查看所有用户的套餐订阅与当前用量，开通、续期、取消订阅，或批量重置额度、延长有效期。">
+    <PageHeader title="订阅管理" description="（管理员）查看订阅与当前用量，调整已有订阅的额度上限、余量，或重置额度、延长有效期。">
       <template #actions>
         <Button variant="outline" size="sm" :disabled="loading" @click="load">
           <RefreshCw :class="loading ? 'animate-spin' : ''" />
@@ -276,6 +282,9 @@ function planLabel(id: string): string {
         <Button variant="outline" size="sm" data-testid="toolbar-reset" @click="openReset()">
           <RotateCcw />
           重置额度
+        </Button>
+        <Button variant="outline" size="sm" data-testid="toolbar-adjust-quota" @click="openAdjustQuota()">
+          调整额度
         </Button>
         <Button variant="outline" size="sm" data-testid="toolbar-extend" @click="openExtend()">
           <CalendarPlus />
@@ -352,6 +361,9 @@ function planLabel(id: string): string {
           data-testid="sub-bulk-bar"
         >
           <span class="mr-auto text-sm">已选 <strong class="tabular-nums">{{ selected.size }}</strong> 份有效订阅</span>
+          <Button variant="outline" size="sm" @click="openAdjustQuota()">
+            调整额度
+          </Button>
           <Button variant="outline" size="sm" @click="openReset()">
             <RotateCcw />
             重置额度
@@ -456,6 +468,9 @@ function planLabel(id: string): string {
                         <RotateCcw />
                         重置额度
                       </DropdownMenuItem>
+                      <DropdownMenuItem @select="openAdjustQuota(s)">
+                        调整上限 / 余量
+                      </DropdownMenuItem>
                       <DropdownMenuItem @select="openExtend(s)">
                         <CalendarPlus />
                         延长有效期
@@ -492,6 +507,7 @@ function planLabel(id: string): string {
       @granted="onGranted"
     />
 
+    <AdjustQuotaDialog v-model:open="adjustQuotaOpen" :selected="single ? [] : selectedList" :single="single" :plans="plans" :initial-plan-id="planId === ALL ? undefined : planId" @done="onBulkDone" />
     <ResetQuotaDialog
       v-model:open="resetOpen"
       :selected="single ? [] : selectedList"

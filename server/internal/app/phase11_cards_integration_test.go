@@ -60,9 +60,14 @@ func TestResetCards(t *testing.T) {
 		t.Fatalf("notification = %v", n)
 	}
 	found := false
-	for _, m := range smtp.Wait(1, 3*time.Second) {
-		if m.To[0] == "carol@example.com" && strings.Contains(m.Subject, "重置卡") {
-			found = true
+	// Quota warning emails from the earlier request may arrive first. Wait for
+	// the specific reset-card delivery rather than assuming SMTP ordering.
+	deadline := time.Now().Add(3 * time.Second)
+	for count := 1; !found && time.Now().Before(deadline); count++ {
+		for _, m := range smtp.Wait(count, time.Until(deadline)) {
+			if m.To[0] == "carol@example.com" && strings.Contains(m.Subject, "重置卡") {
+				found = true
+			}
 		}
 	}
 	if !found {
@@ -72,7 +77,7 @@ func TestResetCards(t *testing.T) {
 		t.Fatalf("audit = %v", items)
 	}
 
-	// Carol previews and uses a card: the 5-hour session restarts, the
+	// Carol previews and uses a card: the 5-hour usage resets, the
 	// weekly one keeps its usage, and the gateway admits again.
 	mine := e.mustDo(e.carol, http.MethodGet, "/api/billing/reset-cards", nil, 200)
 	cardID := mine["items"].([]any)[0].(map[string]any)["id"].(string)

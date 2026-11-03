@@ -74,7 +74,7 @@ function historyText(c: ResetCard): string {
         我的重置卡
       </h2>
       <p class="text-muted-foreground text-sm">
-        对有效订阅使用：对应额度立即清零，窗口从使用时起重新计时。每张卡只能使用一次。
+        对有效订阅使用：对应额度立即清零，保持原窗口刷新时间。每张卡只能使用一次。
       </p>
     </div>
     <ErrorState v-if="loadError" :error="loadError" @retry="load" />

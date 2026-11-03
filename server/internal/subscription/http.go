@@ -70,6 +70,7 @@ func (h *Handler) AdminRoutes(r chi.Router) {
 	m.Post("/billing/subscriptions", h.grant)
 	m.Post("/billing/subscriptions/{id}/cancel", h.cancel)
 	m.Post("/billing/subscriptions/reset-quota", h.resetQuota)
+	m.Post("/billing/subscriptions/adjust-quota", h.adjustQuota)
 	m.Post("/billing/subscriptions/extend", h.extend)
 	h.cardAdminRoutes(r)
 }
@@ -234,6 +235,7 @@ type planBody struct {
 	// to its active subscriptions, which otherwise keep their grant-time
 	// snapshot.
 	SyncSubscriptionModels bool `json:"syncSubscriptionModels"`
+	SyncSubscriptionLimits bool `json:"syncSubscriptionLimits"`
 }
 
 // listPrice decodes the tri-state listPrice field.
@@ -315,7 +317,8 @@ func (h *Handler) patchPlan(w http.ResponseWriter, r *http.Request) {
 	}
 	details := map[string]any{}
 	patch := PlanPatch{Name: body.Name, Description: body.Description, Duration: body.Duration, Models: body.Models,
-		Rules: body.Rules, Stackable: body.Stackable, Group: body.Group, Status: body.Status, SyncSubscriptionModels: body.SyncSubscriptionModels}
+		Rules: body.Rules, Stackable: body.Stackable, Group: body.Group, Status: body.Status, SyncSubscriptionModels: body.SyncSubscriptionModels,
+		SyncSubscriptionLimits: body.SyncSubscriptionLimits}
 	patch.SetListPrice, patch.ListPrice = body.listPrice(details)
 	if body.Version == nil {
 		details["version"] = "必填"

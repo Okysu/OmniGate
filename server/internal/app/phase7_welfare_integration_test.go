@@ -147,12 +147,11 @@ func TestQuotaResetAndExtend(t *testing.T) {
 			t.Fatalf("reset = %v", res)
 		}
 		rules := e.expectUsed(e.admin, aliceW1, map[string]string{"cal": "0", "roll": "0", "sess": "0", "per": "0", "life": "2"})
-		// The session window restarted at the reset (phase11-api.md §1): empty,
-		// refreshing 5 hours after the reset; rolling windows have no refresh time.
+		// Resetting usage preserves both session and rolling refresh times.
 		anchor, _ := rules["sess"]["windowStart"].(string)
 		start, err := time.Parse(time.RFC3339Nano, anchor)
 		if err != nil || rules["sess"]["resetsAt"] != start.Add(5*time.Hour).Format(time.RFC3339) ||
-			time.Since(start) > time.Minute || rules["roll"]["resetsAt"] != nil ||
+			rules["sess"]["windowStart"] != before["sess"]["windowStart"] || rules["roll"]["resetsAt"] != before["roll"]["resetsAt"] ||
 			rules["cal"]["windowStart"] != before["cal"]["windowStart"] {
 			t.Fatalf("after reset: sess=%v roll=%v cal=%v", rules["sess"], rules["roll"], rules["cal"])
 		}

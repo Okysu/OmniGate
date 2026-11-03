@@ -1003,6 +1003,8 @@ export type PlanPatch = Partial<PlanInput> & {
   version: number
   /** Also write the model list to the plan's active subscriptions (they keep their grant-time snapshot otherwise). */
   syncSubscriptionModels?: boolean
+  /** Copy compatible limits into existing active subscriptions; preserve usage and windows. */
+  syncSubscriptionLimits?: boolean
 }
 
 export interface RuleUsage extends QuotaRule {
@@ -1189,6 +1191,28 @@ export interface ResetQuotaInput {
   includeLifetime: boolean
   /** ≤200. */
   note: string
+}
+
+export interface AdjustQuotaInput {
+  target: SubscriptionTarget
+  ruleId: string
+  limit?: string
+  remaining?: string
+  note: string
+}
+
+export interface SendNotificationInput {
+  target: { userIds: string[], groupIds: string[] }
+  title: string
+  body: string
+  link: string
+  severity: NotificationSeverity
+  idempotencyKey: string
+}
+
+export interface SendNotificationResult {
+  recipients: number
+  alreadySent: boolean
 }
 
 /** `POST /api/admin/billing/subscriptions/extend` body. */
@@ -2095,7 +2119,8 @@ export interface PlazaResponse<T extends PlazaModel = PlazaModel> {
 // ---------------------------------------------------------------------------
 
 export type NotificationEventType
-  = | 'wallet.balance_low'
+  = | 'admin.message'
+    | 'wallet.balance_low'
     | 'wallet.credited'
     | 'subscription.expiring'
     | 'subscription.expired'

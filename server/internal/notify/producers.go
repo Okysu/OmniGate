@@ -479,7 +479,7 @@ func (s *Service) SubscriptionBulk(_ context.Context, n subscription.BulkNotice)
 func (s *Service) ResetCardsIssued(_ context.Context, n subscription.CardNotice) {
 	s.goAsync(func(ctx context.Context) {
 		label := subscription.CardKindLabel(n.Kind)
-		body := fmt.Sprintf("管理员向你发放了 %d 张%s，可在「钱包与订阅」中使用：使用后对应的额度窗口立即清零并重新计时。", n.Quantity, label)
+		body := fmt.Sprintf("管理员向你发放了 %d 张%s，可在「钱包与订阅」中使用：使用后对应额度用量立即清零，原刷新时间保持不变。", n.Quantity, label)
 		switch n.Kind {
 		case subscription.CardKind5h:
 			body += "\n可重置：5 小时额度。"

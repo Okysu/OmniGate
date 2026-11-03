@@ -1,24 +1,22 @@
-# 契约：Round 11 —— 额度重置卡、锚定式额度重置
+# 契约：Round 11 —— 额度重置卡、保留刷新时间的额度重置
 
 > 状态：**已实现**。通用约定同前；所有 SQL 同时支持 PostgreSQL 与 SQLite（迁移 `00018_reset_cards`）。
-> 需求原文：“额度重置卡（5 小时 / 周 / 双重置卡）”；以及“像 OpenAI 的全局额度重置那样：在 A 时刻重置，用量清零，下一次刷新变为 A + 窗口时长”。
+> 最新要求：管理员重置额度和用户使用重置卡只清零用量，保持原刷新时间。
 
-## 1. 锚定式重置（anchored reset）
+## 1. 保留刷新时间的重置
 
-管理员批量重置（[phase7-api.md §3.1](phase7-api.md#31-重置额度)）与重置卡使用**同一个**重置函数。在时刻 A 重置一条规则：
+管理员批量重置与重置卡共用同一个函数：将当前窗口计数行的 `used` 更新为 `0`，保留原 `window_start`，不创建新锚点。
 
 | 窗口 | 重置效果 |
 | --- | --- |
-| `session` | 删除当前会话的计数行，再写入一行 `window_start = A`（UTC，截断到秒，与开启会话时相同）、`used = 0` 的**锚点行**。它就是当前会话：用量为 0，`resetsAt = A + duration`，之后的用量计入这一会话；到 A + duration 会话结束，下一个计量的请求照常开启新会话。与原来的刷新时间无关 |
-| `rolling` | 删除窗口内的全部分桶（滚动窗口没有单一的刷新时刻，不写锚点） |
-| `calendar` / `period` | 删除当前窗口的计数，窗口边界不变 |
-| `lifetime` | 删除全部计数（管理员重置仅在 `includeLifetime: true` 时；重置卡从不匹配 lifetime 规则） |
+| `session` | 清零用量，保持原 `windowStart` 与 `resetsAt`；尚未开启或已结束的会话不被重置操作启动 |
+| `rolling` | 清零活动分桶的用量，保留桶时间与原逐步释放时间 |
+| `calendar` / `period` | 清零当前窗口用量，窗口边界不变 |
+| `lifetime` | 仅管理员显式选择 `includeLifetime: true` 时清零；重置卡不匹配总量规则 |
 
-- 锚点行与普通会话行相同（主键 `(subscription_id, rule_id, window_start)`），用 `INSERT … ON CONFLICT DO UPDATE SET used = 0` 写入，同一秒内重复重置只留一行。
-- 定期清理（`Sweep`）只删除早于 32 天的 session / rolling 行，不区分用量是否为 0，锚点行在会话期间一直保留。
-- 重置在锁定订阅行（`FOR UPDATE`）的事务内执行，与结算（`Record`）互斥，不会在删除与写锚点之间开启另一个会话。
-- 订阅视图（`GET /api/billing/subscriptions` 等）中，被重置的 session 规则 `used = "0"`、`windowStart = A`、`resetsAt = A + duration`；rolling 规则 `used = "0"`、`resetsAt = null`。
-- 用量提醒按窗口去重：session 规则重置后是新的窗口（起点 A），同一会话内达到 80% / 100% 会再次提醒。
+操作在锁定订阅行的事务内执行，与请求结算互斥。定期清理继续按窗口保留期处理零用量行；会话内的空行必须保留到原窗口结束。重置不会改变订阅到期时间，也不会将原来的刷新时间推迟。
+
+用量提醒仍按原窗口去重，同一窗口不会因人工重置而变成新的提醒周期。
 
 ## 2. 重置卡
 
@@ -138,7 +136,7 @@ interface ResetCard {
 1. 以条件更新认领卡：`status = 'available'`、属于调用者、未过期 → 置为 `used`、记录 `usedAt`。同一张卡并发使用只有一个成功，其余得到 `409 card_used`；
 2. 锁定订阅并校验：属于调用者（否则 `404`）、有效且未到期（否则 `409 subscription_not_active`）、在限定套餐内（否则 `422 card_plan_not_allowed`）；
 3. 找出匹配的规则；没有 → `422 card_not_applicable`；
-4. 对这些规则执行 §1 的锚定式重置（同一时刻 A）；
+4. 对这些规则执行 §1 的保留刷新时间重置；
 5. 记录卡使用在哪份订阅，写审计 `reset_card.use`（metadata 含 `batchId`、`kind`、`subscriptionId`、`planName`、`rules`、`resetAt`）。
 
 任何一步失败整个事务回滚，**卡不会被消耗**。卡的错误：不存在或属于别人 → `404 not_found`；`409 card_used` / `card_expired` / `card_revoked`。
@@ -171,11 +169,11 @@ interface ResetCard {
 - **钱包与订阅页「我的重置卡」**（有卡时显示）：按卡类型分组，每组按批次列出张数、剩余有效期、限定套餐与备注；「使用」打开对话框：选择可用的订阅
   （只列出可用的），逐条显示“使用前 → 使用后”，如“5 小时：$18.200 / $30.000，14:35 刷新 → $0.000 / $30.000，下次刷新 19:35（5 小时后）”；
   所选窗口都没有用量时提示（不阻止）；成功后刷新订阅与卡片并提示。已使用 / 过期 / 作废的卡折叠在下方。
-- 管理端「重置套餐额度」对话框的说明改为“会话窗口从现在起重新计时”。
+- 管理端「重置套餐额度」对话框的说明改为“用量清零，保持原刷新时间”。
 
 ## 6. 种子目录
 
-内置目录（`omnigate seed builtin`）六个套餐的 `5h`、`weekly` 规则由 `rolling` 改为 `session`（时长不变：5h、7d），与线上套餐一致，重置卡可锚定其刷新时间。
+内置目录（`omnigate seed builtin`）六个套餐的 `5h`、`weekly` 规则由 `rolling` 改为 `session`（时长不变：5h、7d），与线上套餐一致，重置卡只清零用量并保留其刷新时间。
 已部署的实例需要手动执行 `omnigate seed builtin` 才会更新套餐（已有订阅保留各自的规则快照）。
 
 ## 7. 实现差异

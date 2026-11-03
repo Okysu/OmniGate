@@ -9,6 +9,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import ErrorState from '@/components/ErrorState.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
+import SendNotificationDialog from '@/components/notifications/SendNotificationDialog.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -165,6 +166,7 @@ function toggleOne(id: string, v: boolean | 'indeterminate') {
 }
 
 const batchOpen = ref(false)
+const notificationOpen = ref(false)
 const batchAction = ref<UserBatchAction>('disable')
 function openBatch(a: UserBatchAction) {
   batchAction.value = a
@@ -189,6 +191,9 @@ function openDetail(u: User) {
   <div class="space-y-6">
     <PageHeader title="用户" description="管理控制台用户的角色与状态。用户通过外部身份提供方登录后自动出现在此列表；点击用户查看详情。">
       <template #actions>
+        <Button v-if="canWrite" variant="outline" size="sm" data-testid="send-notification" @click="notificationOpen = true">
+          发送通知
+        </Button>
         <Button variant="outline" size="sm" :disabled="loading" @click="load">
           <RefreshCw :class="loading ? 'animate-spin' : ''" />
           刷新
@@ -238,6 +243,9 @@ function openDetail(u: User) {
           data-testid="user-bulk-bar"
         >
           <span class="mr-auto text-sm">已选 <strong class="tabular-nums">{{ selected.size }}</strong> 位用户</span>
+          <Button variant="outline" size="sm" @click="notificationOpen = true">
+            发送通知
+          </Button>
           <Button variant="outline" size="sm" class="text-destructive" @click="openBatch('disable')">
             <Ban />
             停用
@@ -400,6 +408,7 @@ function openDetail(u: User) {
     </Card>
 
     <UserChangeDialogs ref="changes" @updated="onUpdated" @stale="load" />
+    <SendNotificationDialog v-if="canWrite" v-model:open="notificationOpen" :initial-user-ids="[...selected]" :initial-group-ids="selected.size ? [] : groupId ? [groupId] : []" />
     <UserBatchDialog
       v-model:open="batchOpen"
       :users="selectedUsers"

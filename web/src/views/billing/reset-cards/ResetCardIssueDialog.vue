@@ -139,7 +139,7 @@ async function submit() {
       <DialogHeader>
         <DialogTitle>发放重置卡</DialogTitle>
         <DialogDescription>
-          用户在「钱包与订阅」中对自己的订阅使用重置卡：对应额度立即清零，5 小时 / 每周窗口从使用时起重新计时。卡按窗口时长匹配规则，与规则 ID 无关。
+          用户在「钱包与订阅」中对自己的订阅使用重置卡：对应额度立即清零，5 小时 / 每周窗口保持原刷新时间。卡按窗口时长匹配规则，与规则 ID 无关。
         </DialogDescription>
       </DialogHeader>
 

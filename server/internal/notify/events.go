@@ -14,6 +14,7 @@ import (
 
 // Event types (§2).
 const (
+	TypeAdminMessage          = "admin.message"
 	TypeWalletBalanceLow      = "wallet.balance_low"
 	TypeWalletCredited        = "wallet.credited"
 	TypeSubscriptionExpiring  = "subscription.expiring"
@@ -79,6 +80,7 @@ type EventMeta struct {
 var Catalog = []EventMeta{
 	{TypeAccountStatusChanged, catAccount, true, true, true, SeverityWarn, true},
 	{TypeAccountGroupChanged, catAccount, false, true, false, SeverityInfo, false},
+	{TypeAdminMessage, catModels, false, true, false, SeverityInfo, true},
 	{TypeWalletBalanceLow, catBilling, true, true, true, SeverityWarn, false},
 	{TypeWalletCredited, catBilling, false, true, false, SeverityInfo, false},
 	{TypeSubscriptionExpiring, catBilling, true, true, false, SeverityWarn, false},

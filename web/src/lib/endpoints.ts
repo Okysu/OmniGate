@@ -1,4 +1,7 @@
 import type {
+  AdjustQuotaInput,
+  SendNotificationInput,
+  SendNotificationResult,
   AffinityOutcome,
   AffinityStats,
   ClientInfo,
@@ -370,6 +373,8 @@ export const plansApi = {
   /** phase7 §3.1; `dryRun` only counts (§3.3). */
   resetQuota: (input: ResetQuotaInput, opts: { dryRun?: boolean } = {}) =>
     bulkSubscriptions('/api/admin/billing/subscriptions/reset-quota', input, opts.dryRun),
+  adjustQuota: (input: AdjustQuotaInput, opts: { dryRun?: boolean } = {}) =>
+    bulkSubscriptions('/api/admin/billing/subscriptions/adjust-quota', input, opts.dryRun),
   /** phase7 §3.2; `dryRun` only counts (§3.3). */
   extend: (input: ExtendSubscriptionsInput, opts: { dryRun?: boolean } = {}) =>
     bulkSubscriptions('/api/admin/billing/subscriptions/extend', input, opts.dryRun),
@@ -525,6 +530,8 @@ export interface ListNotificationsParams {
 export type NotificationPreferencesInput = Omit<NotificationPreferences, 'smtpConfigured'>
 
 export const notificationsApi = {
+  send: (body: SendNotificationInput, opts: { dryRun?: boolean } = {}) =>
+    api.post<SendNotificationResult>('/api/admin/notifications', body, { query: opts.dryRun ? { dryRun: true } : undefined }),
   list: async (params: ListNotificationsParams, signal?: AbortSignal): Promise<Paginated<AppNotification>> => {
     const res = await api.get<Paginated<AppNotification> | null>('/api/notifications', { query: { ...params, unread: params.unread ? true : undefined }, signal })
     return { items: res?.items ?? [], total: res?.total ?? 0, page: res?.page ?? params.page, pageSize: res?.pageSize ?? params.pageSize }

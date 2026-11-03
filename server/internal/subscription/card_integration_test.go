@@ -50,7 +50,7 @@ func (f *fixture) reset(subID uuid.UUID, rules []string) {
 	}
 }
 
-func TestAnchoredSessionReset(t *testing.T) {
+func TestResetPreservesSessionAndRollingSchedule(t *testing.T) {
 	f := newFixture(t)
 	u := f.user(identity.RoleUser)
 	p := f.plan(PlanInput{Rules: []Rule{sessionRule("3"), rollingRule("roll", "5h", "3"), monthlyRule("100")}})
@@ -65,23 +65,23 @@ func TestAnchoredSessionReset(t *testing.T) {
 		t.Fatal("expected the exhausted session to block")
 	}
 
-	// Reset at A (with a sub-second part): the session restarts at A.
+	// A reset two hours later must retain the original session anchor.
 	a := f.now.Add(456 * time.Millisecond)
 	f.now = a
 	f.reset(v.ID, nil)
-	anchor := a.Truncate(time.Second)
+	anchor := t0.Truncate(time.Second)
 	rules := f.rulesOf(u.ID, v.ID)
 	s, roll, month := rules["5h"], rules["roll"], rules["monthly"]
 	if s.Used != "0" || s.WindowStart == nil || !s.WindowStart.Equal(anchor) || !s.ResetsAt.Equal(anchor.Add(5*time.Hour)) || s.Exceeded {
 		t.Fatalf("session after reset: %+v", s)
 	}
-	if roll.Used != "0" || roll.ResetsAt != nil || month.Used != "0" {
+	if roll.Used != "0" || roll.ResetsAt == nil || !roll.ResetsAt.Equal(bucketStart(t0).Add(5*time.Hour)) || month.Used != "0" {
 		t.Fatalf("rolling / period after reset: %+v / %+v", roll, month)
 	}
 	admitted(t, f.decide(u.ID, "m", a), v.ID)
 	var buckets int
 	_ = f.pool.QueryRow(f.ctx, `SELECT count(*) FROM quota_usage WHERE subscription_id = $1 AND rule_id = 'roll'`, v.ID).Scan(&buckets)
-	if buckets != 0 {
+	if buckets == 0 {
 		t.Fatalf("rolling buckets left: %d", buckets)
 	}
 	// The empty anchor row survives the sweeper.
@@ -115,17 +115,17 @@ func TestAnchoredSessionReset(t *testing.T) {
 		t.Fatalf("new session: %+v", s)
 	}
 
-	// Resetting an idle session (no live session) also anchors it.
+	// Resetting an idle session must not start its clock.
 	f.now = next.Add(10 * time.Hour)
 	f.reset(v.ID, []string{"5h"})
-	if s = f.rulesOf(u.ID, v.ID)["5h"]; s.Used != "0" || !s.WindowStart.Equal(f.now.Truncate(time.Second)) {
+	if s = f.rulesOf(u.ID, v.ID)["5h"]; s.Used != "0" || s.WindowStart != nil || s.ResetsAt != nil {
 		t.Fatalf("idle reset: %+v", s)
 	}
-	// Two resets in the same second keep one anchor row.
+	// Repeated idle resets still leave the session unopened.
 	f.reset(v.ID, []string{"5h"})
 	_ = f.pool.QueryRow(f.ctx, `SELECT count(*) FROM quota_usage WHERE subscription_id = $1 AND rule_id = '5h' AND window_start >= $2`,
 		v.ID, f.now.Add(-5*time.Hour)).Scan(&sessions)
-	if sessions != 1 {
+	if sessions != 0 {
 		t.Fatalf("anchor rows: %d", sessions)
 	}
 }
@@ -428,7 +428,7 @@ func TestCardUse(t *testing.T) {
 		t.Fatalf("preview of someone else's card: %v", err)
 	}
 
-	// 5h card: only the 5-hour session is reset (anchored at now).
+	// 5h card: only usage is reset, preserving the original refresh time.
 	res, err := use(c5, sub.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -439,7 +439,7 @@ func TestCardUse(t *testing.T) {
 	}
 	if len(res.Rules) != 1 || res.Rules[0] != "5h" || res.Card.Status != CardUsed || res.Card.UsedAt == nil ||
 		res.Card.Subscription == nil || res.Card.Subscription.PlanName != "Pro" ||
-		rules["5h"].Used != "0" || !rules["5h"].ResetsAt.Equal(f.now.Truncate(time.Second).Add(5*time.Hour)) ||
+		rules["5h"].Used != "0" || !rules["5h"].ResetsAt.Equal(weeklyStart.Add(5*time.Hour)) ||
 		rules["weekly"].Used != "4" || !rules["weekly"].WindowStart.Equal(weeklyStart) || rules["monthly"].Used != "4" {
 		t.Fatalf("5h card result %+v %+v", res, rules)
 	}
@@ -453,12 +453,12 @@ func TestCardUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := f.rulesOf(u.ID, sub.ID); r["weekly"].Used != "0" || !r["weekly"].ResetsAt.Equal(f.now.Truncate(time.Second).Add(7*day)) ||
+	if r := f.rulesOf(u.ID, sub.ID); r["weekly"].Used != "0" || !r["weekly"].ResetsAt.Equal(weeklyStart.Add(7*day)) ||
 		r["5h"].WindowStart.Equal(f.now.Truncate(time.Second)) || res.Rules[0] != "weekly" {
 		t.Fatalf("weekly card %+v", r)
 	}
 
-	// both: every matching rule with the same anchor; rolling rules lose their buckets.
+	// Both cards preserve session anchors and rolling bucket timestamps.
 	f.now = f.now.Add(time.Minute)
 	burn(sub.ID, 2, f.now.Add(-30*time.Second))
 	res, err = use(card(CardKindBoth, nil), sub.ID)
@@ -466,7 +466,7 @@ func TestCardUse(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := f.rulesOf(u.ID, sub.ID)
-	anchor := f.now.Truncate(time.Second)
+	anchor := weeklyStart
 	if len(res.Rules) != 2 || r["5h"].Used != "0" || r["weekly"].Used != "0" || !r["5h"].WindowStart.Equal(anchor) ||
 		!r["weekly"].WindowStart.Equal(anchor) || r["monthly"].Used != "6" {
 		t.Fatalf("both card %+v", r)
@@ -475,7 +475,7 @@ func TestCardUse(t *testing.T) {
 	if err != nil || len(res.Rules) != 2 {
 		t.Fatalf("both card on rolling: %v %+v", err, res)
 	}
-	if r := f.rulesOf(u.ID, rsub.ID); r["r5"].Used != "0" || r["r7"].Used != "0" || r["r5"].ResetsAt != nil {
+	if r := f.rulesOf(u.ID, rsub.ID); r["r5"].Used != "0" || r["r7"].Used != "0" || r["r5"].ResetsAt == nil || !r["r5"].ResetsAt.Equal(bucketStart(t0).Add(5*time.Hour)) {
 		t.Fatalf("rolling after card %+v", r)
 	}
 
