@@ -276,7 +276,7 @@ func EventLabel(t string) string {
 }
 
 var labels = map[string]string{
-	TypeAdminMessage: "管理员通知",
+	TypeAdminMessage:     "管理员通知",
 	TypeWalletBalanceLow: "钱包余额不足", TypeWalletCredited: "钱包入账", TypeSubscriptionExpiring: "订阅即将到期",
 	TypeSubscriptionExpired: "订阅已结束", TypeQuotaNearLimit: "套餐额度即将用完", TypeQuotaExhausted: "套餐额度已用完",
 	TypeModelPriceChanged: "模型价格变化", TypeModelRemoved: "模型不再可用", TypeModelAdded: "新模型上架",
