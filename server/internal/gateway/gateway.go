@@ -1551,6 +1551,14 @@ func (g *Gateway) stream(w http.ResponseWriter, r *http.Request, st *reqState, r
 			}
 			break
 		}
+		if proc.Done() && !protocol.IsImages(st.dialect) && !protocol.IsAudio(st.dialect) {
+			// A text protocol's terminal event already contains its final usage.
+			// Responses-compatible proxies may append a Chat [DONE] sentinel;
+			// parsing that as JSON would revoke a completed answer's billing.
+			// Media streams retain their own lifecycle (e.g. multiple images
+			// can each emit a completed event in a single request).
+			break
+		}
 	}
 	if streamErr == nil {
 		emit(proc.Finish())
