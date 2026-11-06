@@ -160,7 +160,14 @@ func TestLotteryConcurrentBatchesAndRetry(t *testing.T) {
 		wg.Go(func() { _, err := f.svc.DrawLottery(f.ctx, user.ID, uuid.New(), 1); wins <- err == nil })
 	}
 	wg.Wait()
-	if <-wins == <-wins {
+	close(wins)
+	winners := 0
+	for won := range wins {
+		if won {
+			winners++
+		}
+	}
+	if winners != 1 {
 		t.Fatal("last chance must be consumed exactly once")
 	}
 	if v, err := f.svc.Lottery(f.ctx, user.ID); err != nil || v.Available != 0 || f.wallet(user.ID).Balance.String() != "45" {
