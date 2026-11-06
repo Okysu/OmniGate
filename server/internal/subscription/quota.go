@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"omnigate/internal/lottery"
 	"omnigate/internal/money"
 	"omnigate/internal/platform/db"
 	"omnigate/internal/protocol"
@@ -300,6 +301,9 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordInput) error {
 		}
 		if tag.RowsAffected() == 0 {
 			return nil // already recorded
+		}
+		if err := lottery.Record(ctx, tx, sub.UserID, charge, at); err != nil {
+			return err
 		}
 		ls, err := compileSub(sub)
 		if err != nil {

@@ -27,6 +27,7 @@ import { isAbortError, queryInt } from '@/lib/query'
 import { isQuotaOverflow, PLAN_ERROR_MESSAGES, QUOTA_OVERFLOW_OPTIONS, QUOTA_OVERFLOW_SHORT, sortSubscriptions } from '@/lib/quota'
 import { normalizeRedeemCode, REDEEM_ERROR_MESSAGES } from '@/lib/redeem'
 import ResetCardsSection from './reset-cards/ResetCardsSection.vue'
+import LotteryCard from './LotteryCard.vue'
 import SubscriptionOrder from './SubscriptionOrder.vue'
 import UsageLimitsCard from './UsageLimitsCard.vue'
 
@@ -390,6 +391,7 @@ function amountClass(v: string): string {
       </template>
     </section>
 
+    <LotteryCard @credited="loadWallet(); loadLedger()" />
     <ResetCardsSection ref="cardsSection" :now="now.getTime()" @used="loadSubscriptions" />
 
     <Card>

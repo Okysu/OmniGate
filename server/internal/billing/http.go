@@ -31,12 +31,16 @@ func (h *Handler) Routes(r chi.Router) {
 	own.Get("/billing/ledger", h.ledger)
 	own.Post("/billing/redeem", h.redeem)
 	h.purchaseRoutes(own)
+	own.Get("/billing/lottery", h.lottery)
+	own.Post("/billing/lottery/draw", h.drawLottery)
 }
 
 // AdminRoutes registers the management endpoints; mount on the /api/admin router.
 func (h *Handler) AdminRoutes(r chi.Router) {
 	m := r.With(auth.Require(authz.BillingManage))
 	m.Get("/billing/settings", h.getSettings)
+	m.Get("/billing/lottery", h.getLotteryConfig)
+	m.Put("/billing/lottery", h.putLotteryConfig)
 	m.Put("/billing/settings", h.putSettings)
 	m.Get("/billing/redeem-batches", h.listBatches)
 	m.Post("/billing/redeem-batches", h.createBatch)

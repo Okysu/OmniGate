@@ -101,6 +101,7 @@ export const REF_TYPE_LABELS: Record<string, string> = {
   signup: '注册赠送',
   purchase: '购买套餐',
   referral: '邀请返利',
+  lottery: '消费抽奖',
 }
 
 export const PRICE_KIND_LABELS: Record<PriceKind, string> = {

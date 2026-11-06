@@ -54,6 +54,7 @@ import RetryOnPicker from '@/components/RetryOnPicker.vue'
 import DomainTagsInput from './settings/DomainTagsInput.vue'
 import SettingField from './settings/SettingField.vue'
 import SmtpTestDialog from './settings/SmtpTestDialog.vue'
+import LotterySettings from './settings/LotterySettings.vue'
 import AffinityCard from './settings/AffinityCard.vue'
 import { useAuthStore } from '@/stores/auth'
 
@@ -606,6 +607,7 @@ const restrictedWithoutDomains = computed(() => form.value.auth.registrationMode
         </CardFooter>
       </Card>
 
+      <LotterySettings v-if="auth.can('billing.manage')" />
       <AffinityCard v-if="data" :data="data" :busy="busy" :conflict="conflict" @saved="onAffinitySaved" @conflict="conflict = true" @dirty="(v: boolean) => (affinityDirty = v)" />
 
       <!-- 邮件（SMTP） -->

@@ -21,6 +21,7 @@ import (
 
 	"omnigate/internal/apperr"
 	"omnigate/internal/audit"
+	"omnigate/internal/lottery"
 	"omnigate/internal/money"
 	"omnigate/internal/platform/db"
 )
@@ -562,11 +563,17 @@ func (s *Service) SettleUsage(ctx context.Context, userID uuid.UUID, requestID s
 		if err := s.releaseLocked(ctx, tx, w, requestID); err != nil {
 			return err
 		}
-		_, err = s.applyLedger(ctx, tx, w, KindCharge, -charge, RefRequest, requestID, nil, nil)
+		entry, err := s.applyLedger(ctx, tx, w, KindCharge, -charge, RefRequest, requestID, nil, nil)
 		if errors.Is(err, errDuplicateCharge) {
 			return nil // already settled; still commit the (idempotent) release
 		}
-		if err == nil && record != nil {
+		if err != nil {
+			return err
+		}
+		if err = lottery.Record(ctx, tx, userID, charge, entry.CreatedAt); err != nil {
+			return err
+		}
+		if record != nil {
 			err = record(ctx, tx)
 		}
 		return err
