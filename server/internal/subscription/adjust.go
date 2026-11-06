@@ -65,13 +65,13 @@ func saveQuotaRules(ctx context.Context, q db.Querier, sub *Subscription, now ti
 	return err
 }
 
-func compatibleLimit(a, b Rule) bool {
+func compatibleRule(a, b Rule, syncWeights bool) bool {
 	return a.Meter == b.Meter && reflect.DeepEqual(a.Window, b.Window) &&
-		slices.Equal(a.Models, b.Models) && reflect.DeepEqual(a.ModelWeights, b.ModelWeights) &&
+		slices.Equal(a.Models, b.Models) && (syncWeights || reflect.DeepEqual(a.ModelWeights, b.ModelWeights)) &&
 		reflect.DeepEqual(a.PluginVersionID, b.PluginVersionID)
 }
 
-func (s *Service) syncPlanLimits(ctx context.Context, q db.Querier, plan *Plan, now time.Time) (int, error) {
+func (s *Service) syncPlanRuleFields(ctx context.Context, q db.Querier, plan *Plan, now time.Time, patch PlanPatch) (int, error) {
 	subs, err := s.targetSubs(ctx, q, Target{ByPlan: true, PlanIDs: []uuid.UUID{plan.ID}}, now, true)
 	if err != nil {
 		return 0, err
@@ -88,10 +88,18 @@ func (s *Service) syncPlanLimits(ctx context.Context, q db.Querier, plan *Plan, 
 			if !ok {
 				continue
 			}
-			if !compatibleLimit(old, next) {
-				return 0, invalid(map[string]any{"syncSubscriptionLimits": fmt.Sprintf("订阅 %s 的规则 %s 与新规则计量或窗口不同；请仅同步上限，或在订阅管理中单独调整", sub.ID, old.ID)})
+			if !compatibleRule(old, next, patch.SyncSubscriptionWeights) {
+				field := "syncSubscriptionLimits"
+				if patch.SyncSubscriptionWeights {
+					field = "syncSubscriptionWeights"
+				}
+				return 0, invalid(map[string]any{field: fmt.Sprintf("订阅 %s 的规则 %s 不兼容，无法同步", sub.ID, old.ID)})
 			}
-			if old.Limit != next.Limit {
+			if patch.SyncSubscriptionWeights && !reflect.DeepEqual(old.ModelWeights, next.ModelWeights) {
+				sub.Rules[i].ModelWeights = next.ModelWeights
+				changed = true
+			}
+			if patch.SyncSubscriptionLimits && old.Limit != next.Limit {
 				sub.Rules[i].Limit = next.Limit
 				changed = true
 			}

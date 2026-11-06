@@ -184,7 +184,8 @@ type PlanPatch struct {
 	SyncSubscriptionModels bool
 	// SyncSubscriptionLimits copies compatible rule limits to existing active
 	// subscriptions without replacing their windows, usage, or expiry.
-	SyncSubscriptionLimits bool
+	SyncSubscriptionLimits  bool
+	SyncSubscriptionWeights bool
 }
 
 func validatePlan(in *PlanInput) error {
@@ -442,12 +443,17 @@ func (s *Service) UpdatePlan(ctx context.Context, actor Actor, id uuid.UUID, pat
 			return err
 		}
 		md := map[string]any{"before": planAudit(cur), "after": planAudit(p)}
-		if patch.SyncSubscriptionLimits {
-			count, err := s.syncPlanLimits(ctx, tx, p, now)
+		if patch.SyncSubscriptionLimits || patch.SyncSubscriptionWeights {
+			count, err := s.syncPlanRuleFields(ctx, tx, p, now, patch)
 			if err != nil {
 				return err
 			}
-			md["syncedSubscriptionLimits"] = count
+			if patch.SyncSubscriptionLimits {
+				md["syncedSubscriptionLimits"] = count
+			}
+			if patch.SyncSubscriptionWeights {
+				md["syncedSubscriptionWeights"] = count
+			}
 		}
 		if patch.SyncSubscriptionModels {
 			// Existing subscribers get the plan's current models too (new

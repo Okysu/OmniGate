@@ -55,6 +55,27 @@ func TestSyncOldPlanLimitsPreservesUsageAndWindows(t *testing.T) {
 	}
 }
 
+func TestSyncModelWeightsOnlyChangesFutureUsage(t *testing.T) {
+	f := newFixture(t)
+	u := f.user(identity.RoleUser)
+	rule := Rule{ID: "total", Meter: MeterCharge, Limit: "24", Window: Window{Kind: WindowLifetime}}
+	p := f.plan(PlanInput{Rules: []Rule{rule}})
+	v, _ := f.grant(u.ID, p.ID, 1)
+	f.record(v.ID, "flash", protocol.Usage{}, "4", f.now)
+	rule.Limit = "66"
+	rule.ModelWeights = map[string]string{"flash": "0.5"}
+	rules := []Rule{rule}
+	_, err := f.svc.UpdatePlan(f.ctx, f.user(identity.RoleSystemAdmin), p.ID, PlanPatch{Version: p.Version, Rules: &rules, SyncSubscriptionWeights: true}, RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.record(v.ID, "flash", protocol.Usage{}, "4", f.now.Add(time.Minute))
+	got := f.rulesOf(u.ID, v.ID)["total"]
+	if got.Limit != "24" || got.Used != "6" || got.Remaining != "18" {
+		t.Fatalf("old subscription after weighted usage: %+v", got)
+	}
+}
+
 func TestAdjustQuotaPreservesRefreshAndIsAtomic(t *testing.T) {
 	f := newFixture(t)
 	u := f.user(identity.RoleUser)

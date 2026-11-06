@@ -42,12 +42,14 @@ const isEdit = computed(() => current.value !== null)
 /** Edit only: also give the plan's active subscriptions the new model list. */
 const syncModels = ref(false)
 const syncLimits = ref(false)
+const syncWeights = ref(false)
 const modelsChanged = computed(() => !!current.value && [...form.models].sort().join(',') !== [...current.value.models].sort().join(','))
 
 function reset(p: Plan | null) {
   current.value = p
   syncModels.value = false
   syncLimits.value = false
+  syncWeights.value = false
   Object.assign(form, p ? formFromPlan(p) : emptyPlanForm())
   errors.value = {}
   formError.value = null
@@ -146,7 +148,7 @@ async function submit() {
   try {
     const body = buildPlanPayload(form)
     const saved = current.value
-      ? await plansApi.update(current.value.id, { ...body, version: current.value.version, syncSubscriptionModels: modelsChanged.value && syncModels.value, syncSubscriptionLimits: syncLimits.value })
+      ? await plansApi.update(current.value.id, { ...body, version: current.value.version, syncSubscriptionModels: modelsChanged.value && syncModels.value, syncSubscriptionLimits: syncLimits.value, syncSubscriptionWeights: syncWeights.value })
       : await plansApi.create(body)
     toast.success(current.value ? '套餐已保存' : '套餐已创建')
     emit('saved', saved, !current.value)
@@ -319,6 +321,13 @@ async function reloadLatest() {
               </p>
             </div>
             <Switch id="plan-sync-limits" v-model="syncLimits" />
+          </div>
+          <div v-if="isEdit" class="flex items-center justify-between gap-4 rounded-lg border p-3">
+            <div class="space-y-1">
+              <Label for="plan-sync-weights">同步已有订阅的模型倍率</Label>
+              <p class="text-muted-foreground text-xs">新倍率对有效订阅的后续用量生效，保留已用额度与到期时间。</p>
+            </div>
+            <Switch id="plan-sync-weights" v-model="syncWeights" />
           </div>
           <div class="bg-muted/40 space-y-2 rounded-lg border border-dashed p-3">
             <p class="flex items-center gap-1.5 text-xs font-medium">
