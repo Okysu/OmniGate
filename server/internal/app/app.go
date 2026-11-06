@@ -319,21 +319,23 @@ func (a *App) Handler() http.Handler {
 	r.Get("/readyz", a.ready)
 
 	// Data plane.
+	dataCORS := apiCORS(a.cfg.CORSOrigins, false)
 	r.Route("/v1", func(r chi.Router) {
-		r.Use(httpx.AccessLog(a.log, "data"))
+		r.Use(httpx.AccessLog(a.log, "data"), dataCORS)
 		a.gw.Routes(r)
 	})
 	// OpenAI's legacy billing endpoints without the /v1 prefix (some clients
 	// that show a balance call them so).
-	r.Group(func(r chi.Router) {
-		r.Use(httpx.AccessLog(a.log, "data"))
+	r.Route("/dashboard/billing", func(r chi.Router) {
+		r.Use(httpx.AccessLog(a.log, "data"), dataCORS)
 		a.gw.DashboardRoutes(r)
 	})
 
 	// Control plane.
 	origins := append([]string{a.cfg.PublicURL.Scheme + "://" + a.cfg.PublicURL.Host}, a.cfg.AllowedOrigins...)
+	origins = append(origins, a.cfg.ConsoleCORSOrigins...)
 	r.Route("/api", func(r chi.Router) {
-		r.Use(httpx.AccessLog(a.log, "control"), auth.CSRF(origins))
+		r.Use(httpx.AccessLog(a.log, "control"), apiCORS(a.cfg.ConsoleCORSOrigins, true), auth.CSRF(origins))
 		r.Get("/system/info", a.systemInfo)
 		r.With(a.authH.OptionalSession).Group(a.plazaH.PublicRoutes)
 		a.r6.h.PublicRoutes(r)

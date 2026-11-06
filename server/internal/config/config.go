@@ -42,7 +42,10 @@ type Config struct {
 	// AllowedOrigins are extra browser origins accepted by the CSRF origin check
 	// (the PublicURL origin is always allowed).
 	AllowedOrigins []string
-	TrustedProxies []netip.Prefix
+	// HTTP CORS is opt-in per plane. Only the control plane uses session cookies.
+	CORSOrigins        []string
+	ConsoleCORSOrigins []string
+	TrustedProxies     []netip.Prefix
 
 	DatabaseURL string
 	RedisURL    string // reserved: read but not used yet (multi-instance limits/counters, Phase 3–4)
@@ -192,6 +195,14 @@ func LoadFrom(getenv func(string) string) (*Config, error) {
 		}
 	}
 	c.AllowedOrigins = splitList(get("ALLOWED_ORIGINS", ""))
+	c.CORSOrigins, err = corsOrigins(get("CORS_ORIGINS", ""), true)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("OMNIGATE_CORS_ORIGINS: %w", err))
+	}
+	c.ConsoleCORSOrigins, err = corsOrigins(get("CONSOLE_CORS_ORIGINS", ""), false)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("OMNIGATE_CONSOLE_CORS_ORIGINS: %w", err))
+	}
 
 	for _, p := range splitList(get("TRUSTED_PROXIES", "")) {
 		prefix, err := netip.ParsePrefix(p)

@@ -74,14 +74,14 @@ type accountJSON struct {
 // AccountRoutes registers the account endpoints on the /v1 router.
 func (g *Gateway) AccountRoutes(r chi.Router) {
 	r.Get("/account", g.account)
-	g.DashboardRoutes(r)
+	r.Route("/dashboard/billing", g.DashboardRoutes)
 }
 
 // DashboardRoutes registers the OpenAI-compatible legacy billing endpoints
 // (also mounted at the root: clients differ on the /v1 prefix).
 func (g *Gateway) DashboardRoutes(r chi.Router) {
-	r.Get("/dashboard/billing/subscription", g.dashboardSubscription)
-	r.Get("/dashboard/billing/usage", g.dashboardUsage)
+	r.Get("/subscription", g.dashboardSubscription)
+	r.Get("/usage", g.dashboardUsage)
 }
 
 // accountAuth authenticates the key of an account request; nil after

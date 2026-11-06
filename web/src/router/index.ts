@@ -145,6 +145,12 @@ const consoleRoutes: RouteRecordRaw[] = [
     meta: { title: '统计', permission: 'stats.own' },
   },
   {
+    path: 'benefits',
+    name: 'benefits',
+    component: () => import('@/views/benefits/BenefitsView.vue'),
+    meta: { title: '福利', permission: 'billing.own' },
+  },
+  {
     path: 'billing',
     name: 'billing',
     component: () => import('@/views/billing/BillingView.vue'),

@@ -33,7 +33,7 @@
 | OAuth CSRF / 登录劫持 | 加密 state Cookie（单次使用、10 分钟）、state 比对、PKCE S256、OIDC nonce | ✅ 测试：state 伪造被拒 |
 | 开放重定向 | `SafeRedirect` 只允许同站路径，拒绝 `//`、`/\`、换行、`/api/` | ✅ 单元 + 集成测试 |
 | 会话令牌被盗用 | 256 bit 随机令牌；数据库只存 SHA-256；HttpOnly、生产环境 Secure、SameSite=Lax；空闲超时与绝对超时；可撤销 | ✅ |
-| 控制台 CSRF | 非 GET 请求必须带 `X-Requested-With`，并校验 Origin；CORS 关闭 | ✅ 测试：缺头/外来 Origin 被拒 |
+| 控制台 CSRF | 写请求必须带 `X-Requested-With`，并校验 Origin；控制台 CORS 默认关闭，仅可授权明确来源 | ✅ 测试：缺头/外来 Origin 被拒 |
 | 账号接管（通过邮箱合并） | 不按邮箱自动合并账号；身份键为（provider, 不可变 subject） | ✅ |
 | GitHub login 被改名后抢注 | 推荐使用 `github-id:` 匹配；引导管理员规则只在首次创建账号时生效 | ✅（文档提示） |
 | 暴力尝试登录/回调 | 按 IP 前缀限流 | ✅（进程内；多实例时改用 Redis ⏳） |

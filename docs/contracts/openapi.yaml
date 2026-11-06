@@ -44,7 +44,7 @@ info:
     ## CSRF 规则（作用于所有 `/api/*` 非安全方法）
     除 `GET`/`HEAD`/`OPTIONS` 外，所有 `/api/*` 请求必须携带请求头 `X-Requested-With: XMLHttpRequest`，
     否则返回 `403 csrf_rejected`。若请求带有 `Origin` 头，其值必须等于 `OMNIGATE_PUBLIC_URL` 的源
-    （scheme://host[:port]）或位于 `OMNIGATE_ALLOWED_ORIGINS` 中，否则同样返回 `403 csrf_rejected`。
+    （scheme://host[:port]）或位于 `OMNIGATE_ALLOWED_ORIGINS`、`OMNIGATE_CONSOLE_CORS_ORIGINS` 中，否则同样返回 `403 csrf_rejected`。
     CSRF 检查先于会话检查执行：缺少该头的未登录写请求得到的是 `403 csrf_rejected` 而不是 `401`。
 
     ## 控制面错误码与 HTTP 状态（`httpx.StatusFor`）
@@ -6854,7 +6854,7 @@ components:
       in: header
       required: false
       description: |
-        浏览器自动附带。若存在，必须等于 `OMNIGATE_PUBLIC_URL` 的源或属于 `OMNIGATE_ALLOWED_ORIGINS`，否则 `403 csrf_rejected`。
+        浏览器自动附带。若存在，必须等于 `OMNIGATE_PUBLIC_URL` 的源或属于 `OMNIGATE_ALLOWED_ORIGINS`、`OMNIGATE_CONSOLE_CORS_ORIGINS`，否则 `403 csrf_rejected`。
         未携带 Origin 的请求（如 curl）只校验 `X-Requested-With`。
       schema:
         type: string

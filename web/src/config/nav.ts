@@ -61,6 +61,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: '概览', to: '/console', icon: LayoutDashboard },
       // Every signed-in user; the badge shows the unread count (no header bell by design).
       { title: '通知中心', to: '/console/notifications', icon: Bell, badge: 'unread' },
+      { title: '福利', to: '/console/benefits', icon: Gift, permission: 'billing.own' },
     ],
   },
   {

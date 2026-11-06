@@ -14,6 +14,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/prometheus/client_golang v1.24.1
+	github.com/rs/cors v1.11.1
 	github.com/tidwall/gjson v1.19.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/time v0.16.0

@@ -25,7 +25,9 @@
 | `OMNIGATE_HTTP_ADDR` | `:8080` | 否 | 主 HTTP 监听地址（控制面、数据面、前端页面、探针）。 |
 | `OMNIGATE_METRICS_ADDR` | `:9090` | 否 | Prometheus 指标监听地址（该端口任意路径均返回指标，通常抓取 `/metrics`）。设为 `off` 关闭；**设为空字符串不会关闭**，而是回到默认值 `:9090`。不要暴露到公网。 |
 | `OMNIGATE_PUBLIC_URL` | `http://localhost:8080` | 是（必须 https） | 用户浏览器访问的对外地址（只能是源，即 scheme://host[:port]，不能带路径；末尾 `/` 会被去掉）。用于拼接 OAuth/OIDC 回调地址，其源（scheme://host[:port]）也是 CSRF `Origin` 校验的默认允许源。仅支持部署在域名根路径。 |
-| `OMNIGATE_ALLOWED_ORIGINS` | 空 | 否 | 额外允许的浏览器源（逗号分隔，如 `http://localhost:5173`）。`PUBLIC_URL` 的源总是被允许。 |
+| `OMNIGATE_ALLOWED_ORIGINS` | 空 | 否 | 控制台 CSRF 校验额外允许的来源，逗号分隔。`PUBLIC_URL` 的源总是被允许。 |
+| `OMNIGATE_CORS_ORIGINS` | 空（关闭） | 否 | 允许浏览器通过 HTTP 跨域访问 `/v1` 和兼容余额端点 `/dashboard/billing/*`。填完整来源，如 `https://chat.example.com,http://localhost:5173`，或单独填 `*`。请求仍需 Gateway Key。适用于流式与非流式 HTTP 请求。 |
+| `OMNIGATE_CONSOLE_CORS_ORIGINS` | 空（关闭） | 否 | 允许浏览器跨域读取控制台 `/api` 的完整来源，逗号分隔，同时用于 CSRF 来源校验。仅填写受信任的前端。登录请求需使用 `credentials: 'include'`，写操作还需 `X-Requested-With: XMLHttpRequest`。会话 Cookie 使用 `SameSite=Lax`，前后端使用同站点的 HTTPS 子域名可携带登录态。 |
 | `OMNIGATE_TRUSTED_PROXIES` | 空 | 建议 | 受信任反向代理的地址（逗号分隔，CIDR 或单个 IP；单个 IP 视为 /32 或 /128）。仅当直连对端在此列表内时才解析 `X-Forwarded-For`。只写代理的精确地址，`deploy/` 的 Compose 部署为 `172.30.88.1`（宿主机代理）或 `172.30.88.10`（容器版 Caddy）。详见[反向代理](#7-反向代理)。 |
 | `OMNIGATE_DATABASE_URL` | 无（Docker 镜像中为 `sqlite:///data/omnigate.db`） | 是 | 数据库地址，以 `sqlite:` 开头时使用 SQLite，否则为 PostgreSQL 连接串（pgx 格式，如 `postgres://user:pass@host:5432/db?sslmode=disable`）。SQLite：`sqlite:///绝对路径.db`、`sqlite://相对路径.db`（相对工作目录）、`sqlite::memory:`（仅测试）；文件所在目录不存在时自动创建。两者区别见 [1.5](#15-数据库postgresql-与-sqlite)。Compose 部署中由 `docker-compose.yml` 设置为 PostgreSQL。 |
 | `OMNIGATE_REDIS_URL` | 空 | 否 | Redis 连接串。Phase 1 仍然只读取、**未使用**：Key 的 RPM 限流、兑换码限流、登录限流、Key 认证缓存、渠道熔断状态都保存在**各进程内存中**，多实例部署时各实例独立计数（套餐配额的用量计数保存在 PostgreSQL，多实例共享，见 [11](#11-套餐与周期配额)）。 |
