@@ -191,7 +191,11 @@ func dialectFor(r *http.Request) string {
 	return protocol.OpenAIChat
 }
 
-func writeError(w http.ResponseWriter, _ *http.Request, dialect string, e *protocol.GatewayError) {
+func writeError(w http.ResponseWriter, r *http.Request, dialect string, e *protocol.GatewayError) {
+	if s := logState(r); s != nil {
+		s.entry.StatusCode = e.Status
+		s.entry.ErrorClass, s.entry.ErrorMessage = &e.Class, &e.Message
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if e.RetryAfter > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(e.RetryAfter.Seconds()))))
@@ -213,6 +217,7 @@ func presentedKey(r *http.Request) string {
 // authenticate applies key, IP allowlist and RPM checks.
 func (g *Gateway) authenticate(r *http.Request) (*keys.Auth, *protocol.GatewayError) {
 	a, err := g.keys.Authenticate(r.Context(), presentedKey(r))
+	recordAuth(r, a)
 	if err != nil {
 		g.log.ErrorContext(r.Context(), "key lookup failed", "err", err)
 		return nil, protocol.NewError(protocol.ErrInternal, "internal error")
@@ -298,7 +303,11 @@ func (g *Gateway) countTokens(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Model string `json:"model"`
 	}
-	if json.Unmarshal(body, &req) != nil || req.Model == "" {
+	parseErr := json.Unmarshal(body, &req)
+	if s := logState(r); s != nil {
+		s.entry.Model = req.Model
+	}
+	if parseErr != nil || req.Model == "" {
 		writeError(w, r, protocol.Anthropic, protocol.NewError(protocol.ErrInvalidRequest, "missing model"))
 		return
 	}
@@ -611,10 +620,13 @@ func (g *Gateway) handle(dialect string) http.HandlerFunc {
 		// covers requests whose client already saw the response end.
 		g.wg.Add(1)
 		defer g.wg.Done()
-		st := &reqState{dialect: dialect, start: time.Now().UTC()}
-		reqID := httpx.RequestID(r.Context())
-		st.entry = &requestlog.Entry{ID: uuid.Must(uuid.NewV7()), StartedAt: st.start, RequestID: reqID, Inbound: dialect,
-			IPPrefix: httpx.IPPrefix(httpx.ClientIP(r.Context()))}
+		s := logState(r)
+		if s == nil {
+			s = newLogState(r)
+			r = r.WithContext(context.WithValue(r.Context(), requestLogKey{}, s))
+		}
+		st := &reqState{dialect: dialect, start: s.entry.StartedAt, entry: s.entry}
+		st.entry.Inbound = dialect
 		// Only the client id and version are logged, never the raw headers.
 		st.client = clientdetect.Detect(r.Header)
 		st.entry.Client = &st.client.ID
@@ -627,6 +639,7 @@ func (g *Gateway) handle(dialect string) http.HandlerFunc {
 			writeError(w, r, dialect, gerr)
 		}
 		g.finish(st, gerr)
+		s.logged = true
 		if st.abort {
 			panic(http.ErrAbortHandler)
 		}

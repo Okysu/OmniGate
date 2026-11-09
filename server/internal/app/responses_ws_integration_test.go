@@ -138,11 +138,15 @@ func TestResponsesWebSocket(t *testing.T) {
 		t.Fatalf("unknown event = %v", errEv)
 	}
 
-	// Every turn that reached the pipeline is a regular request log.
+	// Inference turns and the local warm-up are each logged once.
 	e.settle()
 	logs := e.mustDo(e.admin, http.MethodGet, "/api/logs?model=m1", nil, 200)
-	if logs["total"].(float64) != 3 || logs["items"].([]any)[0].(map[string]any)["inbound"] != "openai.responses" {
+	if logs["total"].(float64) != 4 || logs["items"].([]any)[0].(map[string]any)["inbound"] != "openai.responses" {
 		t.Fatalf("logs = %v", logs)
+	}
+	rejected := e.mustDo(e.admin, http.MethodGet, "/api/logs?status=rejected", nil, 200)
+	if rejected["total"].(float64) != 4 {
+		t.Fatalf("rejected WebSocket turns = %v", rejected)
 	}
 }
 

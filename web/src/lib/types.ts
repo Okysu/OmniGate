@@ -655,6 +655,8 @@ export interface FallbackAttempt {
 }
 
 export interface RequestLog {
+  method?: string
+  path?: string
   id: string
   requestId: string
   startedAt: string
@@ -730,8 +732,12 @@ export interface RequestLog {
 export interface StatsTotals {
   requests: number
   success: number
+  /** Only HTTP 5xx responses. */
   errors: number
+  /** HTTP 4xx responses, including client disconnects. */
+  rejected?: number
   successRate: number
+  failureRate?: number | null
   inputTokens: number
   outputTokens: number
   cost: string | null
@@ -749,7 +755,10 @@ export interface StatsTotals {
 export interface StatsDaily {
   date: string
   requests: number
+  /** Only HTTP 5xx responses. */
   errors: number
+  /** HTTP 4xx responses, including client disconnects. */
+  rejected?: number
   inputTokens: number
   outputTokens: number
   charge: string
@@ -758,7 +767,10 @@ export interface StatsDaily {
 export interface StatsByModel {
   model: string
   requests: number
+  /** Only HTTP 5xx responses. */
   errors: number
+  /** HTTP 4xx responses, including client disconnects. */
+  rejected?: number
   inputTokens: number
   outputTokens: number
   charge: string
@@ -768,7 +780,10 @@ export interface StatsByChannel {
   channelId: string | null
   channelName: string | null
   requests: number
+  /** Only HTTP 5xx responses. */
   errors: number
+  /** HTTP 4xx responses, including client disconnects. */
+  rejected?: number
   latencyP95Ms: number | null
   /** phase12 §5: prompt tokens (input + cache), cache reads and their ratio; absent on older backends. */
   inputTokens?: number
@@ -781,7 +796,10 @@ export interface StatsByClient {
   client: string
   name: string
   requests: number
+  /** Only HTTP 5xx responses. */
   errors: number
+  /** HTTP 4xx responses, including client disconnects. */
+  rejected?: number
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number

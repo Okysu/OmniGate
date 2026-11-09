@@ -64,6 +64,8 @@ export const MODEL_HEALTH_LABELS: Record<string, string> = {
 }
 
 export const INBOUND_LABELS: Record<string, string> = {
+  'gateway.http': '网关 HTTP',
+  'gateway.websocket': 'WebSocket 事件',
   'openai.chat': 'OpenAI Chat',
   'openai.responses': 'OpenAI Responses',
   'anthropic.messages': 'Anthropic Messages',

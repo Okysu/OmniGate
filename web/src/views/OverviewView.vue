@@ -119,8 +119,8 @@ const greeting = computed(() => {
       </p>
       <div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
         <template v-if="canStats && !statsError">
-          <StatTile label="请求数" :icon="Activity" :value="formatNumber(totals?.requests)" :hint="totals ? `失败 ${formatNumber(totals.errors)}` : undefined" :loading="statsLoading && !totals" />
-          <StatTile label="成功率" :icon="CircleCheck" :value="totals && totals.requests > 0 ? formatPercent(totals.successRate) : '—'" :loading="statsLoading && !totals" />
+          <StatTile label="请求数" :icon="Activity" :value="formatNumber(totals?.requests)" :hint="totals ? `4xx 拒绝 ${formatNumber(totals.rejected ?? 0)} · 5xx 失败 ${formatNumber(totals.errors)}` : undefined" :loading="statsLoading && !totals" />
+          <StatTile label="服务失败率" hint="仅统计 5xx，占全部请求的比例" :icon="CircleCheck" :value="totals && totals.requests > 0 ? formatPercent(totals.errors / totals.requests) : '—'" :loading="statsLoading && !totals" />
           <StatTile label="P95 延迟" :icon="Timer" :value="formatMs(totals?.latencyP95Ms)" :loading="statsLoading && !totals" />
           <StatTile
             label="Tokens 入 / 出"

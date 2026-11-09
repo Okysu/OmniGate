@@ -6978,10 +6978,10 @@ components:
       name: status
       in: query
       required: false
-      description: "`success` = 状态码 < 400，`error` = 状态码 ≥ 400；其他取值忽略。"
+      description: "`success` = 状态码 < 400，`rejected` = 400–499，`error` = 500–599；其他取值忽略。"
       schema:
         type: string
-        enum: [success, error]
+        enum: [success, rejected, error]
     LogAffinity:
       name: affinity
       in: query
@@ -10532,6 +10532,12 @@ components:
         errorClass, errorMessage, attempts, fallbackPath, ttftMs, durationMs, usage, cost, charge, subscriptionId, quotaCharge, servedModel, channelTier, imageCount,
         priceMultiplier, audioSeconds, usageEstimated]
       properties:
+        method:
+          type: string
+          description: HTTP 方法；旧日志为空字符串
+        path:
+          type: string
+          description: HTTP 路径，不含 query；旧日志为空字符串
         id:
           type: string
           format: uuid
@@ -10688,7 +10694,7 @@ components:
           format: date-time
         totals:
           type: object
-          required: [requests, success, errors, successRate, inputTokens, outputTokens, cost, charge, latencyP50Ms, latencyP95Ms, latencyP99Ms, ttftP50Ms]
+          required: [requests, success, errors, rejected, failureRate, successRate, inputTokens, outputTokens, cost, charge, latencyP50Ms, latencyP95Ms, latencyP99Ms, ttftP50Ms]
           properties:
             requests:
               type: integer
@@ -10699,6 +10705,15 @@ components:
             errors:
               type: integer
               format: int64
+              description: HTTP 500–599 服务失败数
+            rejected:
+              type: integer
+              description: HTTP 400–499 请求拒绝数（含 499 客户端断开）
+            failureRate:
+              type: [number, "null"]
+              minimum: 0
+              maximum: 1
+              description: 5xx 数量 / 全部请求数；无请求时为 null
             successRate:
               type: number
               minimum: 0
@@ -10741,7 +10756,7 @@ components:
           type: array
           items:
             type: object
-            required: [date, requests, errors, inputTokens, outputTokens, charge]
+            required: [date, requests, errors, rejected, inputTokens, outputTokens, charge]
             properties:
               date:
                 type: string
@@ -10751,6 +10766,10 @@ components:
                 type: integer
               errors:
                 type: integer
+                description: HTTP 500–599 服务失败数
+              rejected:
+                type: integer
+                description: HTTP 400–499 请求拒绝数（含 499 客户端断开）
               inputTokens:
                 type: integer
               outputTokens:
@@ -10762,7 +10781,7 @@ components:
           maxItems: 50
           items:
             type: object
-            required: [model, requests, errors, inputTokens, outputTokens, charge]
+            required: [model, requests, errors, rejected, inputTokens, outputTokens, charge]
             properties:
               model:
                 type: string
@@ -10770,6 +10789,10 @@ components:
                 type: integer
               errors:
                 type: integer
+                description: HTTP 500–599 服务失败数
+              rejected:
+                type: integer
+                description: HTTP 400–499 请求拒绝数（含 499 客户端断开）
               inputTokens:
                 type: integer
               outputTokens:
@@ -10781,7 +10804,7 @@ components:
           maxItems: 50
           items:
             type: object
-            required: [channelId, channelName, requests, errors, latencyP95Ms]
+            required: [channelId, channelName, requests, errors, rejected, latencyP95Ms]
             properties:
               channelId:
                 type: [string, "null"]
@@ -10793,6 +10816,10 @@ components:
                 type: integer
               errors:
                 type: integer
+                description: HTTP 500–599 服务失败数
+              rejected:
+                type: integer
+                description: HTTP 400–499 请求拒绝数（含 499 客户端断开）
               latencyP95Ms:
                 type: [integer, "null"]
               inputTokens:
@@ -10812,13 +10839,14 @@ components:
           description: 按识别出的客户端（Round 13，`phase13-api.md` §4），按请求数倒序；识别功能上线前的日志归入 `unknown`
           items:
             type: object
-            required: [client, name, requests, errors, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cacheHitRate,
+            required: [client, name, requests, errors, rejected, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, cacheHitRate,
               affinityHits, affinityBound, affinityHitRate, charge]
             properties:
               client: { type: string, description: 客户端 id }
               name: { type: string, description: 显示名称 }
               requests: { type: integer }
-              errors: { type: integer }
+              errors: { type: integer, description: HTTP 500–599 服务失败数 }
+              rejected: { type: integer, description: HTTP 400–499 请求拒绝数 }
               inputTokens: { type: integer, description: 输入 + 缓存读 + 缓存写 token }
               outputTokens: { type: integer }
               cacheReadTokens: { type: integer }

@@ -38,6 +38,8 @@ type Entry struct {
 	ID        uuid.UUID
 	StartedAt time.Time
 	RequestID string
+	Method    string
+	Path      string
 	UserID    *uuid.UUID
 	KeyID     *uuid.UUID
 	KeyName   *string
@@ -139,8 +141,10 @@ func NewWriter(pool *db.DB, log *slog.Logger) *Writer {
 // rather than silent loss) and then drops, counting the drop in a metric.
 func (w *Writer) Add(e *Entry) {
 	outcome := "success"
-	if e.StatusCode >= 400 {
+	if e.StatusCode >= 500 && e.StatusCode < 600 {
 		outcome = "error"
+	} else if e.StatusCode >= 400 && e.StatusCode < 500 {
+		outcome = "rejected"
 	}
 	metricRequests.WithLabelValues(e.Inbound, outcome).Inc()
 	metricLatency.WithLabelValues(e.Inbound).Observe(float64(e.DurationMs) / 1000)
@@ -306,7 +310,7 @@ var columns = []string{"id", "started_at", "request_id", "user_id", "key_id", "k
 	"ttft_ms", "duration_ms", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens",
 	"usage_estimated", "cost_nano", "charge_nano", "sell_price_id", "cost_price_id", "ip_prefix", "subscription_id", "quota_charge_nano", "served_model", "channel_tier",
 	"image_count", "image_input_tokens", "price_multiplier", "audio_seconds", "audio_input_tokens", "audio_output_tokens", "input_characters", "price_tier",
-	"affinity", "affinity_rule", "client", "client_version", "compat_warnings"}
+	"affinity", "affinity_rule", "client", "client_version", "compat_warnings", "request_method", "request_path"}
 
 func row(e *Entry) []any {
 	path, _ := json.Marshal(e.Attempts)
@@ -318,7 +322,7 @@ func row(e *Entry) []any {
 		e.TTFTMs, e.DurationMs, e.Usage.Input, e.Usage.Output, e.Usage.CacheRead, e.Usage.CacheWrite, e.Usage.Reasoning,
 		e.Usage.Estimated, int64(e.Cost), int64(e.Charge), e.SellPriceID, e.CostPriceID, e.IPPrefix, e.SubscriptionID, int64(e.QuotaCharge),
 		servedModel(e), channelTier(e), e.Usage.Images, e.Usage.ImageInput, e.PriceMultiplier, e.Usage.AudioSeconds, e.Usage.AudioInput,
-		e.Usage.AudioOutput, e.Usage.Characters, e.PriceTier, e.Affinity, e.AffinityRule, e.Client, e.ClientVersion, e.CompatWarnings}
+		e.Usage.AudioOutput, e.Usage.Characters, e.PriceTier, e.Affinity, e.AffinityRule, e.Client, e.ClientVersion, e.CompatWarnings, e.Method, e.Path}
 }
 
 func (w *Writer) insert(ctx context.Context, batch []*Entry) error {

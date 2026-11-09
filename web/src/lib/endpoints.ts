@@ -294,7 +294,7 @@ export interface LogsFilter {
   channelId?: string
   keyId?: string
   userId?: string
-  status?: 'success' | 'error'
+  status?: 'success' | 'rejected' | 'error'
   /** phase12 §4: one session affinity outcome, or 'any' (an affinity rule applied). */
   affinity?: AffinityOutcome | 'any'
   /** phase13 §3: one detected client id (GET /api/clients). */

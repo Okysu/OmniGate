@@ -242,3 +242,9 @@ interface RedeemBatch { id: string; kind: 'wallet_credit'; amount: string; count
 | 数据面错误体 | — | 不在 JSON 中携带 request id，统一通过响应头 `X-OmniGate-Request-Id` 提供 |
 | `count_tokens` | — | 只尝试第一个可用的 Anthropic 渠道，失败即估算；消耗 RPM 配额，不写请求日志、不计费 |
 | 代理模式下的 SSRF | 拨号时校验 | 配置 `OMNIGATE_UPSTREAM_PROXY` 后只能在请求前解析主机名校验（尽力而为，存在 DNS 重绑定窗口） |
+
+### 网关日志与失败率（2026-11-09）
+
+数据接口 `/v1/*` 与 `/dashboard/billing/*` 的所有 HTTP 请求均写入请求日志，包括未知路径、方法错误、CORS 预检、模型列表、余额查询和 Token 计数。推理请求仅记录一次，保留用量和结算详情；辅助请求不触发计费。WebSocket 握手、预热、协议拒绝和推理轮次分别留痕。日志增加 `method` 和 `path`，不记录 query、凭据或正文；历史记录这两个字段为空字符串。有效 Key 的 IP/RPM/账号停用拒绝也关联用户，无法识别的 Key 留作匿名日志，仅管理员可见。
+
+统计按 HTTP 状态码分三类。`success` 为小于 400，`rejected` 为 400–499（包括 499），`errors` 为 500–599。总览、每日、模型、渠道、客户端和 Prometheus 使用同一口径。`failureRate` = errors / requests，无请求为 null；`successRate` 保留原语义 success / requests，4xx 不算成功。日志支持 `status=success|rejected|error`。流式 HTTP 200 中的业务错误仍保留错误详情，不计为 HTTP 5xx。历史日志在查询时按新口径计算，无需改写。

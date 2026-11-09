@@ -100,7 +100,7 @@ SukiRouter 中的 ZCode、CodeWhale、Ktor、Unify Chat Provider 规则来源无
 ```ts
 {
   client: string, name: string,
-  requests: number, errors: number,           // errors = status_code >= 400
+  requests: number, errors: number,           // errors = 500 <= status_code <= 599; rejected = 400 <= status_code <= 499
   inputTokens: number,                        // 提示 token：输入 + 缓存读 + 缓存写（与 totals.inputTokens 相同口径）
   outputTokens: number, cacheReadTokens: number, cacheWriteTokens: number,
   cacheHitRate: number | null,                // cacheReadTokens ÷ inputTokens；没有提示 token 时为 null（phase12-api.md §5）

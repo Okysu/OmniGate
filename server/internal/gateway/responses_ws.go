@@ -15,6 +15,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"omnigate/internal/keys"
 	"omnigate/internal/platform/httpx"
 	"omnigate/internal/protocol"
 )
@@ -47,6 +48,7 @@ type wsSession struct {
 	ctx    context.Context
 	header http.Header // handshake headers forwarded to every response
 	base   *http.Request
+	auth   *keys.Auth
 
 	writeMu sync.Mutex
 	sem     chan struct{}
@@ -79,7 +81,8 @@ func (g *Gateway) responsesWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Reject a bad key before upgrading, with a regular HTTP error.
-	if _, gerr := g.authenticate(r); gerr != nil {
+	a, gerr := g.authenticate(r)
+	if gerr != nil {
 		writeError(w, r, protocol.OpenAIResponses, gerr)
 		return
 	}
@@ -87,10 +90,19 @@ func (g *Gateway) responsesWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return // Accept already wrote the HTTP error
 	}
+	// Record the successful handshake immediately, not when the long-lived
+	// connection closes. Its subsequent turns have their own log entries.
+	if s := logState(r); s != nil {
+		s.entry.StatusCode = http.StatusSwitchingProtocols
+		s.entry.DurationMs = time.Since(s.entry.StartedAt).Milliseconds()
+		g.logs.Add(s.entry)
+		s.logged = true
+	}
 	conn.SetReadLimit(g.opts.MaxBodyBytes)
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), wsConnLifetime)
+	// Turns must not share the handshake's logging state (lanes run concurrently).
+	ctx, cancel := context.WithTimeout(context.WithValue(context.WithoutCancel(r.Context()), requestLogKey{}, (*requestLogState)(nil)), wsConnLifetime)
 	defer cancel()
-	s := &wsSession{g: g, conn: conn, ctx: ctx, header: forwardHeaders(r.Header), base: r,
+	s := &wsSession{g: g, conn: conn, ctx: ctx, header: forwardHeaders(r.Header), base: r, auth: a,
 		sem: make(chan struct{}, wsMaxInFlight), lanes: map[string]chan wsJob{},
 		cache: map[string][]json.RawMessage{}, byLane: map[string][]string{}}
 	s.run()
@@ -315,6 +327,7 @@ func (s *wsSession) warmUp(j wsJob, body []byte, input []json.RawMessage) {
 		Model string `json:"model"`
 	}
 	_ = json.Unmarshal(body, &req)
+	s.logEvent(http.StatusOK, req.Model, "", "")
 	id := "resp_" + randomHex(24)
 	s.remember(j.lane, id, input)
 	resp := map[string]any{"id": id, "object": "response", "created_at": time.Now().Unix(), "status": "completed",
@@ -370,11 +383,27 @@ func (s *wsSession) sendEvent(lane string, ev map[string]any) {
 }
 
 func (s *wsSession) sendError(lane string, status int, typ, code, msg, param string) {
+	s.logEvent(status, "", code, msg)
 	e := map[string]any{"type": typ, "code": code, "message": msg}
 	if param != "" {
 		e["param"] = param
 	}
 	s.sendEvent(lane, map[string]any{"type": "error", "status": status, "error": e})
+}
+
+// Protocol-level rejections and warm-ups do not enter the inference pipeline.
+// Record them separately; ordinary turns are already logged by handle.
+func (s *wsSession) logEvent(status int, model, code, msg string) {
+	r := s.base.WithContext(httpx.WithRequestID(s.ctx, httpx.NewRequestID()))
+	e := newLogState(r).entry
+	e.Inbound, e.StatusCode, e.Model = "gateway.websocket", status, model
+	if s.auth != nil {
+		e.UserID, e.KeyID, e.KeyName = &s.auth.UserID, &s.auth.Key.ID, &s.auth.Key.Name
+	}
+	if code != "" {
+		e.ErrorClass, e.ErrorMessage = &code, &msg
+	}
+	s.g.logs.Add(e)
 }
 
 // wsResponseWriter receives the pipeline's HTTP response: SSE events are

@@ -142,7 +142,7 @@ async function load(opts: { silent?: boolean } = {}) {
       from,
       to,
       model: model.value || undefined,
-      status: status.value === ALL ? undefined : status.value as 'success' | 'error',
+      status: status.value === ALL ? undefined : status.value as 'success' | 'rejected' | 'error',
       keyId: keyId.value === ALL ? undefined : keyId.value,
       userId: userId.value || undefined,
       affinity: affinity.value === ALL ? undefined : affinity.value,
@@ -270,8 +270,11 @@ const colCount = computed(() => 13 + (seeAll.value ? 2 : 0))
                 <SelectItem value="success">
                   成功
                 </SelectItem>
+                <SelectItem value="rejected">
+                  请求拒绝（4xx）
+                </SelectItem>
                 <SelectItem value="error">
-                  失败
+                  服务失败（5xx）
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -452,11 +455,12 @@ const colCount = computed(() => 13 + (seeAll.value ? 2 : 0))
                     <Badge variant="secondary" class="text-[10px]">
                       {{ INBOUND_LABELS[l.inbound] ?? l.inbound }}
                     </Badge>
+                    <span v-if="l.path" class="text-muted-foreground block max-w-64 truncate font-mono text-xs" :title="`${l.method} ${l.path}`">{{ l.method }} {{ l.path }}</span>
                   </TableCell>
                   <TableCell>{{ l.stream ? '是' : '否' }}</TableCell>
                   <TableCell>
                     <Badge variant="outline" class="tabular-nums" :class="statusClass(l.statusCode)">
-                      {{ l.statusCode }}
+                      {{ l.statusCode }}{{ l.statusCode >= 400 && l.statusCode < 500 ? ' · 请求拒绝' : l.statusCode >= 500 && l.statusCode < 600 ? ' · 服务失败' : '' }}
                     </Badge>
                   </TableCell>
                   <TableCell class="font-mono" :title="l.errorClass ? ERROR_CLASS_HINTS[l.errorClass] : undefined">

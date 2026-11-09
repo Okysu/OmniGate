@@ -321,13 +321,13 @@ func (a *App) Handler() http.Handler {
 	// Data plane.
 	dataCORS := apiCORS(a.cfg.CORSOrigins, false)
 	r.Route("/v1", func(r chi.Router) {
-		r.Use(httpx.AccessLog(a.log, "data"), dataCORS)
+		r.Use(httpx.AccessLog(a.log, "data"), a.gw.RequestLogging, dataCORS)
 		a.gw.Routes(r)
 	})
 	// OpenAI's legacy billing endpoints without the /v1 prefix (some clients
 	// that show a balance call them so).
 	r.Route("/dashboard/billing", func(r chi.Router) {
-		r.Use(httpx.AccessLog(a.log, "data"), dataCORS)
+		r.Use(httpx.AccessLog(a.log, "data"), a.gw.RequestLogging, dataCORS)
 		a.gw.DashboardRoutes(r)
 	})
 

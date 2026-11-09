@@ -85,8 +85,9 @@ const daily = computed(() => (data.value ? fillDaily(data.value.daily, data.valu
 const categories = computed(() => daily.value.map(d => d.date))
 
 const requestSeries = computed<ColumnSeries[]>(() => [
-  { key: 'success', label: '成功', color: 'blue', values: daily.value.map(d => d.requests - d.errors) },
-  { key: 'errors', label: '失败', color: 'red', values: daily.value.map(d => d.errors) },
+  { key: 'success', label: '成功', color: 'blue', values: daily.value.map(d => d.requests - d.errors - (d.rejected ?? 0)) },
+  { key: 'rejected', label: '请求拒绝（4xx）', color: 'orange', values: daily.value.map(d => d.rejected ?? 0) },
+  { key: 'errors', label: '服务失败（5xx）', color: 'red', values: daily.value.map(d => d.errors) },
 ])
 const tokenSeries = computed<ColumnSeries[]>(() => [
   { key: 'input', label: '输入 Tokens', color: 'blue', values: daily.value.map(d => d.inputTokens) },
@@ -121,7 +122,7 @@ const latencyHint = computed(() => {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="统计" :description="seeAll ? '请求量、成功率、延迟与费用（全部用户，可按用户筛选）。日期按 UTC 聚合。' : '你的请求量、成功率、延迟与费用。日期按 UTC 聚合。'">
+    <PageHeader title="统计" :description="seeAll ? '请求量、服务失败率、延迟与费用（全部用户，可按用户筛选）。日期按 UTC 聚合。' : '你的请求量、服务失败率、延迟与费用。日期按 UTC 聚合。'">
       <template #actions>
         <Button variant="outline" size="sm" :disabled="loading" @click="load">
           <RefreshCw :class="loading ? 'animate-spin' : ''" />
@@ -158,8 +159,8 @@ const latencyHint = computed(() => {
     <ErrorState v-if="loadError" :error="loadError" @retry="load" />
     <template v-else>
       <div class="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-        <StatTile label="请求数" :icon="Activity" :value="formatNumber(totals?.requests)" :hint="totals ? `失败 ${formatNumber(totals.errors)}` : undefined" :loading="loading && !totals" />
-        <StatTile label="成功率" :icon="CircleCheck" :value="totals && totals.requests > 0 ? formatPercent(totals.successRate) : '—'" :loading="loading && !totals" />
+        <StatTile label="请求数" :icon="Activity" :value="formatNumber(totals?.requests)" :hint="totals ? `4xx 拒绝 ${formatNumber(totals.rejected ?? 0)} · 5xx 失败 ${formatNumber(totals.errors)}` : undefined" :loading="loading && !totals" />
+        <StatTile label="服务失败率" hint="仅统计 5xx，占全部请求的比例" :icon="CircleCheck" :value="totals && totals.requests > 0 ? formatPercent(totals.errors / totals.requests) : '—'" :loading="loading && !totals" />
         <StatTile label="延迟 P95" :icon="Timer" :value="formatMs(totals?.latencyP95Ms)" :hint="latencyHint" :loading="loading && !totals" />
         <StatTile label="首字节 TTFT P50" :icon="Gauge" :value="formatMs(totals?.ttftP50Ms)" :loading="loading && !totals" />
         <StatTile label="输入 Tokens" :icon="ArrowDownToLine" :value="formatCompact(totals?.inputTokens)" :title="formatNumber(totals?.inputTokens)" hint="含缓存读写" :loading="loading && !totals" />
@@ -251,7 +252,10 @@ const latencyHint = computed(() => {
                   请求
                 </TableHead>
                 <TableHead class="text-right">
-                  失败
+                  请求拒绝（4xx）
+                </TableHead>
+                <TableHead class="text-right">
+                  服务失败（5xx）
                 </TableHead>
                 <TableHead class="text-right">
                   输入 Tokens
@@ -271,6 +275,9 @@ const latencyHint = computed(() => {
                 </TableCell>
                 <TableCell class="text-right tabular-nums">
                   {{ formatNumber(d.requests) }}
+                </TableCell>
+                <TableCell class="text-right tabular-nums text-amber-700 dark:text-amber-400">
+                  {{ formatNumber(d.rejected ?? 0) }}
                 </TableCell>
                 <TableCell class="text-right tabular-nums">
                   {{ formatNumber(d.errors) }}
@@ -311,7 +318,10 @@ const latencyHint = computed(() => {
                     请求
                   </TableHead>
                   <TableHead class="text-right">
-                    失败率
+                    请求拒绝（4xx）
+                  </TableHead>
+                  <TableHead class="text-right">
+                    失败率（5xx）
                   </TableHead>
                   <TableHead class="text-right">
                     输入 / 输出
@@ -324,10 +334,13 @@ const latencyHint = computed(() => {
               <TableBody>
                 <TableRow v-for="m in data.byModel" :key="m.model">
                   <TableCell class="max-w-48 truncate font-mono text-xs">
-                    {{ m.model }}
+                    {{ m.model || '未指定模型' }}
                   </TableCell>
                   <TableCell class="text-right tabular-nums">
                     {{ formatNumber(m.requests) }}
+                  </TableCell>
+                  <TableCell class="text-right tabular-nums text-amber-700 dark:text-amber-400">
+                    {{ formatNumber(m.rejected ?? 0) }}
                   </TableCell>
                   <TableCell class="text-right tabular-nums" :class="m.errors > 0 ? 'text-destructive' : ''">
                     {{ formatPercent(errorRate(m.requests, m.errors)) }}
@@ -363,7 +376,10 @@ const latencyHint = computed(() => {
                     请求
                   </TableHead>
                   <TableHead class="text-right">
-                    失败率
+                    请求拒绝（4xx）
+                  </TableHead>
+                  <TableHead class="text-right">
+                    失败率（5xx）
                   </TableHead>
                   <TableHead class="text-right">
                     P95 延迟
@@ -380,6 +396,9 @@ const latencyHint = computed(() => {
                   </TableCell>
                   <TableCell class="text-right tabular-nums">
                     {{ formatNumber(c.requests) }}
+                  </TableCell>
+                  <TableCell class="text-right tabular-nums text-amber-700 dark:text-amber-400">
+                    {{ formatNumber(c.rejected ?? 0) }}
                   </TableCell>
                   <TableCell class="text-right tabular-nums" :class="c.errors > 0 ? 'text-destructive' : ''">
                     {{ formatPercent(errorRate(c.requests, c.errors)) }}
@@ -417,7 +436,10 @@ const latencyHint = computed(() => {
                   请求
                 </TableHead>
                 <TableHead class="text-right">
-                  失败率
+                  请求拒绝（4xx）
+                </TableHead>
+                <TableHead class="text-right">
+                  失败率（5xx）
                 </TableHead>
                 <TableHead class="text-right">
                   输入 / 输出
@@ -440,6 +462,9 @@ const latencyHint = computed(() => {
                 </TableCell>
                 <TableCell class="text-right tabular-nums">
                   {{ formatNumber(c.requests) }}
+                </TableCell>
+                <TableCell class="text-right tabular-nums text-amber-700 dark:text-amber-400">
+                  {{ formatNumber(c.rejected ?? 0) }}
                 </TableCell>
                 <TableCell class="text-right tabular-nums" :class="c.errors > 0 ? 'text-destructive' : ''">
                   {{ formatPercent(errorRate(c.requests, c.errors)) }}

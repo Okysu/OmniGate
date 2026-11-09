@@ -191,7 +191,7 @@ func TestCompletionsEndpoint(t *testing.T) {
 		if code, _, raw := readBody(gwPost(t, context.Background(), base, "/v1/chat/completions", key, `{"model":"chat-only","messages":[{"role":"user","content":"hi"}]}`)); code != 200 {
 			t.Fatalf("chat = %d %s", code, raw)
 		}
-		l := e.lastLog(e.admin, "model=chat-only&status=error")
+		l := e.lastLog(e.admin, "model=chat-only&status=rejected")
 		if l["inbound"] != "openai.completions" || l["statusCode"] != float64(404) {
 			t.Fatalf("log = %v", l)
 		}

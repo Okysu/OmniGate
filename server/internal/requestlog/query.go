@@ -122,7 +122,9 @@ func parseFilter(r *http.Request, maxDays int) (*filter, error) {
 	case "success":
 		f.where = append(f.where, "l.status_code < 400")
 	case "error":
-		f.where = append(f.where, "l.status_code >= 400")
+		f.where = append(f.where, "l.status_code BETWEEN 500 AND 599")
+	case "rejected":
+		f.where = append(f.where, "l.status_code BETWEEN 400 AND 499")
 	}
 	return f, nil
 }
@@ -202,6 +204,8 @@ type logView struct {
 	// CompatWarnings lists the fields protocol conversion dropped or could
 	// not convert (comma-separated); null = none.
 	CompatWarnings *string `json:"compatWarnings"`
+	Method         string  `json:"method"`
+	Path           string  `json:"path"`
 }
 
 // clientRef is a logged client: id, display name and version (null = not
@@ -232,7 +236,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		l.reasoning_tokens, l.usage_estimated, l.cost_nano, l.charge_nano, l.subscription_id, l.quota_charge_nano,
 		COALESCE(l.served_model, l.model), l.channel_tier, l.image_count, l.image_input_tokens, l.price_multiplier,
 		l.audio_seconds, l.audio_input_tokens, l.audio_output_tokens, l.input_characters, l.price_tier, l.affinity, l.affinity_rule,
-		l.client, l.client_version, l.compat_warnings
+		l.client, l.client_version, l.compat_warnings, l.request_method, l.request_path
 		FROM request_logs l LEFT JOIN users u ON u.id = l.user_id`+f.sql()+
 		` ORDER BY l.started_at DESC, l.id DESC LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
@@ -254,7 +258,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 			&ttft, &dur, &v.Usage.Input, &v.Usage.Output, &v.Usage.CacheRead, &v.Usage.CacheWrite, &v.Usage.Reasoning,
 			&v.Usage.Estimated, &cost, &charge, &v.SubscriptionID, &quota, &v.ServedModel, &v.ChannelTier, &v.ImageCount,
 			&v.Usage.ImageInputTokens, &v.PriceMultiplier, &v.AudioSeconds, &v.Usage.AudioInputTokens, &v.Usage.AudioOutputTokens,
-			&v.Usage.InputCharacters, &v.PriceTier, &v.Affinity, &v.AffinityRule, &client, &clientVersion, &v.CompatWarnings); err != nil {
+			&v.Usage.InputCharacters, &v.PriceTier, &v.Affinity, &v.AffinityRule, &client, &clientVersion, &v.CompatWarnings, &v.Method, &v.Path); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
@@ -341,7 +345,7 @@ func ratio(n, d int64) *float64 {
 // (NULL) count as unknown.
 func (h *Handler) byClient(ctx context.Context, where string, args []any) ([]map[string]any, error) {
 	const client = "COALESCE(l.client, '" + clientdetect.Unknown + "')"
-	rows, err := h.pool.Query(ctx, `SELECT `+client+`, count(*), count(*) FILTER (WHERE status_code >= 400),
+	rows, err := h.pool.Query(ctx, `SELECT `+client+`, count(*), count(*) FILTER (WHERE status_code BETWEEN 500 AND 599), count(*) FILTER (WHERE status_code BETWEEN 400 AND 499),
 		coalesce(sum(input_tokens + cache_read_tokens + cache_write_tokens), 0), coalesce(sum(output_tokens), 0),
 		coalesce(sum(cache_read_tokens), 0), coalesce(sum(cache_write_tokens), 0),
 		count(*) FILTER (WHERE affinity = '`+affinity.OutcomeHit+`'), count(*) FILTER (WHERE affinity IN (`+boundOutcomes+`)),
@@ -354,12 +358,12 @@ func (h *Handler) byClient(ctx context.Context, where string, args []any) ([]map
 	out := []map[string]any{}
 	for rows.Next() {
 		var id string
-		var n, e, prompt, o, read, write, hits, bound int64
+		var n, e, rejected, prompt, o, read, write, hits, bound int64
 		var c *string
-		if err := rows.Scan(&id, &n, &e, &prompt, &o, &read, &write, &hits, &bound, &c); err != nil {
+		if err := rows.Scan(&id, &n, &e, &rejected, &prompt, &o, &read, &write, &hits, &bound, &c); err != nil {
 			return nil, err
 		}
-		out = append(out, map[string]any{"client": id, "name": clientdetect.Name(id), "requests": n, "errors": e,
+		out = append(out, map[string]any{"client": id, "name": clientdetect.Name(id), "requests": n, "errors": e, "rejected": rejected,
 			"inputTokens": prompt, "outputTokens": o, "cacheReadTokens": read, "cacheWriteTokens": write,
 			"cacheHitRate": cacheHitRate(read, prompt), "affinityHits": hits, "affinityBound": bound,
 			"affinityHitRate": ratio(hits, bound), "charge": numericString(c)})
@@ -396,16 +400,16 @@ func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) buildSummary(ctx context.Context, f *filter) (map[string]any, error) {
 	where := f.sql()
 	dl := h.pool.Dialect()
-	var reqs, ok, errs, in, outTok, cacheRead, cacheWrite int64
+	var reqs, ok, errs, rejected, in, outTok, cacheRead, cacheWrite int64
 	var cost, charge *string
 	var p50, p95, p99, ttft *float64
-	err := h.pool.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE status_code < 400), count(*) FILTER (WHERE status_code >= 400),
+	err := h.pool.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE status_code < 400), count(*) FILTER (WHERE status_code BETWEEN 500 AND 599), count(*) FILTER (WHERE status_code BETWEEN 400 AND 499),
 		coalesce(sum(input_tokens + cache_read_tokens + cache_write_tokens), 0), coalesce(sum(output_tokens), 0),
 		coalesce(sum(cache_read_tokens), 0), coalesce(sum(cache_write_tokens), 0),
 		`+dl.SumText("cost_nano")+`, `+dl.SumText("charge_nano")+`,
 		`+dl.Percentile(0.5, "duration_ms")+`, `+dl.Percentile(0.95, "duration_ms")+`,
 		`+dl.Percentile(0.99, "duration_ms")+`, `+dl.Percentile(0.5, "ttft_ms")+`
-		FROM request_logs l`+where, f.args...).Scan(&reqs, &ok, &errs, &in, &outTok, &cacheRead, &cacheWrite, &cost, &charge, &p50, &p95, &p99, &ttft)
+		FROM request_logs l`+where, f.args...).Scan(&reqs, &ok, &errs, &rejected, &in, &outTok, &cacheRead, &cacheWrite, &cost, &charge, &p50, &p95, &p99, &ttft)
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +425,7 @@ func (h *Handler) buildSummary(ctx context.Context, f *filter) (map[string]any, 
 		return &n
 	}
 	totals := map[string]any{
-		"requests": reqs, "success": ok, "errors": errs, "successRate": rate, "inputTokens": in, "outputTokens": outTok,
+		"requests": reqs, "success": ok, "errors": errs, "rejected": rejected, "successRate": rate, "failureRate": ratio(errs, reqs), "inputTokens": in, "outputTokens": outTok,
 		"cost": nil, "charge": numericString(charge),
 		"latencyP50Ms": round(p50), "latencyP95Ms": round(p95), "latencyP99Ms": round(p99), "ttftP50Ms": round(ttft),
 		// Prompt cache hits (phase12-api.md §5): inputTokens is the prompt.
@@ -433,7 +437,7 @@ func (h *Handler) buildSummary(ctx context.Context, f *filter) (map[string]any, 
 
 	daily := []map[string]any{}
 	rows, err := h.pool.Query(ctx, `SELECT `+dl.DateUTC("started_at")+` d, count(*),
-		count(*) FILTER (WHERE status_code >= 400), coalesce(sum(input_tokens + cache_read_tokens + cache_write_tokens), 0),
+		count(*) FILTER (WHERE status_code BETWEEN 500 AND 599), count(*) FILTER (WHERE status_code BETWEEN 400 AND 499), coalesce(sum(input_tokens + cache_read_tokens + cache_write_tokens), 0),
 		coalesce(sum(output_tokens), 0), `+dl.SumText("charge_nano")+`
 		FROM request_logs l`+where+` GROUP BY d ORDER BY d`, f.args...)
 	if err != nil {
@@ -441,18 +445,18 @@ func (h *Handler) buildSummary(ctx context.Context, f *filter) (map[string]any, 
 	}
 	for rows.Next() {
 		var d string
-		var n, e, i, o int64
+		var n, e, rejected, i, o int64
 		var c *string
-		if err := rows.Scan(&d, &n, &e, &i, &o, &c); err != nil {
+		if err := rows.Scan(&d, &n, &e, &rejected, &i, &o, &c); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		daily = append(daily, map[string]any{"date": d, "requests": n, "errors": e, "inputTokens": i, "outputTokens": o, "charge": numericString(c)})
+		daily = append(daily, map[string]any{"date": d, "requests": n, "errors": e, "rejected": rejected, "inputTokens": i, "outputTokens": o, "charge": numericString(c)})
 	}
 	rows.Close()
 
 	byModel := []map[string]any{}
-	rows, err = h.pool.Query(ctx, `SELECT model, count(*), count(*) FILTER (WHERE status_code >= 400),
+	rows, err = h.pool.Query(ctx, `SELECT model, count(*), count(*) FILTER (WHERE status_code BETWEEN 500 AND 599), count(*) FILTER (WHERE status_code BETWEEN 400 AND 499),
 		coalesce(sum(input_tokens + cache_read_tokens + cache_write_tokens), 0), coalesce(sum(output_tokens), 0), `+dl.SumText("charge_nano")+`
 		FROM request_logs l`+where+` GROUP BY model ORDER BY count(*) DESC, model LIMIT 50`, f.args...)
 	if err != nil {
@@ -460,18 +464,18 @@ func (h *Handler) buildSummary(ctx context.Context, f *filter) (map[string]any, 
 	}
 	for rows.Next() {
 		var m string
-		var n, e, i, o int64
+		var n, e, rejected, i, o int64
 		var c *string
-		if err := rows.Scan(&m, &n, &e, &i, &o, &c); err != nil {
+		if err := rows.Scan(&m, &n, &e, &rejected, &i, &o, &c); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		byModel = append(byModel, map[string]any{"model": m, "requests": n, "errors": e, "inputTokens": i, "outputTokens": o, "charge": numericString(c)})
+		byModel = append(byModel, map[string]any{"model": m, "requests": n, "errors": e, "rejected": rejected, "inputTokens": i, "outputTokens": o, "charge": numericString(c)})
 	}
 	rows.Close()
 
 	byChannel := []map[string]any{}
-	rows, err = h.pool.Query(ctx, `SELECT channel_id, max(channel_name), count(*), count(*) FILTER (WHERE status_code >= 400),
+	rows, err = h.pool.Query(ctx, `SELECT channel_id, max(channel_name), count(*), count(*) FILTER (WHERE status_code BETWEEN 500 AND 599), count(*) FILTER (WHERE status_code BETWEEN 400 AND 499),
 		`+dl.Percentile(0.95, "duration_ms")+`, coalesce(sum(input_tokens + cache_read_tokens + cache_write_tokens), 0),
 		coalesce(sum(cache_read_tokens), 0)
 		FROM request_logs l`+where+` GROUP BY channel_id ORDER BY count(*) DESC, max(channel_name), channel_id LIMIT 50`, f.args...)
@@ -481,13 +485,13 @@ func (h *Handler) buildSummary(ctx context.Context, f *filter) (map[string]any, 
 	for rows.Next() {
 		var id *uuid.UUID
 		var name *string
-		var n, e, prompt, read int64
+		var n, e, rejected, prompt, read int64
 		var p *float64
-		if err := rows.Scan(&id, &name, &n, &e, &p, &prompt, &read); err != nil {
+		if err := rows.Scan(&id, &name, &n, &e, &rejected, &p, &prompt, &read); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		byChannel = append(byChannel, map[string]any{"channelId": id, "channelName": name, "requests": n, "errors": e, "latencyP95Ms": round(p),
+		byChannel = append(byChannel, map[string]any{"channelId": id, "channelName": name, "requests": n, "errors": e, "rejected": rejected, "latencyP95Ms": round(p),
 			"inputTokens": prompt, "cacheReadTokens": read, "cacheHitRate": cacheHitRate(read, prompt)})
 	}
 	rows.Close()
