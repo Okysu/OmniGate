@@ -138,3 +138,58 @@ func TestGatewayLogsAllRequestsAndSeparatesRejections(t *testing.T) {
 		t.Fatal("credentials/query string leaked into logs")
 	}
 }
+
+func TestLogKindFilterAndKeyUsage(t *testing.T) {
+	e := setupGateway(t)
+	up := newFakeUpstream(t)
+	e.channel(e.admin, map[string]any{"name": "usage-test", "type": "openai", "baseUrl": up.srv.URL + "/v1", "scope": "global", "models": models("m1", "m2")})
+	kid, key := e.key(e.carol, map[string]any{"name": "usage"})
+	otherID, otherKey := e.key(e.carol, map[string]any{"name": "other"})
+	h := e.app.Handler()
+	call := func(method, path, secret, body string) {
+		t.Helper()
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.RemoteAddr = "127.0.0.1:1234"
+		r.Header.Set("Authorization", "Bearer "+secret)
+		r.Header.Set("Content-Type", "application/json")
+		h.ServeHTTP(httptest.NewRecorder(), r)
+	}
+	call("POST", "/v1/chat/completions", key, chatBody)
+	call("POST", "/v1/chat/completions", key, chatBody)
+	call("POST", "/v1/chat/completions", key, `{"model":"m2","messages":[{"role":"user","content":"hi"}]}`)
+	call("POST", "/v1/chat/completions", otherKey, chatBody)
+	call("GET", "/v1/models", key, "")
+	call("GET", "/v1/models", key, "")
+	if err := e.app.FlushLogs(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for kind, n := range map[string]float64{"": 6, "all": 6, "model": 4, "other": 2} {
+		out := e.mustDo(e.carol, "GET", "/api/logs?kind="+kind, nil, 200)
+		if out["total"].(float64) != n {
+			t.Fatalf("kind=%q: %v, want %v", kind, out["total"], n)
+		}
+	}
+	e.mustDo(e.carol, "GET", "/api/logs?kind=bogus", nil, 422)
+
+	for _, rng := range []string{"", "24h", "7d", "30d", "all"} {
+		out := e.mustDo(e.carol, "GET", "/api/stats/keys/"+kid+"/usage?range="+rng, nil, 200)
+		totals := out["totals"].(map[string]any)
+		// Two m1 requests and one m2 request: 10 input + 2 output tokens each.
+		if totals["requests"].(float64) != 3 || totals["inputTokens"].(float64) != 30 || totals["outputTokens"].(float64) != 6 || totals["totalTokens"].(float64) != 36 {
+			t.Fatalf("range %q totals: %v", rng, totals)
+		}
+		byModel := out["byModel"].([]any)
+		if len(byModel) != 2 || byModel[0].(map[string]any)["model"] != "m1" || byModel[0].(map[string]any)["requests"].(float64) != 2 {
+			t.Fatalf("range %q byModel: %v", rng, byModel)
+		}
+	}
+	other := e.mustDo(e.carol, "GET", "/api/stats/keys/"+otherID+"/usage", nil, 200)
+	if other["totals"].(map[string]any)["requests"].(float64) != 1 {
+		t.Fatalf("other key: %v", other)
+	}
+	e.mustDo(e.carol, "GET", "/api/stats/keys/"+kid+"/usage?range=1y", nil, 422)
+	dave := e.h.newClient()
+	dave.login("dave")
+	e.mustDo(dave, "GET", "/api/stats/keys/"+kid+"/usage", nil, 404)
+	e.mustDo(e.admin, "GET", "/api/stats/keys/"+kid+"/usage", nil, 200)
+}

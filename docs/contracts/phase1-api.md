@@ -151,7 +151,8 @@ interface RequestLog {
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
-| GET | `/api/logs?from=&to=&model=&channelId=&keyId=&userId=&status=success\|error` | `stats.own` | 自己的请求；`stats.all` 可查全部并按 `userId` 过滤 |
+| GET | `/api/logs?from=&to=&model=&channelId=&keyId=&userId=&status=success\|rejected\|error&kind=all\|model\|other` | `stats.own` | 自己的请求；`stats.all` 可查全部并按 `userId` 过滤。`kind=model` 只看模型请求，`other` 为模型列表等其他网关请求 |
+| GET | `/api/stats/keys/{id}/usage?range=24h\|7d\|30d\|all` | `stats.own`（Key 所有者或 `stats.all`） | 单个 Key 的模型请求 Token 用量：总量（输入、缓存读写、输出）与按模型明细 |
 | GET | `/api/stats/summary?from=&to=&userId=` | `stats.own` | 见下 |
 
 ```ts

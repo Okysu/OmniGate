@@ -2595,6 +2595,7 @@ paths:
         - $ref: "#/components/parameters/LogKeyId"
         - $ref: "#/components/parameters/LogModel"
         - $ref: "#/components/parameters/LogStatus"
+        - $ref: "#/components/parameters/LogKind"
         - $ref: "#/components/parameters/LogAffinity"
         - $ref: "#/components/parameters/LogClient"
       responses:
@@ -2613,6 +2614,62 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/LogRangeInvalid"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/stats/keys/{id}/usage:
+    get:
+      tags: [logs]
+      operationId: getKeyUsage
+      summary: 单个 API Key 的 Token 用量
+      description: |
+        统计该 Key 的模型请求（同 `kind=model`）在时间窗口内的 Token 用量：总量与按请求模型的明细（按合计 Token 倒序）。
+        `inputTokens` 不含缓存 token；`totalTokens` = 输入 + 缓存读取 + 缓存写入 + 输出；`reasoningTokens` 已包含在输出中。
+        仅 Key 的所有者或持有 `stats.all` 的用户可查，其他情况 → 404。`range=all` 时 `from` 为 null，覆盖保留期内的全部日志。
+      x-required-permission: stats.own
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: range
+          in: query
+          required: false
+          description: 时间窗口，默认 `24h`；其他值 → 422。
+          schema:
+            type: string
+            enum: ["24h", 7d, 30d, all]
+      responses:
+        "200":
+          description: Token 用量
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [keyId, range, from, to, totals, byModel]
+                properties:
+                  keyId: { type: string, format: uuid }
+                  range: { type: string, enum: ["24h", 7d, 30d, all] }
+                  from: { type: string, format: date-time, nullable: true }
+                  to: { type: string, format: date-time }
+                  totals: { $ref: "#/components/schemas/KeyUsageTokens" }
+                  byModel:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/KeyUsageTokens"
+                        - type: object
+                          required: [model]
+                          properties:
+                            model: { type: string }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -6982,6 +7039,14 @@ components:
       schema:
         type: string
         enum: [success, rejected, error]
+    LogKind:
+      name: kind
+      in: query
+      required: false
+      description: "请求类型：`model` = 进入推理管线的模型请求，`other` = 其他网关请求（模型列表、账户查询、未知接口、协议层拒绝，`inbound` 为 `gateway.*`），`all`（默认）= 全部；其他值 → 422。"
+      schema:
+        type: string
+        enum: [all, model, other]
     LogAffinity:
       name: affinity
       in: query
@@ -7739,6 +7804,18 @@ components:
           requestId: 0192f0c4-7000-7abc-8def-0123456789ab
 
   schemas:
+    KeyUsageTokens:
+      type: object
+      required: [requests, inputTokens, cacheReadTokens, cacheWriteTokens, outputTokens, reasoningTokens, totalTokens, charge]
+      properties:
+        requests: { type: integer }
+        inputTokens: { type: integer, description: 不含缓存 token }
+        cacheReadTokens: { type: integer }
+        cacheWriteTokens: { type: integer }
+        outputTokens: { type: integer }
+        reasoningTokens: { type: integer, description: 输出中的推理部分 }
+        totalTokens: { type: integer, description: 输入 + 缓存读取 + 缓存写入 + 输出 }
+        charge: { type: string, description: 钱包扣费金额（货币单位） }
     Error:
       type: object
       description: 控制面统一错误信封。`message` 为可展示给用户的中文文案，不含敏感信息。

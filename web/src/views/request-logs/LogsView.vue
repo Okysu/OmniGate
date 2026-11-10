@@ -99,6 +99,13 @@ const range = useRangeQuery('24h', ['1h', '24h', '7d', 'custom'])
 const page = computed(() => queryInt(route.query.page, 1))
 const model = computed(() => queryStr(route.query.model))
 const status = computed(() => queryStr(route.query.status) || ALL)
+/** Request kind; model requests by default, so model lists and unknown endpoints stay out of the way. */
+type Kind = 'model' | 'other' | 'all'
+const KIND_DEFAULT = 'model'
+const kind = computed<Kind>(() => {
+  const v = queryStr(route.query.kind)
+  return v === 'other' || v === 'all' ? v : KIND_DEFAULT
+})
 const keyId = computed(() => queryStr(route.query.keyId) || ALL)
 const userId = computed(() => (seeAll.value ? queryStr(route.query.userId) : ''))
 /** phase12 §4: session affinity outcome filter ('any' = an affinity rule applied). */
@@ -114,7 +121,7 @@ watch(model, v => (modelInput.value = v))
 function setQuery(next: Record<string, string | number | undefined>) {
   const q: Record<string, unknown> = { ...route.query }
   for (const [k, v] of Object.entries(next))
-    q[k] = v === undefined || v === '' || v === ALL || (k === 'page' && v === 1) ? undefined : String(v)
+    q[k] = v === undefined || v === '' || (v === ALL && k !== 'kind') || (k === 'page' && v === 1) || (k === 'kind' && v === KIND_DEFAULT) ? undefined : String(v)
   void router.replace({ query: q as Record<string, string> })
 }
 function applyModelFilter() {
@@ -143,6 +150,7 @@ async function load(opts: { silent?: boolean } = {}) {
       to,
       model: model.value || undefined,
       status: status.value === ALL ? undefined : status.value as 'success' | 'rejected' | 'error',
+      kind: kind.value,
       keyId: keyId.value === ALL ? undefined : keyId.value,
       userId: userId.value || undefined,
       affinity: affinity.value === ALL ? undefined : affinity.value,
@@ -201,9 +209,9 @@ function onUserPicked(u: User | null) {
 }
 watch(userPick, v => setQuery({ userId: v[0], page: undefined }))
 
-const hasFilters = computed(() => !!model.value || status.value !== ALL || keyId.value !== ALL || !!userId.value || affinity.value !== ALL || client.value !== ALL)
+const hasFilters = computed(() => !!model.value || status.value !== ALL || kind.value !== KIND_DEFAULT || keyId.value !== ALL || !!userId.value || affinity.value !== ALL || client.value !== ALL)
 function clearFilters() {
-  setQuery({ model: undefined, status: undefined, keyId: undefined, userId: undefined, affinity: undefined, client: undefined, page: undefined })
+  setQuery({ model: undefined, status: undefined, kind: undefined, keyId: undefined, userId: undefined, affinity: undefined, client: undefined, page: undefined })
 }
 
 // ---------- rows ----------
@@ -259,6 +267,22 @@ const colCount = computed(() => 13 + (seeAll.value ? 2 : 0))
             <form class="col-span-2 flex gap-2 sm:col-span-1" @submit.prevent="applyModelFilter">
               <SuggestInput v-model="modelInput" :options="modelOptions" placeholder="模型" mono clearable class="w-full sm:w-44" aria-label="按模型过滤" @select="applyModelFilter" @clear="applyModelFilter" @change="applyModelFilter" />
             </form>
+            <Select :model-value="kind" @update:model-value="(v) => setQuery({ kind: String(v), page: undefined })">
+              <SelectTrigger class="w-full sm:w-32" aria-label="按请求类型过滤" data-testid="kind-filter">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="model">
+                  模型请求
+                </SelectItem>
+                <SelectItem value="other" title="模型列表、账户查询、未知接口、协议层拒绝等">
+                  其他请求
+                </SelectItem>
+                <SelectItem value="all">
+                  全部请求
+                </SelectItem>
+              </SelectContent>
+            </Select>
             <Select :model-value="status" @update:model-value="(v) => setQuery({ status: String(v), page: undefined })">
               <SelectTrigger class="w-full sm:w-32" aria-label="按状态过滤">
                 <SelectValue />

@@ -30,6 +30,7 @@ func (h *Handler) Routes(r chi.Router) {
 	r.With(auth.Require(authz.StatsOwn)).Get("/logs", h.list)
 	r.With(auth.Require(authz.StatsOwn)).Get("/stats/summary", h.summary)
 	r.With(auth.Require(authz.StatsOwn)).Get("/clients", h.clients)
+	r.With(auth.Require(authz.StatsOwn)).Get("/stats/keys/{id}/usage", h.keyUsage)
 }
 
 // clients lists the known client ids (phase13-api.md §1): values of the
@@ -118,6 +119,18 @@ func parseFilter(r *http.Request, maxDays int) (*filter, error) {
 	default:
 		return nil, apperr.Validation("client 不是已知的客户端标识（可选值见 GET /api/clients）", nil)
 	}
+	// Request kind: model requests go through the inference pipeline; other
+	// gateway requests (model lists, unknown endpoints, protocol rejections)
+	// are logged as gateway.*.
+	switch q.Get("kind") {
+	case "", "all":
+	case "model":
+		f.where = append(f.where, modelRequest)
+	case "other":
+		f.where = append(f.where, "NOT "+modelRequest)
+	default:
+		return nil, apperr.Validation("kind 只能是 all、model、other", nil)
+	}
 	switch q.Get("status") {
 	case "success":
 		f.where = append(f.where, "l.status_code < 400")
@@ -128,6 +141,9 @@ func parseFilter(r *http.Request, maxDays int) (*filter, error) {
 	}
 	return f, nil
 }
+
+// modelRequest matches requests that entered the inference pipeline.
+const modelRequest = "l.inbound NOT LIKE 'gateway.%'"
 
 type logUsage struct {
 	Input      int64 `json:"input"`

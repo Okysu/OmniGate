@@ -2236,3 +2236,28 @@ export interface AlertsSummary {
   balances: UpstreamBalance[]
   recent: AppNotification[]
 }
+
+export type KeyUsageRange = '24h' | '7d' | '30d' | 'all'
+
+/** Token usage of one API key (model requests only); inputTokens excludes cache tokens. */
+export interface KeyUsageTokens {
+  requests: number
+  inputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  outputTokens: number
+  reasoningTokens: number
+  /** input + cache read + cache write + output. */
+  totalTokens: number
+  charge: string
+}
+
+export interface KeyUsage {
+  keyId: string
+  range: KeyUsageRange
+  /** null for range=all. */
+  from: string | null
+  to: string
+  totals: KeyUsageTokens
+  byModel: (KeyUsageTokens & { model: string })[]
+}

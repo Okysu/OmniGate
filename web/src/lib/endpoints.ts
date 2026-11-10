@@ -89,6 +89,8 @@ import type {
   SettingsResponse,
   SmtpTestResult,
   SessionsResponse,
+  KeyUsage,
+  KeyUsageRange,
   StatsSummary,
   Subscription,
   SubscriptionStatus,
@@ -285,6 +287,9 @@ export const keysApi = {
   update: (id: string, patch: KeyPatch) => api.patch<GatewayKey>(`/api/keys/${enc(id)}`, patch),
   revoke: (id: string) => api.delete(`/api/keys/${enc(id)}`),
   rotate: (id: string) => api.post<KeyCreated>(`/api/keys/${enc(id)}/rotate`),
+  /** Token usage of one key over a window, in total and per model. */
+  usage: (id: string, range: KeyUsageRange, signal?: AbortSignal) =>
+    api.get<KeyUsage>(`/api/stats/keys/${enc(id)}/usage`, { query: { range }, signal }),
 }
 
 export interface LogsFilter {
@@ -295,6 +300,8 @@ export interface LogsFilter {
   keyId?: string
   userId?: string
   status?: 'success' | 'rejected' | 'error'
+  /** model: inference requests only; other: model lists, unknown endpoints, protocol rejections. */
+  kind?: 'model' | 'other' | 'all'
   /** phase12 §4: one session affinity outcome, or 'any' (an affinity rule applied). */
   affinity?: AffinityOutcome | 'any'
   /** phase13 §3: one detected client id (GET /api/clients). */

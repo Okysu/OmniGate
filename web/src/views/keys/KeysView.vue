@@ -2,7 +2,7 @@
 import type { MultiSelectOption } from '@/components/MultiSelect.vue'
 import type { ChannelView, GatewayKey, KeyCreated, KeySpendUsage, QuotaOverflow, SpendLimit } from '@/lib/types'
 import { computed, onMounted, ref } from 'vue'
-import { KeyRound, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCw, Trash2 } from '@lucide/vue'
+import { BarChart3, KeyRound, MoreHorizontal, Pencil, Plus, RefreshCw, RotateCw, Trash2 } from '@lucide/vue'
 import { toast } from 'vue-sonner'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -26,6 +26,7 @@ import { amountRatio, levelOf, normalizeBillingLimits, normalizeSpendLimit, perc
 import { effectiveQuotaOverflow, isQuotaOverflow, KEY_QUOTA_OVERFLOW_LABELS, QUOTA_OVERFLOW_SHORT } from '@/lib/quota'
 import { useAuthStore } from '@/stores/auth'
 import KeyFormDialog from './KeyFormDialog.vue'
+import KeyUsageDialog from './KeyUsageDialog.vue'
 import UsageExamples from './UsageExamples.vue'
 
 const auth = useAuthStore()
@@ -139,6 +140,15 @@ function openEdit(k: GatewayKey) {
   editing.value = k
   void ensureOptions()
   formOpen.value = true
+}
+
+// ---------- usage ----------
+const canSeeUsage = computed(() => auth.can('stats.own'))
+const usageOpen = ref(false)
+const usageKey = ref<GatewayKey | null>(null)
+function openUsage(k: GatewayKey) {
+  usageKey.value = k
+  usageOpen.value = true
 }
 
 // Secret is held only while the dialog is open.
@@ -394,6 +404,10 @@ function policyTitle(k: GatewayKey): string {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      <DropdownMenuItem v-if="canSeeUsage" @select="openUsage(k)">
+                        <BarChart3 />
+                        用量统计
+                      </DropdownMenuItem>
                       <DropdownMenuItem @select="openEdit(k)">
                         <Pencil />
                         编辑
@@ -430,6 +444,8 @@ function policyTitle(k: GatewayKey): string {
       @updated="onUpdated"
       @conflict="load"
     />
+
+    <KeyUsageDialog v-model:open="usageOpen" :gateway-key="usageKey" />
 
     <SecretOnceDialog
       v-if="secret"
