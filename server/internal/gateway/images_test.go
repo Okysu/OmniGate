@@ -86,3 +86,33 @@ func TestMultipartReencode(t *testing.T) {
 	_, _, stop, _ = m.stream("other")
 	stop()
 }
+
+func TestGPTImageMultipartGuidanceCompatibility(t *testing.T) {
+	var src bytes.Buffer
+	w := multipart.NewWriter(&src)
+	_ = w.WriteField("model", "m")
+	_ = w.WriteField("guidance_scale", "7")
+	_ = w.WriteField("frame_count", "9")
+	_ = w.WriteField("output_format", "gif")
+	_ = w.Close()
+	m := &multipartBody{spool: &spool{limit: 1 << 20}, boundary: w.Boundary(), out: "test"}
+	_, _ = m.spool.Write(src.Bytes())
+	defer m.spool.close()
+	for _, model := range []string{"gpt-image-2.6-flare", "other-image"} {
+		var b bytes.Buffer
+		if err := m.encode(&b, model); err != nil {
+			t.Fatal(err)
+		}
+		n, err := m.length(model)
+		if err != nil || n != int64(b.Len()) {
+			t.Fatal("content length mismatch")
+		}
+		form, err := multipart.NewReader(&b, "test").ReadForm(1 << 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if (len(form.Value["guidance_scale"]) > 0) == strings.HasPrefix(model, "gpt-image-") || form.Value["frame_count"][0] != "9" || form.Value["output_format"][0] != "gif" {
+			t.Fatalf("bad fields %v", form.Value)
+		}
+	}
+}

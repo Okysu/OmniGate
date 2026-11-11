@@ -144,6 +144,11 @@ func (m *multipartBody) encode(w io.Writer, model string) error {
 		if err != nil {
 			return err
 		}
+		// guidance_scale belongs to diffusion APIs, not GPT Image. Do not
+		// filter other providers or file parts with the same name.
+		if strings.HasPrefix(model, "gpt-image-") && p.FormName() == "guidance_scale" && p.FileName() == "" {
+			continue
+		}
 		h := make(textproto.MIMEHeader, len(p.Header))
 		for k, v := range p.Header {
 			h[k] = v

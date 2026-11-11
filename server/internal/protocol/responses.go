@@ -68,6 +68,27 @@ type responsesPart struct {
 	Filename string `json:"filename,omitempty"`
 }
 
+// DeepSeek returns the full reasoning in content rather than an OpenAI summary.
+func responsesReasoningText(it responsesItem) string {
+	var text string
+	if json.Unmarshal(it.Content, &text) == nil && text != "" {
+		return text
+	}
+	var parts []responsesPart
+	if json.Unmarshal(it.Content, &parts) == nil {
+		var b strings.Builder
+		for _, p := range parts {
+			if p.Type == "reasoning_text" || p.Type == "text" {
+				b.WriteString(p.Text)
+			}
+		}
+		if b.Len() > 0 {
+			return b.String()
+		}
+	}
+	return summaryText(it.Summary)
+}
+
 // prompt_cache_key and safety_identifier mean the same in Chat and Responses
 // and are carried over; service_tier stays a dropped hint (it selects a
 // processing / billing tier that OpenAI-compatible Chat upstreams rarely
@@ -206,7 +227,7 @@ func responsesToChatPivot(body []byte, upstreamModel, maxTokensField string, com
 				if b.ID == "" && b.Provider == ReasoningOpenAI {
 					b.ID = it.ID
 				}
-				b.Text = summaryText(it.Summary)
+				b.Text = responsesReasoningText(it)
 				reasoning = append(reasoning, b)
 			case it.Type == "message" || it.Type == "" && it.Role != "":
 				msg, err := responsesMessageToChat(it, &is)
@@ -372,9 +393,13 @@ func ChatToResponsesRequest(body []byte, upstreamModel string, compat Compat) ([
 		out["max_output_tokens"] = *req.MaxTokens
 	}
 	if req.ReasoningEffort != "" {
-		out["reasoning"] = map[string]string{"effort": req.ReasoningEffort, "summary": "auto"}
+		effort := req.ReasoningEffort
+		if strings.HasPrefix(upstreamModel, "deepseek-") && effort == "medium" {
+			effort = "high"
+		}
+		out["reasoning"] = map[string]string{"effort": effort, "summary": "auto"}
 	}
-	if req.OGKeepReasoning {
+	if req.OGKeepReasoning && !strings.HasPrefix(upstreamModel, "deepseek-") {
 		// The client keeps reasoning blobs (reasoning.go): with store=false the
 		// encrypted reasoning is the only way the model sees it again.
 		out["include"] = []string{"reasoning.encrypted_content"}
@@ -399,7 +424,11 @@ func ChatToResponsesRequest(body []byte, upstreamModel string, compat Compat) ([
 			if err != nil {
 				return nil, nil, invalid("messages[%d]：%v", i, err)
 			}
-			items = append(items, map[string]any{"role": "developer", "content": text})
+			role := "developer"
+			if strings.HasPrefix(upstreamModel, "deepseek-") {
+				role = "system"
+			}
+			items = append(items, map[string]any{"role": role, "content": text})
 		case "user":
 			var s string
 			if json.Unmarshal(m.Content, &s) == nil {
@@ -419,7 +448,14 @@ func ChatToResponsesRequest(body []byte, upstreamModel string, compat Compat) ([
 			// Only OpenAI encrypted reasoning can go back as reasoning items; the
 			// items precede the message and calls they produced.
 			kept := 0
+			if strings.HasPrefix(upstreamModel, "deepseek-") && m.reasoningText() != "" {
+				items = append(items, map[string]any{"type": "reasoning", "content": m.reasoningText()})
+				kept = len(m.OGReasoning)
+			}
 			for _, b := range m.OGReasoning {
+				if strings.HasPrefix(upstreamModel, "deepseek-") {
+					continue
+				}
 				if b.Provider != ReasoningOpenAI || b.Blob == "" {
 					continue
 				}
@@ -602,7 +638,7 @@ func responsesToChatResponse(body []byte, model string, pivot bool) ([]byte, Usa
 				}
 			}
 		case "reasoning":
-			t := summaryText(it.Summary)
+			t := responsesReasoningText(it)
 			if reasoning.Len() > 0 && t != "" {
 				reasoning.WriteString("\n\n")
 			}

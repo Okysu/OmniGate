@@ -97,6 +97,9 @@ func RewriteForPassthrough(dialect string, body []byte, upstreamModel string, st
 	if err := json.Unmarshal(body, &m); err != nil {
 		return nil, invalid("请求体不是合法的 JSON：%v", err)
 	}
+	if IsImages(dialect) && strings.HasPrefix(upstreamModel, "gpt-image-") {
+		delete(m, "guidance_scale")
+	}
 	mb, _ := json.Marshal(upstreamModel)
 	m["model"] = mb
 	if (dialect == OpenAIChat || dialect == OpenAICompletions) && stream {
@@ -239,7 +242,7 @@ var anthropicToChatPolicy = fieldPolicy{
 		"stream", "tools", "tool_choice", "metadata", "thinking", "output_config"),
 	// Anthropic server-side features with no OpenAI equivalent that don't change
 	// what the model is asked to do: dropped with a warning even in strict mode.
-	hints: set("service_tier", "context_management", "safeguards"),
+	hints: set("service_tier", "cache_control", "context_management", "safeguards"),
 }
 
 func set(keys ...string) map[string]bool {
