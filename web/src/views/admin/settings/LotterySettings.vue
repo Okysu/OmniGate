@@ -47,7 +47,7 @@ async function save() {
         </p>
         <div v-for="(prize, index) in config.prizes" :key="index" class="flex items-end gap-2">
           <label class="text-sm">奖金<Input v-model="prize.amount" required inputmode="decimal" /></label>
-          <label class="text-sm">概率（%）<input v-model.number="prize.percent" required type="number" min="1" max="100" step="1" class="border-input bg-background h-9 w-full rounded-md border px-3"></label>
+          <label class="text-sm">概率（%）<Input :model-value="prize.percent" required type="number" min="1" max="100" step="1" @update:model-value="value => { prize.percent = Number(value) }" /></label>
           <Button type="button" variant="outline" @click="config.prizes.splice(index, 1)">
             移除
           </Button>

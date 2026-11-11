@@ -42,7 +42,7 @@
 需要另建活动；支持调整说明、时间、条件、剩余库存和每人次数。
 
 分享路径为 `/benefits/{id}`，未登录可查看，领取时跳转登录并回到原活动。
-后台入口 `/console/admin/benefits`；福利首页继续保留每日消费抽奖。
+活动管理入口位于 `/console/benefits`，有 `billing.manage` 权限时显示新建和管理按钮，使用弹窗完成配置，不设置独立管理路由；福利首页继续保留每日消费抽奖。
 
 新增迁移 27 同时覆盖 PostgreSQL 和 SQLite。新增 `benefit_campaigns`、
 `benefit_claims`，余额发放和付费流水复用现有账本，审计为 `benefit.save`、

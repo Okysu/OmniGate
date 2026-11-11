@@ -39,7 +39,6 @@ const placeholderRoutes: RouteRecordRaw[] = NAV_ITEMS
 
 /** Every authenticated page, relative to {@link CONSOLE_BASE}. */
 const consoleRoutes: RouteRecordRaw[] = [
-  { path: 'admin/benefits', name: 'admin-benefits', component: () => import('@/views/benefits/CampaignAdmin.vue'), meta: { title: '福利活动', permission: 'billing.manage' } },
   {
     path: '',
     name: 'overview',
