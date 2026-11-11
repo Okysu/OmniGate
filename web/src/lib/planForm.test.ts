@@ -36,6 +36,8 @@ describe('plan form ↔ payload', () => {
   it('round-trips a plan', () => {
     const body = buildPlanPayload(formFromPlan(plan))
     expect(body).toEqual({
+      stock: -1,
+      hidden: false,
       name: 'Pro',
       description: 'desc',
       listPrice: '20',

@@ -52,7 +52,7 @@ func (p *Plan) Period() (time.Duration, error) { return ParsePeriod(p.Duration) 
 func PlanTx(ctx context.Context, q db.Querier, id uuid.UUID, now time.Time, lock bool) (*Plan, error) {
 	if lock {
 		var one int
-		err := q.QueryRow(ctx, `SELECT 1 FROM plans WHERE id = $1 FOR SHARE`, id).Scan(&one)
+		err := q.QueryRow(ctx, `SELECT 1 FROM plans WHERE id = $1 FOR UPDATE`, id).Scan(&one)
 		if db.IsNoRows(err) {
 			return nil, apperr.NotFound("套餐")
 		}
@@ -70,7 +70,7 @@ func PlanTx(ctx context.Context, q db.Querier, id uuid.UUID, now time.Time, lock
 // ActivePlansTx returns the active plans in catalog order (newest first, as
 // GET /api/plans).
 func ActivePlansTx(ctx context.Context, q db.Querier, now time.Time) ([]*Plan, error) {
-	rows, err := q.Query(ctx, `SELECT `+planCols+` FROM plans p WHERE p.status = 'active'
+	rows, err := q.Query(ctx, `SELECT `+planCols+` FROM plans p WHERE p.status = 'active' AND p.hidden = false
 		ORDER BY p.created_at DESC, p.id DESC`, dbTime(now))
 	if err != nil {
 		return nil, err
@@ -185,6 +185,9 @@ func floorAmount(a money.Amount, decimals int) money.Amount {
 // subscriptions are subs and quotes it at now. Only plans that cost more per
 // day than the current one are upgrades.
 func UpgradeCheck(from *Subscription, fromPlan, plan *Plan, subs []*Subscription, now time.Time) (UpgradeQuote, error) {
+	if fromPlan != nil && fromPlan.Hidden {
+		return UpgradeQuote{}, NotAnUpgradeError("活动套餐不能折价升级，请直接购买正式套餐")
+	}
 	if from.StatusAt(now) != StatusActive {
 		return UpgradeQuote{}, NotActiveError()
 	}

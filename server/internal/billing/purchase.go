@@ -85,7 +85,7 @@ func (s *Service) PurchaseOptions(ctx context.Context, userID uuid.UUID) (*Purch
 	}
 	out := &PurchaseOptions{Available: w.Available(), Currency: w.Currency, Plans: []PurchaseOption{}, Active: subs}
 	for _, p := range plans {
-		o := PurchaseOption{Plan: p, Purchasable: p.Purchasable(), Action: subscription.PurchaseNew, Upgrades: []UpgradeOption{}}
+		o := PurchaseOption{Plan: p, Purchasable: p.Purchasable() && p.Stock != 0, Action: subscription.PurchaseNew, Upgrades: []UpgradeOption{}}
 		period, err := p.Period()
 		if err != nil {
 			return nil, err
@@ -159,7 +159,7 @@ func (s *Service) Purchase(ctx context.Context, actor Actor, in PurchaseInput, m
 		if plan.Status != subscription.PlanActive {
 			return subscription.PlanArchivedError()
 		}
-		if !plan.Purchasable() {
+		if plan.Hidden || !plan.Purchasable() {
 			return subscription.PlanNotForSaleError()
 		}
 		subs, err := subscription.LiveSubscriptionsTx(ctx, tx, actor.ID, now)
@@ -192,6 +192,9 @@ func (s *Service) Purchase(ctx context.Context, actor Actor, in PurchaseInput, m
 			e := apperr.New(apperr.KindConflict, "price_changed", "价格已变化，请确认新价格后重试")
 			e.Details = map[string]any{"price": price.String()}
 			return e
+		}
+		if err := subscription.ConsumeStockTx(ctx, tx, plan.ID, 1); err != nil {
+			return err
 		}
 		if w, err = s.lockWallet(ctx, tx, actor.ID, true); err != nil {
 			return err

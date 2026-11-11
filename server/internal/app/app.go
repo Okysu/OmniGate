@@ -337,6 +337,7 @@ func (a *App) Handler() http.Handler {
 	r.Route("/api", func(r chi.Router) {
 		r.Use(httpx.AccessLog(a.log, "control"), apiCORS(a.cfg.ConsoleCORSOrigins, true), auth.CSRF(origins))
 		r.Get("/system/info", a.systemInfo)
+		a.billingH.PublicCampaignRoutes(r)
 		r.With(a.authH.OptionalSession).Group(a.plazaH.PublicRoutes)
 		a.r6.h.PublicRoutes(r)
 		a.authH.Routes(r)

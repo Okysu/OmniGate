@@ -289,6 +289,7 @@ function recordTitle(r: PurchaseRecord): string {
               <div class="flex items-start justify-between gap-2">
                 <h2 class="min-w-0 truncate text-base font-semibold" :title="c.option.plan.name">
                   {{ c.option.plan.name }}
+                  <span v-if="c.option.plan.stock !== undefined && c.option.plan.stock >= 0" class="ml-2 text-xs text-muted-foreground">剩余 {{ c.option.plan.stock }} 份</span>
                 </h2>
                 <Badge v-if="c.direct?.action === 'renew'" variant="secondary" class="shrink-0">
                   已订阅
@@ -349,7 +350,7 @@ function recordTitle(r: PurchaseRecord): string {
                   购买
                 </Button>
                 <p class="text-muted-foreground text-center text-xs">
-                  暂不支持余额购买，可通过兑换码或联系管理员开通。
+                  {{ c.option.plan.stock === 0 ? '套餐已售罄，请等待补货。' : '暂不支持余额购买，可通过兑换码或联系管理员开通。' }}
                 </p>
               </template>
               <Button

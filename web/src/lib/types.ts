@@ -972,6 +972,8 @@ export interface MeterOption {
 export type PlanStatus = 'active' | 'archived'
 
 export interface Plan {
+  stock?: number
+  hidden?: boolean
   id: string
   name: string
   description: string
@@ -994,6 +996,8 @@ export interface Plan {
 
 /** User-facing catalog entry (`GET /api/plans`): no admin-only data (subscribers, status, version). */
 export interface CatalogPlan {
+  stock?: number
+  hidden?: boolean
   id: string
   name: string
   description: string
@@ -1006,6 +1010,8 @@ export interface CatalogPlan {
 }
 
 export interface PlanInput {
+  stock?: number
+  hidden?: boolean
   name: string
   description: string
   listPrice: string | null

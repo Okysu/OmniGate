@@ -134,6 +134,8 @@ func dbTime(t time.Time) time.Time { return t.UTC().Truncate(time.Microsecond) }
 
 // Plan is a sellable set of quota rules.
 type Plan struct {
+	Stock       int64
+	Hidden      bool
 	ID          uuid.UUID
 	Name        string
 	Description string
@@ -154,6 +156,8 @@ type Plan struct {
 
 // PlanInput is the full editable state of a plan.
 type PlanInput struct {
+	Stock       *int64
+	Hidden      bool
 	Name        string
 	Description string
 	ListPrice   *money.Amount
@@ -168,6 +172,8 @@ type PlanInput struct {
 // PlanPatch changes selected fields; nil fields are kept. ListPrice is applied
 // when SetListPrice is true (nil clears it).
 type PlanPatch struct {
+	Stock        *int64
+	Hidden       *bool
 	Name         *string
 	Description  *string
 	SetListPrice bool
@@ -190,6 +196,9 @@ type PlanPatch struct {
 
 func validatePlan(in *PlanInput) error {
 	details := map[string]any{}
+	if in.Stock != nil && *in.Stock < -1 {
+		details["stock"] = "库存不能小于 -1"
+	}
 	in.Name = strings.TrimSpace(in.Name)
 	in.Description = strings.TrimSpace(in.Description)
 	if in.Status == "" {
@@ -235,13 +244,13 @@ func validatePlan(in *PlanInput) error {
 // planCols needs $1 = now (for the live subscriber count).
 const planCols = `p.id, p.name, p.description, p.list_price_nano, p.duration, p.models, p.rules, p.stackable, p.status,
 	(SELECT count(*) FROM subscriptions s WHERE s.plan_id = p.id AND s.status = 'active' AND s.ends_at > $1),
-	p.version, p.created_at, p.updated_at, p.plan_group`
+	p.version, p.created_at, p.updated_at, p.plan_group, p.stock, p.hidden`
 
 func scanPlan(row db.Row) (*Plan, error) {
 	var p Plan
 	var price *int64
 	if err := row.Scan(&p.ID, &p.Name, &p.Description, &price, &p.Duration, &p.Models, &p.Rules, &p.Stackable,
-		&p.Status, &p.Subscribers, &p.Version, &p.CreatedAt, &p.UpdatedAt, &p.Group); err != nil {
+		&p.Status, &p.Subscribers, &p.Version, &p.CreatedAt, &p.UpdatedAt, &p.Group, &p.Stock, &p.Hidden); err != nil {
 		return nil, err
 	}
 	if price != nil {
@@ -271,7 +280,7 @@ func planAudit(p *Plan) map[string]any {
 		price = ptr(p.ListPrice.String())
 	}
 	return map[string]any{"name": p.Name, "description": p.Description, "listPrice": price, "duration": p.Duration,
-		"models": p.Models, "rules": p.Rules, "stackable": p.Stackable, "group": p.Group, "status": p.Status}
+		"models": p.Models, "rules": p.Rules, "stackable": p.Stackable, "group": p.Group, "status": p.Status, "stock": p.Stock, "hidden": p.Hidden}
 }
 
 // GetPlan returns a plan by id.
@@ -354,10 +363,10 @@ func (s *Service) CreatePlan(ctx context.Context, actor Actor, in PlanInput, met
 	var p *Plan
 	err = db.InTx(ctx, s.pool, func(tx db.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO plans (id, name, description, list_price_nano, duration, models, rules,
-				stackable, status, created_by, created_at, updated_at, plan_group)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12)`,
+				stackable, status, created_by, created_at, updated_at, plan_group, stock, hidden)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $12, $13, $14)`,
 			id, in.Name, in.Description, priceNano(in.ListPrice), in.Duration, models, rules, in.Stackable, in.Status,
-			createdBy, now, in.Group); err != nil {
+			createdBy, now, in.Group, stockValue(in.Stock), in.Hidden); err != nil {
 			return err
 		}
 		var err error
@@ -389,7 +398,13 @@ func (s *Service) UpdatePlan(ctx context.Context, actor Actor, id uuid.UUID, pat
 			return apperr.VersionConflict()
 		}
 		in := PlanInput{Name: cur.Name, Description: cur.Description, ListPrice: cur.ListPrice, Duration: cur.Duration,
-			Models: cur.Models, Rules: cur.Rules, Stackable: cur.Stackable, Group: cur.Group, Status: cur.Status}
+			Models: cur.Models, Rules: cur.Rules, Stackable: cur.Stackable, Group: cur.Group, Status: cur.Status, Stock: &cur.Stock, Hidden: cur.Hidden}
+		if patch.Stock != nil {
+			in.Stock = patch.Stock
+		}
+		if patch.Hidden != nil {
+			in.Hidden = *patch.Hidden
+		}
 		if patch.Name != nil {
 			in.Name = *patch.Name
 		}
@@ -434,9 +449,9 @@ func (s *Service) UpdatePlan(ctx context.Context, actor Actor, id uuid.UUID, pat
 		models, _ := json.Marshal(in.Models)
 		rules, _ := json.Marshal(in.Rules)
 		if _, err := tx.Exec(ctx, `UPDATE plans SET name = $2, description = $3, list_price_nano = $4, duration = $5,
-				models = $6, rules = $7, stackable = $8, status = $9, version = version + 1, updated_at = $10, plan_group = $11
+				models = $6, rules = $7, stackable = $8, status = $9, version = version + 1, updated_at = $10, plan_group = $11, stock = $12, hidden = $13
 			WHERE id = $1`, id, in.Name, in.Description, priceNano(in.ListPrice), in.Duration, models, rules,
-			in.Stackable, in.Status, now, in.Group); err != nil {
+			in.Stackable, in.Status, now, in.Group, stockValue(in.Stock), in.Hidden); err != nil {
 			return err
 		}
 		if p, err = scanPlan(tx.QueryRow(ctx, `SELECT `+planCols+` FROM plans p WHERE p.id = $2`, now, id)); err != nil {

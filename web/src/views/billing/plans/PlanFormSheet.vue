@@ -24,6 +24,7 @@ import RuleEditor from './RuleEditor.vue'
 const props = defineProps<{
   /** Plan being edited; null = create. */
   plan: Plan | null
+  activity?: boolean
 }>()
 const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ saved: [plan: Plan, created: boolean] }>()
@@ -51,6 +52,7 @@ function reset(p: Plan | null) {
   syncLimits.value = false
   syncWeights.value = false
   Object.assign(form, p ? formFromPlan(p) : emptyPlanForm())
+  if (!p && props.activity) { form.hidden = true; form.stackable = true; form.durationN = 7; form.durationUnit = 'd' }
   errors.value = {}
   formError.value = null
   conflict.value = false
@@ -121,7 +123,7 @@ function applyPreset(key: PlanPresetKey) {
 }
 
 // ---------- errors ----------
-const KNOWN = new Set(['name', 'description', 'listPrice', 'duration', 'models', 'rules', 'stackable', 'group'])
+const KNOWN = new Set(['name', 'description', 'listPrice', 'duration', 'models', 'rules', 'stackable', 'group', 'stock', 'hidden'])
 const otherErrors = computed(() => Object.entries(errors.value).filter(([k]) => {
   if (KNOWN.has(k))
     return false
@@ -258,6 +260,17 @@ async function reloadLatest() {
                   </div>
                 </FormField>
               </div>
+              <FormField label="剩余库存" for="plan-stock" :error="errors.stock" hint="-1 表示不限量；0 为售罄。购买或活动领取成功后扣减库存。">
+                <Input id="plan-stock" v-model="form.stock" type="number" min="-1" step="1" />
+              </FormField>
+              <div class="flex items-center justify-between gap-4 rounded-lg border p-3">
+                <div>
+                  <Label for="plan-hidden">仅用于活动</Label><p class="text-muted-foreground text-xs">
+                    隐藏于正式购买页，用户只能通过活动领取或购买。
+                  </p>
+                </div>
+                <Switch id="plan-hidden" v-model="form.hidden" :disabled="props.activity" />
+              </div>
               <FormField label="分组" for="plan-group" :error="errors.group" hint="同一分组内的套餐可以互相补差价升级，不同分组之间不能（例如「GPT」与「国模」）。购买页按分组展示；留空为未分组。">
                 <Input id="plan-group" v-model="form.group" maxlength="50" placeholder="例如 GPT" :aria-invalid="!!errors.group" />
               </FormField>
@@ -273,7 +286,7 @@ async function reloadLatest() {
                     </template>
                   </p>
                 </div>
-                <Switch id="plan-stackable" v-model="form.stackable" />
+                <Switch id="plan-stackable" v-model="form.stackable" :disabled="props.activity" />
               </div>
             </div>
           </div>
@@ -325,7 +338,9 @@ async function reloadLatest() {
           <div v-if="isEdit" class="flex items-center justify-between gap-4 rounded-lg border p-3">
             <div class="space-y-1">
               <Label for="plan-sync-weights">同步已有订阅的模型倍率</Label>
-              <p class="text-muted-foreground text-xs">新倍率对有效订阅的后续用量生效，保留已用额度与到期时间。</p>
+              <p class="text-muted-foreground text-xs">
+                新倍率对有效订阅的后续用量生效，保留已用额度与到期时间。
+              </p>
             </div>
             <Switch id="plan-sync-weights" v-model="syncWeights" />
           </div>

@@ -18,9 +18,6 @@ import (
 func TestLotteryHistoricalAndLiveSpend(t *testing.T) {
 	f := newFixture(t)
 	user := f.user(identity.RoleUser)
-	if err := db.MigrateDownTo(f.ctx, f.pool, 24); err != nil {
-		t.Fatal(err)
-	}
 	midnight := time.Date(2026, 11, 5, 16, 0, 0, 0, time.UTC)
 	admin := f.user(identity.RoleSystemAdmin)
 	sa := subscription.Actor{ID: admin.ID, Name: admin.Name}
@@ -31,6 +28,9 @@ func TestLotteryHistoricalAndLiveSpend(t *testing.T) {
 	}
 	sub, _, err := subs.AdminGrant(f.ctx, sa, user.ID, plan.ID, 1, subscription.RequestMeta{})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MigrateDownTo(f.ctx, f.pool, 24); err != nil {
 		t.Fatal(err)
 	}
 	// Insert genuine pre-upgrade ledger rows: only model debits earn chances.

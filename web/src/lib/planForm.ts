@@ -42,6 +42,8 @@ export interface RuleFormState {
 }
 
 export interface PlanFormState {
+  stock: number | string
+  hidden: boolean
   name: string
   description: string
   /** '' = no list price. */
@@ -219,6 +221,8 @@ export function emptyPlanForm(): PlanFormState {
     name: '',
     description: '',
     listPrice: '',
+    stock: -1,
+    hidden: false,
     durationN: 30,
     durationUnit: 'd',
     stackable: false,
@@ -234,6 +238,8 @@ export function formFromPlan(p: Plan): PlanFormState {
     name: p.name,
     description: p.description,
     listPrice: p.listPrice ?? '',
+    stock: p.stock ?? -1,
+    hidden: p.hidden ?? false,
     durationN: d.n,
     durationUnit: d.unit,
     stackable: p.stackable,
@@ -247,6 +253,8 @@ export function formFromPlan(p: Plan): PlanFormState {
 export function buildPlanPayload(f: PlanFormState): PlanInput {
   const price = f.listPrice.trim()
   return {
+    stock: Number(f.stock),
+    hidden: f.hidden,
     name: f.name.trim(),
     description: f.description.trim(),
     listPrice: price === '' ? null : price,
@@ -326,6 +334,7 @@ function validateRule(r: RuleFormState, i: number, e: Record<string, string>, se
 /** Client-side validation; keys match the server's 422 `details` (e.g. `rules[0].limit`). */
 export function validatePlanForm(f: PlanFormState): Record<string, string> {
   const e: Record<string, string> = {}
+  if (!Number.isSafeInteger(Number(f.stock)) || Number(f.stock) < -1 || String(f.stock).trim() === '') e.stock = '库存必须是 -1 或非负整数'
   const name = f.name.trim()
   if (!name)
     e.name = '必填'

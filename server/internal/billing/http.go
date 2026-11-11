@@ -27,6 +27,8 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 // Routes registers the user endpoints; mount on the /api router.
 func (h *Handler) Routes(r chi.Router) {
 	own := r.With(auth.Require(authz.BillingOwn))
+	own.Post("/benefits/campaigns/{id}/claim", h.claimCampaign)
+	own.Get("/benefits/claims", h.myCampaignClaims)
 	own.Get("/billing/wallet", h.wallet)
 	own.Get("/billing/ledger", h.ledger)
 	own.Post("/billing/redeem", h.redeem)
@@ -38,6 +40,9 @@ func (h *Handler) Routes(r chi.Router) {
 // AdminRoutes registers the management endpoints; mount on the /api/admin router.
 func (h *Handler) AdminRoutes(r chi.Router) {
 	m := r.With(auth.Require(authz.BillingManage))
+	m.Get("/benefits/campaigns", h.adminCampaigns)
+	m.Post("/benefits/campaigns", h.saveCampaign)
+	m.Put("/benefits/campaigns/{id}", h.saveCampaign)
 	m.Get("/billing/settings", h.getSettings)
 	m.Get("/billing/lottery", h.getLotteryConfig)
 	m.Put("/billing/lottery", h.putLotteryConfig)

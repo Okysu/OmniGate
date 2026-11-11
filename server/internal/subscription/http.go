@@ -79,6 +79,8 @@ func (h *Handler) AdminRoutes(r chi.Router) {
 
 // PlanJSON is the API form of a plan (contract §1).
 type PlanJSON struct {
+	Stock       int64     `json:"stock"`
+	Hidden      bool      `json:"hidden"`
 	ID          uuid.UUID `json:"id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
@@ -101,7 +103,7 @@ func PlanView(p *Plan) PlanJSON {
 	if p.ListPrice != nil {
 		price = ptr(p.ListPrice.String())
 	}
-	return PlanJSON{ID: p.ID, Name: p.Name, Description: p.Description, ListPrice: price, Duration: p.Duration,
+	return PlanJSON{Stock: p.Stock, Hidden: p.Hidden, ID: p.ID, Name: p.Name, Description: p.Description, ListPrice: price, Duration: p.Duration,
 		Models: p.Models, Rules: p.Rules, Stackable: p.Stackable, Group: p.Group, Status: p.Status, Subscribers: p.Subscribers,
 		Version: p.Version, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
 }
@@ -109,6 +111,7 @@ func PlanView(p *Plan) PlanJSON {
 // CatalogPlanJSON is the user-facing plan catalog entry: what a plan offers,
 // without admin-only data (subscriber counts, status, edit version).
 type CatalogPlanJSON struct {
+	Stock       int64     `json:"stock"`
 	ID          uuid.UUID `json:"id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
@@ -124,7 +127,7 @@ func catalogViews(ps []*Plan) []CatalogPlanJSON {
 	out := make([]CatalogPlanJSON, len(ps))
 	for i, p := range ps {
 		v := PlanView(p)
-		out[i] = CatalogPlanJSON{ID: v.ID, Name: v.Name, Description: v.Description, ListPrice: v.ListPrice,
+		out[i] = CatalogPlanJSON{Stock: v.Stock, ID: v.ID, Name: v.Name, Description: v.Description, ListPrice: v.ListPrice,
 			Duration: v.Duration, Models: v.Models, Rules: v.Rules, Stackable: v.Stackable, Group: v.Group}
 	}
 	return out
@@ -163,6 +166,14 @@ func (h *Handler) catalog(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	visible := items[:0]
+	for _, p := range items {
+		if !p.Hidden {
+			visible = append(visible, p)
+		}
+	}
+	items = visible
+	total = len(items)
 	SortCatalog(items)
 	httpx.WriteJSON(w, http.StatusOK, httpx.List[CatalogPlanJSON]{Items: catalogViews(items), Total: total, Page: 1, PageSize: len(items)})
 }
@@ -221,6 +232,8 @@ func (h *Handler) listPlans(w http.ResponseWriter, r *http.Request) {
 }
 
 type planBody struct {
+	Stock       *int64          `json:"stock"`
+	Hidden      *bool           `json:"hidden"`
 	Name        *string         `json:"name"`
 	Description *string         `json:"description"`
 	ListPrice   json.RawMessage `json:"listPrice"` // absent: unchanged; null: none
@@ -267,7 +280,10 @@ func (h *Handler) createPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	details := map[string]any{}
-	in := PlanInput{}
+	in := PlanInput{Stock: body.Stock}
+	if body.Hidden != nil {
+		in.Hidden = *body.Hidden
+	}
 	_, in.ListPrice = body.listPrice(details)
 	if body.Name != nil {
 		in.Name = *body.Name
@@ -317,7 +333,7 @@ func (h *Handler) patchPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	details := map[string]any{}
-	patch := PlanPatch{Name: body.Name, Description: body.Description, Duration: body.Duration, Models: body.Models,
+	patch := PlanPatch{Stock: body.Stock, Hidden: body.Hidden, Name: body.Name, Description: body.Description, Duration: body.Duration, Models: body.Models,
 		Rules: body.Rules, Stackable: body.Stackable, Group: body.Group, Status: body.Status, SyncSubscriptionModels: body.SyncSubscriptionModels,
 		SyncSubscriptionLimits: body.SyncSubscriptionLimits, SyncSubscriptionWeights: body.SyncSubscriptionWeights}
 	patch.SetListPrice, patch.ListPrice = body.listPrice(details)
