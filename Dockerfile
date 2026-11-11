@@ -11,9 +11,9 @@
 #
 # 基础镜像固定到精确版本 + 摘要（多架构 index digest），保证可复现构建与供应链可审计。
 # 升级时同时修改 tag 与 digest：docker pull <tag> && docker image inspect --format '{{.RepoDigests}}' <tag>
-# Go 版本须 ≥ server/go.mod 的 toolchain 行（安全修复：go1.26.10 修复了 crypto/x509 对失信中间证书的验证问题（GO-2026-6809））。
+# Go 版本须 ≥ server/go.mod 的 toolchain 行（安全修复：go1.26.11 修复了 net/http MaxBytesReader 竞争导致的 HTTP/1 服务崩溃问题（GO-2026-6859））。
 ARG NODE_IMAGE=node:24.21.0-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1
-ARG GO_IMAGE=golang:1.26.10-alpine@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308
+ARG GO_IMAGE=golang:1.26.11-alpine@sha256:ae52b5bc6ed045a9ed26ab03dc19327a802a9cc9aa8b27ed57f5c6b60579b0bb
 ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 # 多架构构建：前端与 Go 编译都在构建机本机架构上运行（--platform=$BUILDPLATFORM），Go 交叉编译到目标架构
@@ -39,7 +39,7 @@ RUN node /src/scripts/precompress.mjs dist
 FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS server
 WORKDIR /src
 # 官方 golang 镜像默认 GOTOOLCHAIN=local，会忽略 go.mod 的 toolchain 行。改为 auto：
-# 镜像自带的 Go 低于 toolchain 行时自动下载该版本（经 GOPROXY 校验），保证产物不低于 go1.26.10。
+# 镜像自带的 Go 低于 toolchain 行时自动下载该版本（经 GOPROXY 校验），保证产物不低于 go1.26.11。
 ENV GOTOOLCHAIN=auto
 COPY server/go.mod server/go.sum ./
 RUN --mount=type=cache,id=omnigate-gomod,target=/go/pkg/mod go mod download
