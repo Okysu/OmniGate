@@ -44,5 +44,22 @@ export const benefitsApi = {
   claims: () => api.get<{ counts: Record<string, number> }>('/api/benefits/claims'),
   claim: (id: string, requestId: string, expectedPrice: string) => api.post(`/api/benefits/campaigns/${id}/claim`, { requestId, expectedPrice }),
   adminList: () => api.get<{ items: Campaign[] }>('/api/admin/benefits/campaigns'),
-  save: (c: Campaign) => c.id ? api.put<Campaign>(`/api/admin/benefits/campaigns/${c.id}`, c) : api.post<Campaign>('/api/admin/benefits/campaigns', c),
+  save: (c: Campaign) => {
+    const body = {
+      title: c.title,
+      description: c.description,
+      status: c.status,
+      rewardType: c.rewardType,
+      planId: c.planId,
+      amount: c.amount,
+      price: c.price,
+      stock: c.stock,
+      perUserLimit: c.perUserLimit,
+      startsAt: c.startsAt,
+      endsAt: c.endsAt,
+      conditions: c.conditions,
+      version: c.version,
+    }
+    return c.id ? api.put<Campaign>(`/api/admin/benefits/campaigns/${c.id}`, body) : api.post<Campaign>('/api/admin/benefits/campaigns', body)
+  },
 }

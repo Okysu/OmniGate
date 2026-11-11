@@ -104,8 +104,11 @@ func (h *Handler) adminCampaigns(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) saveCampaign(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Campaign
-		Stock        *int64 `json:"stock"`
-		PerUserLimit *int   `json:"perUserLimit"`
+		// Identity comes from the URL (or is generated for POST). Older
+		// clients submit id:"" for a new activity; do not decode it as UUID.
+		ID           *string `json:"id"`
+		Stock        *int64  `json:"stock"`
+		PerUserLimit *int    `json:"perUserLimit"`
 	}
 	if err := httpx.DecodeJSON(r, &body); err != nil {
 		httpx.WriteError(w, r, err)

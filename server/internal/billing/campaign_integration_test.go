@@ -21,7 +21,7 @@ func TestCampaignHTTPDefaultsPermissionsAndPrivacy(t *testing.T) {
 	h := newHTTP(t, f)
 	admin := f.user(identity.RoleSystemAdmin)
 	u := f.user(identity.RoleUser)
-	body := map[string]any{"title": "活动", "rewardType": "balance", "amount": "2", "status": "active", "conditions": map[string]any{"userIds": []string{u.ID.String()}}}
+	body := map[string]any{"id": "", "title": "活动", "rewardType": "balance", "amount": "2", "status": "active", "conditions": map[string]any{"userIds": []string{u.ID.String()}}}
 	status, result := h.do(admin, identity.RoleSystemAdmin, "POST", "/api/admin/benefits/campaigns", body)
 	if status != 200 || result["stock"] != float64(-1) || result["perUserLimit"] != float64(1) {
 		t.Fatalf("defaults: %d %v", status, result)
