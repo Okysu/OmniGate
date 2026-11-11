@@ -161,7 +161,7 @@ func (h *Handler) catalog(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, apperr.Unauthenticated())
 		return
 	}
-	items, total, err := h.svc.ListPlans(r.Context(), PlanActive, 0, 1000)
+	items, _, err := h.svc.ListPlans(r.Context(), PlanActive, 0, 1000)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -173,7 +173,7 @@ func (h *Handler) catalog(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	items = visible
-	total = len(items)
+	total := len(items)
 	SortCatalog(items)
 	httpx.WriteJSON(w, http.StatusOK, httpx.List[CatalogPlanJSON]{Items: catalogViews(items), Total: total, Page: 1, PageSize: len(items)})
 }
