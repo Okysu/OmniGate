@@ -3,7 +3,7 @@ import type { Channel, ChannelScope, ChannelType, ChannelView, EnabledStatus, He
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Cable, Eye, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Trash2, Zap } from '@lucide/vue'
-import { watchDebounced } from '@vueuse/core'
+import { useDocumentVisibility, useIntervalFn, watchDebounced } from '@vueuse/core'
 import { toast } from 'vue-sonner'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import ChannelBadges from '@/components/plugin-ui/ChannelBadges.vue'
@@ -72,14 +72,17 @@ const loading = ref(false)
 const loadError = ref<unknown>(null)
 let controller: AbortController | null = null
 
-async function load() {
-  if (tab.value === 'shared')
+async function load(quiet = false) {
+  if (tab.value === 'shared' || (quiet && controller !== null))
     return
   controller?.abort()
   const ctrl = new AbortController()
   controller = ctrl
-  loading.value = true
-  loadError.value = null
+  const snapshot = items.value
+  if (!quiet) {
+    loading.value = true
+    loadError.value = null
+  }
   try {
     const res = await channelsApi.list({
       page: page.value,
@@ -89,17 +92,22 @@ async function load() {
       scope: scopeFilter.value === ALL ? undefined : scopeFilter.value as ChannelScope,
       status: statusFilter.value === ALL ? undefined : statusFilter.value as EnabledStatus,
     }, ctrl.signal)
-    items.value = res.items
-    total.value = res.total
+    if (controller === ctrl && (!quiet || (!sheetOpen.value && items.value === snapshot))) {
+      items.value = res.items
+      total.value = res.total
+    }
   }
   catch (err) {
     if (isAbortError(err))
       return
-    loadError.value = err
+    if (!quiet)
+      loadError.value = err
   }
   finally {
-    if (controller === ctrl)
+    if (controller === ctrl) {
+      controller = null
       loading.value = false
+    }
   }
 }
 
@@ -108,7 +116,7 @@ function setQuery(next: Record<string, string | number | undefined>) {
   void router.replace({ query: merged })
 }
 
-watch([page, q, typeFilter, scopeFilter, statusFilter, tab], load, { immediate: true })
+watch([page, q, typeFilter, scopeFilter, statusFilter, tab], () => load(), { immediate: true })
 watch(q, (v) => {
   if (v !== search.value)
     search.value = v
@@ -182,6 +190,13 @@ async function testChannel(c: Channel) {
 // ---------- create / edit ----------
 const sheetOpen = ref(false)
 const editing = ref<Channel | null>(null)
+const visibility = useDocumentVisibility()
+function refreshCachedChannels() {
+  if (visibility.value === 'visible' && !sheetOpen.value && !loading.value && !toggling.value.size && !testing.value.size)
+    void load(true)
+}
+useIntervalFn(refreshCachedChannels, 30_000)
+watch(visibility, value => value === 'visible' && refreshCachedChannels())
 function openCreate() {
   editing.value = null
   sheetOpen.value = true

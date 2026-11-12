@@ -3,7 +3,8 @@
 // `channel.detail.overview` contributions), vendor capabilities (owner or
 // channels.manage only) and configuration.
 import type { Channel, ChannelCapabilities, ChannelView, UiContribution } from '@/lib/types'
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useDocumentVisibility, useIntervalFn } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, Blocks, Clock, KeyRound, Loader2, Pencil, Play, RefreshCw, User as UserIcon, UsersRound, Zap } from '@lucide/vue'
 import { toast } from 'vue-sonner'
@@ -96,6 +97,32 @@ async function load() {
   }
 }
 watch(id, load, { immediate: true })
+
+// Read the scheduler's cached results, without invoking upstream capabilities.
+const visibility = useDocumentVisibility()
+let refreshing = false
+let disposed = false
+onBeforeUnmount(() => { disposed = true })
+async function refreshCachedCapabilities() {
+  if (visibility.value !== 'visible' || loading.value || refreshing || !full.value || sheetOpen.value || running.value.size || testing.value)
+    return
+  const channelId = id.value
+  const previousChannel = channel.value
+  const previousCaps = caps.value
+  refreshing = true
+  try {
+    const [nextChannel, nextCaps] = await Promise.all([channelsApi.get(channelId), channelsApi.capabilities(channelId)])
+    if (!disposed && id.value === channelId && !sheetOpen.value && !loading.value && channel.value === previousChannel && caps.value === previousCaps && !running.value.size && !testing.value) {
+      channel.value = nextChannel
+      caps.value = nextCaps
+      capsError.value = null
+    }
+  }
+  catch { /* Keep the last successful snapshot during a background read failure. */ }
+  finally { refreshing = false }
+}
+useIntervalFn(refreshCachedCapabilities, 30_000)
+watch(visibility, value => value === 'visible' && void refreshCachedCapabilities())
 
 const hasCapabilities = computed(() => (caps.value?.capabilities.length ?? 0) > 0)
 watch(hasCapabilities, (has) => {
