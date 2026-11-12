@@ -6,6 +6,8 @@ import { buildPluginConfig, buildSecrets, validatePluginConfig } from '@/lib/con
 export interface PluginFormState {
   /** Plugin row id. */
   pluginId: string | null
+  /** Plugin selected when the edit sheet opened. */
+  originalPluginId: string | null
   /** Selected version (create) / pinned or target version (edit). */
   versionId: string | null
   /** Version the channel is pinned to when the sheet opened (edit). */
@@ -20,7 +22,11 @@ export interface PluginFormState {
 }
 
 export function emptyPluginForm(): PluginFormState {
-  return { pluginId: null, versionId: null, originalVersionId: null, manifest: null, loading: false, error: null, config: {}, secrets: {}, configTouched: false }
+  return { pluginId: null, originalPluginId: null, versionId: null, originalVersionId: null, manifest: null, loading: false, error: null, config: {}, secrets: {}, configTouched: false }
+}
+
+export function pluginIdentityChanged(s: PluginFormState): boolean {
+  return s.originalPluginId !== null && s.pluginId !== null && s.pluginId !== s.originalPluginId
 }
 
 export function pluginVersionChanged(s: PluginFormState): boolean {
@@ -30,10 +36,10 @@ export function pluginVersionChanged(s: PluginFormState): boolean {
 export function validatePluginForm(s: PluginFormState, secretsSet?: Record<string, { set: boolean }> | null): Record<string, string> {
   if (!s.manifest)
     return {}
-  const errors = validatePluginConfig(s.manifest.configSchema, s.config, s.secrets, { secretsSet })
+  const errors = validatePluginConfig(s.manifest.configSchema, s.config, s.secrets, { secretsSet: pluginIdentityChanged(s) ? null : secretsSet })
   // While switching versions without touching the config, the server migrates
   // the stored config; only secrets are checked client-side then.
-  if (pluginVersionChanged(s) && !s.configTouched) {
+  if (pluginVersionChanged(s) && !pluginIdentityChanged(s) && !s.configTouched) {
     for (const k of Object.keys(errors)) {
       if (k.startsWith('pluginConfig.'))
         delete errors[k]
@@ -47,9 +53,9 @@ export function pluginPayload(s: PluginFormState, create: boolean): { pluginVers
   const out: { pluginVersionId?: string, pluginConfig?: Record<string, unknown>, secrets?: Record<string, string> } = {}
   if (!s.versionId || !s.manifest)
     return out
-  if (create || pluginVersionChanged(s))
+  if (create || s.originalVersionId === null || pluginVersionChanged(s))
     out.pluginVersionId = s.versionId
-  if (create ? Object.keys(s.config).length > 0 : s.configTouched)
+  if (create ? Object.keys(s.config).length > 0 : s.configTouched || pluginIdentityChanged(s) || s.originalVersionId === null)
     out.pluginConfig = buildPluginConfig(s.manifest.configSchema, s.config)
   const secrets = buildSecrets(s.secrets)
   if (secrets)

@@ -15,7 +15,8 @@ import (
 
 // pluginChange describes a version switch for the audit log.
 type pluginChange struct {
-	From, To string
+	From, To             string
+	FromPlugin, ToPlugin string
 }
 
 // preparePlugin resolves the plugin version a create/update targets and
@@ -68,9 +69,6 @@ func (s *Service) preparePlugin(ctx context.Context, c *Channel, in *Input, crea
 			return nil, apperr.New(apperr.KindConflict, "plugin_disabled", "该插件已停用")
 		}
 	}
-	if !create && c.Plugin != nil && c.Plugin.ID != l.PluginID && in.PluginVersionID != nil {
-		return nil, apperr.Validation("参数校验失败", map[string]any{"pluginVersionId": "只能在同一插件的版本之间切换；更换插件请新建渠道"})
-	}
 	ct := l.Manifest.ChannelType()
 	if ct == "" {
 		return nil, apperr.Validation("参数校验失败", map[string]any{"pluginVersionId": "该插件不是渠道插件（kind 不含 channel）"})
@@ -94,6 +92,13 @@ func (s *Service) preparePlugin(ctx context.Context, c *Channel, in *Input, crea
 	} else if c.Type != ct {
 		// Legacy channels or plugins that change protocol: type follows the plugin.
 		c.Type = ct
+		if ct != TypeOpenAI && in.Models == nil {
+			models := slices.Clone(c.Models)
+			for i := range models {
+				models[i].UpstreamProtocol = ""
+			}
+			in.Models = &models
+		}
 	}
 	return l, nil
 }
@@ -105,26 +110,31 @@ func (s *Service) applyPlugin(ctx context.Context, c *Channel, in Input, l *plug
 		return nil, nil, nil
 	}
 	var change *pluginChange
+	switchingPlugin := !create && c.Plugin != nil && c.Plugin.ID != l.PluginID
 	cfg := maps.Clone(c.PluginConfig)
-	if cfg == nil {
+	if cfg == nil || switchingPlugin {
 		cfg = map[string]any{}
 	}
 	if !create && c.PluginVersionID != nil && *c.PluginVersionID != l.VersionID {
 		from := ""
+		fromPlugin := ""
 		if c.Plugin != nil {
 			from = c.Plugin.Version
+			fromPlugin = c.Plugin.Key
 		}
-		change = &pluginChange{From: from, To: l.Version}
-		migrated, err := l.MigrateConfig(ctx, plugin.ChannelEnv{ID: c.ID, Name: c.Name, BaseURL: c.BaseURL, Config: cfg}, cfg, from)
-		if err != nil {
-			msg := err.Error()
-			var pe *engine.Error
-			if errors.As(err, &pe) {
-				msg = pe.Message
+		change = &pluginChange{From: from, To: l.Version, FromPlugin: fromPlugin, ToPlugin: l.Key}
+		if !switchingPlugin {
+			migrated, err := l.MigrateConfig(ctx, plugin.ChannelEnv{ID: c.ID, Name: c.Name, BaseURL: c.BaseURL, Config: cfg}, cfg, from)
+			if err != nil {
+				msg := err.Error()
+				var pe *engine.Error
+				if errors.As(err, &pe) {
+					msg = pe.Message
+				}
+				return nil, nil, apperr.Validation("配置迁移失败："+msg, nil)
 			}
-			return nil, nil, apperr.Validation("配置迁移失败："+msg, nil)
+			cfg = migrated
 		}
-		cfg = migrated
 	}
 	if in.PluginConfig != nil {
 		cfg = *in.PluginConfig
@@ -133,10 +143,10 @@ func (s *Service) applyPlugin(ctx context.Context, c *Channel, in Input, l *plug
 	secrets := map[string]string{}
 	set := map[string]bool{}
 	for k := range c.SecretFields {
-		if slices.Contains(allowed, k) {
+		if !switchingPlugin && slices.Contains(allowed, k) {
 			set[k] = true
 		} else {
-			secrets[k] = "" // drop secrets the new version no longer declares
+			secrets[k] = "" // never carry plugin credentials to a different plugin
 		}
 	}
 	if in.Secrets != nil {

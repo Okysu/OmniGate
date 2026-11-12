@@ -377,7 +377,8 @@ func (s *Service) SaveResult(ctx context.Context, channelID uuid.UUID, versionID
 		out = r.Output
 	}
 	_, err := s.pool.Exec(ctx, `INSERT INTO capability_results (channel_id, capability, ok, unsupported, output, error, plugin_version_id, duration_ms, fetched_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+		WHERE EXISTS (SELECT 1 FROM channels WHERE id = $1 AND plugin_version_id = $7)
 		ON CONFLICT (channel_id, capability) DO UPDATE SET ok = EXCLUDED.ok, unsupported = EXCLUDED.unsupported, output = EXCLUDED.output,
 		error = EXCLUDED.error, plugin_version_id = EXCLUDED.plugin_version_id, duration_ms = EXCLUDED.duration_ms, fetched_at = EXCLUDED.fetched_at`,
 		channelID, name, r.OK, r.Unsupported, out, errText, versionID, r.DurationMs, r.FetchedAt)
@@ -386,7 +387,8 @@ func (s *Service) SaveResult(ctx context.Context, channelID uuid.UUID, versionID
 
 func (s *Service) Results(ctx context.Context, channelID uuid.UUID) (map[string]*CapabilityResult, error) {
 	rows, err := s.pool.Query(ctx, `SELECT r.capability, r.ok, r.unsupported, r.output, r.error, r.duration_ms, r.fetched_at, coalesce(v.version, '')
-		FROM capability_results r LEFT JOIN plugin_versions v ON v.id = r.plugin_version_id WHERE r.channel_id = $1`, channelID)
+		FROM capability_results r JOIN channels c ON c.id = r.channel_id AND c.plugin_version_id = r.plugin_version_id
+		LEFT JOIN plugin_versions v ON v.id = r.plugin_version_id WHERE r.channel_id = $1`, channelID)
 	if err != nil {
 		return nil, err
 	}

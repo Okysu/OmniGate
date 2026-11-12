@@ -1764,14 +1764,16 @@ paths:
       description: |
         仅所有者或持有 `channels.manage` 的用户可修改：不可见 → `404`，可见但无管理权 → `403 forbidden`。
         `version` 必填；省略的字段保持不变；`models`、`config`、`sharedWith` 为**整体替换**；提供 `apiKey` 时替换密钥。
-        `type` 创建后不能修改（传入不同值 → `422`）。改为 / 保持 `scope=global` 需要 `channels.manage`。
+        `type` 由插件决定，可通过更换 `pluginVersionId` 改变；单独传入与当前插件不符的类型 → `422`。改为 / 保持 `scope=global` 需要 `channels.manage`。
         修改 `baseUrl` 时按**所有者**的角色执行 `base_url_not_allowed` 检查。`scope` 不是 `shared` 时 `sharedWith` 被清空。
         写审计 `channel.update`（metadata 含 `changed` 字段名列表，不含密钥）。修改在数秒内同步到数据面。
 
-        **插件**：`pluginVersionId` 只能在同一插件的版本之间切换（升级 / 回滚；更换插件请新建渠道，否则 `422`）；切换到的版本必须已批准且插件已启用
-        （`409 plugin_not_approved` / `plugin_disabled`；不切换版本时，插件停用也不影响修改其他字段）。切换时若新版本导出 `migrateConfig(oldConfig, fromVersion)`，
-        先用它迁移现有配置（失败 → `422`，消息以“配置迁移失败”开头），再与提交的 `pluginConfig` 合并校验；新版本不再声明的敏感字段被删除。
-        版本切换另写审计 `channel.plugin_upgrade`（metadata 含 `from` / `to` 版本号）。`pluginConfig` 为**整体替换**；`secrets` 中的空字符串表示删除该字段。
+        **插件**：`pluginVersionId` 可切换到不同插件或同一插件的其他版本；目标必须已批准且插件已启用
+        （`409 plugin_not_approved` / `plugin_disabled`；不切换版本时，插件停用也不影响修改其他字段）。同一插件切版本时，若目标导出 `migrateConfig(oldConfig, fromVersion)`，
+        先迁移现有配置（失败 → `422`，消息以“配置迁移失败”开头）；新版本不再声明的敏感字段删除。换用不同插件不执行迁移，清除旧配置及全部插件敏感字段（即使同名），
+        使用提交的配置或目标默认值校验，必填密钥须重新提供。渠道 ID、API Key、地址和模型映射保留，切换到非 OpenAI 协议时移除模型的 Responses 标记。
+        切换另写审计 `channel.plugin_upgrade`（metadata 含 `from` / `to` 版本号及 `fromPlugin` / `toPlugin`）。`pluginConfig` 为**整体替换**；`secrets` 中空字符串表示删除。
+        查询结果只展示当前固定版本，旧版本迟到结果不会覆盖新版本的结果。
         尚未绑定插件的旧渠道在任意修改时会自动绑定对应类型的内置插件。
       x-required-permission: channels.read
       x-resource-check: 所有者或 channels.manage

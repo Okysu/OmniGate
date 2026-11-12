@@ -207,7 +207,7 @@ signRequest(req, ctx) => UpstreamRequest   // 在 transformRequest 之后执行�
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST / PATCH | `/api/channels[/{id}]` | 新增字段：`pluginVersionId`（必须是已批准且插件已启用的版本；`type` 由其 `extends` 决定；不提供时绑定对应类型的内置插件；创建时缺省的 `baseUrl`/`models` 取自 manifest.defaults）、`pluginConfig`（整体替换，按 configSchema 校验并补默认值）、`secrets`（`{字段名: 值}`，只写；空字符串表示删除）。只能在同一插件的版本之间切换；切换时若新版本导出 `migrateConfig`，先迁移配置 |
+| POST / PATCH | `/api/channels[/{id}]` | 新增字段：`pluginVersionId`（必须是已批准且插件已启用的版本；`type` 由其 `extends` 决定；不提供时绑定对应类型的内置插件；创建时缺省的 `baseUrl`/`models` 取自 manifest.defaults）、`pluginConfig`（整体替换，按 configSchema 校验并补默认值）、`secrets`（`{字段名: 值}`，只写；空字符串表示删除）。编辑可更换插件；同一插件切版本时运行 `migrateConfig`，不同插件则清除旧配置及全部专属密钥，再校验目标配置。API Key、渠道 ID、地址及模型映射保留，非 OpenAI 协议移除 Responses 标记；查询结果与当前固定版本隔离 |
 | GET | `/api/channels[/{id}]` | 新增 `plugin: {id, key, name, version, versionId} \| null`（精简视图也包含）、`pluginConfig`、`secretFields: {名称: {set, hint}}`；列表中管理者可见的渠道另有 `badges: [{value, format, currency}]`（由 `channel.list.badge` 贡献点从最新能力结果解析） |
 | GET | `/api/channels/{id}/capabilities` | 渠道所有者或 `channels.manage`（余额等属于所有者账户信息，不向仅能使用渠道的人公开）：`{plugin, capabilities: [{name, label, output, userTriggerable, schedule}], results: {名称: CapabilityResult}, ui: [贡献点]}` |
 | POST | `/api/channels/{id}/capabilities/{name}` | 渠道所有者或 `channels.manage`，且能力声明了 `userTriggerable`：立即执行并返回 `CapabilityResult`（body 可选 `{input}`） |

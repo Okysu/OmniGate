@@ -1,8 +1,7 @@
 <script setup lang="ts">
 // 插件 section of the channel form. Create: pick an enabled plugin with an
-// approved version and a version (newest first). Edit: show the pinned plugin
-// and allow switching to another approved version of the same plugin
-// (upgrade / rollback; the server runs migrateConfig).
+// approved version. Edit also supports selecting a different plugin; only
+// version changes within the original plugin reuse stored config / secrets.
 import type { PluginFormState } from './pluginForm'
 import type { Channel, Plugin, PluginManifest, PluginVersionSummary } from '@/lib/types'
 import { computed, onMounted, ref } from 'vue'
@@ -10,6 +9,7 @@ import { Blocks, Loader2, Workflow } from '@lucide/vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import FormField from '@/components/FormField.vue'
 import { Badge } from '@/components/ui/badge'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { initConfigValues, initSecretValues } from '@/lib/configSchema'
 import { errorMessage } from '@/lib/api'
@@ -19,7 +19,7 @@ import { isChannelPlugin } from '@/lib/customMeters'
 import { CUSTOM_PROTOCOL_REJECTS, isCustomProtocol, protocolInfo } from '@/lib/pluginProtocol'
 import { compareSemver } from '@/lib/semver'
 import PluginConfigFields from './PluginConfigFields.vue'
-import { pluginVersionChanged } from './pluginForm'
+import { pluginIdentityChanged, pluginVersionChanged } from './pluginForm'
 
 const state = defineModel<PluginFormState>('state', { required: true })
 const props = defineProps<{
@@ -35,12 +35,13 @@ const listError = ref<string | null>(null)
 
 const isEdit = computed(() => props.channel !== null)
 const selectedPlugin = computed(() => plugins.value.find(p => p.id === state.value.pluginId) ?? null)
+const samePlugin = computed(() => state.value.pluginId === state.value.originalPluginId)
 const approvedVersions = computed(() => versions.value.filter(v => v.approval === 'approved'))
 /** Edit: approved versions plus the pinned one (should it no longer be approved). */
 const versionOptions = computed(() => {
   const list = [...approvedVersions.value]
   const pinned = state.value.originalVersionId
-  if (pinned && !list.some(v => v.id === pinned)) {
+  if (samePlugin.value && pinned && !list.some(v => v.id === pinned)) {
     const v = versions.value.find(x => x.id === pinned)
     if (v)
       list.push(v)
@@ -57,7 +58,7 @@ async function loadManifest(versionId: string, fromChannel: boolean) {
   s.error = null
   try {
     const v = await pluginsApi.version(pid, versionId)
-    if (s.versionId !== versionId)
+    if (s.versionId !== versionId || s.pluginId !== pid)
       return // a newer selection won
     const m = v.manifest
     if (!m) {
@@ -66,20 +67,24 @@ async function loadManifest(versionId: string, fromChannel: boolean) {
     }
     s.manifest = m
     s.config = initConfigValues(m.configSchema, fromChannel ? props.channel?.pluginConfig : null)
-    s.secrets = initSecretValues(m.configSchema, props.channel?.secretFields)
+    s.secrets = initSecretValues(m.configSchema, fromChannel ? props.channel?.secretFields : null)
     s.configTouched = false
     emit('manifest', m)
   }
   catch (err) {
-    s.error = errorMessage(err)
+    if (s.pluginId === pid && s.versionId === versionId)
+      s.error = errorMessage(err)
   }
   finally {
-    s.loading = false
+    if (s.pluginId === pid && s.versionId === versionId)
+      s.loading = false
   }
 }
 
 async function loadVersions(pluginId: string): Promise<void> {
-  versions.value = (await pluginsApi.get(pluginId)).versions ?? []
+  const list = (await pluginsApi.get(pluginId)).versions ?? []
+  if (state.value.pluginId === pluginId)
+    versions.value = list.sort((a, b) => compareSemver(b.version, a.version))
 }
 
 async function selectPlugin(id: string) {
@@ -87,40 +92,57 @@ async function selectPlugin(id: string) {
   s.pluginId = id
   s.versionId = null
   s.manifest = null
+  s.config = {}
+  s.secrets = {}
   s.error = null
   s.loading = true
   try {
     await loadVersions(id)
-    const latest = approvedVersions.value[0]
+    if (s.pluginId !== id)
+      return
+    const latest = samePlugin.value && s.originalVersionId
+      ? versions.value.find(v => v.id === s.originalVersionId)
+      : approvedVersions.value[0]
     if (!latest) {
       s.error = '该插件没有已批准的版本'
       return
     }
     s.versionId = latest.id
-    await loadManifest(latest.id, false)
+    await loadManifest(latest.id, samePlugin.value)
   }
   catch (err) {
-    s.error = errorMessage(err)
+    if (s.pluginId === id)
+      s.error = errorMessage(err)
   }
   finally {
-    s.loading = false
+    if (s.pluginId === id)
+      s.loading = false
   }
-}
-
-function selectVersionCreate(id: string) {
-  state.value.versionId = id
-  void loadManifest(id, false)
 }
 
 onMounted(async () => {
   const s = state.value
+  if (props.channel?.plugin) {
+    s.originalPluginId = props.channel.plugin.id
+    s.originalVersionId = props.channel.plugin.versionId
+  }
+  try {
+    const all = (await pluginsApi.list()).items
+    plugins.value = all.filter(p => isChannelPlugin(p) && ((p.status === 'enabled' && p.latest !== null) || p.id === s.originalPluginId))
+  }
+  catch (err) {
+    listError.value = errorMessage(err)
+  }
   if (props.channel) {
     const ref = props.channel.plugin
-    if (!ref)
+    if (!ref) {
+      const builtin = plugins.value.find(p => p.key === `builtin.${props.channel?.type}`)
+      if (builtin)
+        await selectPlugin(builtin.id)
       return
+    }
     s.pluginId = ref.id
     s.versionId = ref.versionId
-    s.originalVersionId = ref.versionId
     try {
       await loadVersions(ref.id)
     }
@@ -131,9 +153,6 @@ onMounted(async () => {
     return
   }
   try {
-    const all = (await pluginsApi.list()).items
-    // Billing-only plugins (phase9 §3) cannot back a channel.
-    plugins.value = all.filter(p => p.status === 'enabled' && p.latest !== null && isChannelPlugin(p))
     const preferred = plugins.value.find(p => p.key === 'builtin.openai') ?? plugins.value[0]
     if (preferred)
       await selectPlugin(preferred.id)
@@ -159,10 +178,10 @@ const switchKind = computed<'upgrade' | 'rollback' | 'same'>(() => {
 function requestVersion(id: string) {
   if (id === state.value.versionId)
     return
-  if (id === state.value.originalVersionId) {
+  if (!isEdit.value || !samePlugin.value || id === state.value.originalVersionId) {
     // Back to the pinned version: no confirmation needed.
     state.value.versionId = id
-    void loadManifest(id, true)
+    void loadManifest(id, isEdit.value && samePlugin.value)
     return
   }
   switchTarget.value = versions.value.find(v => v.id === id) ?? null
@@ -178,6 +197,7 @@ function confirmSwitch() {
 }
 
 const switching = computed(() => pluginVersionChanged(state.value))
+const changingPlugin = computed(() => pluginIdentityChanged(state.value))
 /** phase9 §2: the selected version implements a custom upstream protocol. */
 const customProtocol = computed(() => isCustomProtocol(state.value.manifest) || (!state.value.manifest && isCustomProtocol(selectedPlugin.value)))
 const currentVersionLabel = computed(() => versions.value.find(v => v.id === state.value.versionId)?.version ?? props.channel?.plugin?.version ?? '')
@@ -194,8 +214,8 @@ const currentVersionLabel = computed(() => versions.value.find(v => v.id === sta
       {{ listError }}
     </p>
 
-    <!-- create: plugin + version -->
-    <template v-if="!isEdit">
+    <!-- The same official selectors are available for create and edit. -->
+    <div class="space-y-4">
       <div class="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,10rem)]">
         <FormField label="插件" for="ch-plugin" required :error="errors.pluginVersionId" class="min-w-0">
           <Select :model-value="state.pluginId ?? undefined" @update:model-value="(v) => v && selectPlugin(String(v))">
@@ -211,13 +231,13 @@ const currentVersionLabel = computed(() => versions.value.find(v => v.id === sta
           </Select>
         </FormField>
         <FormField label="版本" for="ch-plugin-version" required class="min-w-0">
-          <Select :model-value="state.versionId ?? undefined" :disabled="!approvedVersions.length" @update:model-value="(v) => v && selectVersionCreate(String(v))">
+          <Select :model-value="state.versionId ?? undefined" :disabled="!versionOptions.length || state.loading" @update:model-value="(v) => v && requestVersion(String(v))">
             <SelectTrigger id="ch-plugin-version" class="w-full font-mono">
               <SelectValue placeholder="—" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem v-for="(v, i) in approvedVersions" :key="v.id" :value="v.id" class="font-mono">
-                v{{ v.version }}{{ i === 0 ? ' · 最新' : '' }}
+              <SelectItem v-for="(v, i) in versionOptions" :key="v.id" :value="v.id" class="font-mono">
+                v{{ v.version }}{{ samePlugin && v.id === state.originalVersionId ? '（当前）' : i === 0 ? ' · 最新' : '' }}{{ v.approval !== 'approved' ? '（未批准）' : '' }}
               </SelectItem>
             </SelectContent>
           </Select>
@@ -228,39 +248,18 @@ const currentVersionLabel = computed(() => versions.value.find(v => v.id === sta
           · {{ selectedPlugin.description }}
         </template>
       </p>
-    </template>
-
-    <!-- edit -->
-    <template v-else-if="channel?.plugin">
-      <div class="flex flex-wrap items-center gap-2 rounded-lg border p-3">
-        <div class="min-w-0 flex-1">
-          <p class="text-sm font-medium">
-            {{ channel.plugin.name }}
-          </p>
-          <p class="text-muted-foreground font-mono text-xs">
-            {{ channel.plugin.key }} · 固定在 v{{ channel.plugin.version }}
-          </p>
-        </div>
-        <FormField label="版本" for="ch-plugin-version" class="w-40" :error="errors.pluginVersionId">
-          <Select :model-value="state.versionId ?? undefined" :disabled="versionOptions.length < 2" @update:model-value="(v) => v && requestVersion(String(v))">
-            <SelectTrigger id="ch-plugin-version" class="w-full font-mono">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="v in versionOptions" :key="v.id" :value="v.id" class="font-mono">
-                v{{ v.version }}{{ v.id === state.originalVersionId ? '（当前）' : '' }}{{ v.approval !== 'approved' ? '（未批准）' : '' }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </FormField>
-      </div>
-      <div v-if="switching" class="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
-        保存后切换到 <span class="font-mono">v{{ currentVersionLabel }}</span>。未修改下方配置时，由服务端用新版本的 migrateConfig（如有）迁移现有配置；修改配置后则以表单内容整体替换。
-      </div>
-    </template>
-    <p v-else class="text-muted-foreground rounded-lg border border-dashed p-3 text-sm">
-      该渠道创建于插件系统之前，使用「{{ channel?.type }}」类型的内置协议。保存后会自动绑定对应的内置插件。
+    </div>
+    <p v-if="channel?.plugin" class="text-muted-foreground text-xs">
+      当前：{{ channel.plugin.name }} · v{{ channel.plugin.version }}
     </p>
+    <Alert v-if="changingPlugin || switching">
+      <AlertDescription v-if="changingPlugin">
+        保存后切换到 {{ selectedPlugin?.name }} v{{ currentVersionLabel }}。渠道类型随插件更新；原插件的配置和专属密钥会清除，请填写新插件所需字段。API Key、地址和模型映射沿用当前表单。
+      </AlertDescription>
+      <AlertDescription v-else>
+        保存后切换到 v{{ currentVersionLabel }}。未修改下方配置时，由服务端用新版本的 migrateConfig（如有）迁移现有配置；修改配置后则以表单内容整体替换。
+      </AlertDescription>
+    </Alert>
 
     <div v-if="customProtocol" class="space-y-1 rounded-lg border border-violet-500/40 bg-violet-500/5 p-3 text-sm" data-testid="custom-protocol-channel-note">
       <p class="flex items-center gap-1.5 font-medium">
@@ -291,7 +290,7 @@ const currentVersionLabel = computed(() => versions.value.find(v => v.id === sta
           v-model:values="state.config"
           v-model:secrets="state.secrets"
           :schema="state.manifest.configSchema"
-          :secret-state="channel?.secretFields"
+          :secret-state="samePlugin ? channel?.secretFields : null"
           :errors="errors"
           @touch="state.configTouched = true"
         />

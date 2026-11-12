@@ -254,7 +254,7 @@ func (s *Service) Update(ctx context.Context, p *authz.Principal, id uuid.UUID, 
 	err = s.store.Update(ctx, c, *in.Version, in.APIKey, secrets, func(tx db.Tx) error {
 		if change != nil {
 			if err := s.record(ctx, tx, p, meta, "channel.plugin_upgrade", c, map[string]any{"name": c.Name, "plugin": c.Plugin.Key,
-				"from": change.From, "to": change.To}); err != nil {
+				"from": change.From, "to": change.To, "fromPlugin": change.FromPlugin, "toPlugin": change.ToPlugin}); err != nil {
 				return err
 			}
 		}
@@ -303,6 +303,7 @@ func diffFields(a, b *Channel) []string {
 		}
 	}
 	add(a.Name != b.Name, "name")
+	add(a.Type != b.Type, "type")
 	add(a.BaseURL != b.BaseURL, "baseUrl")
 	add(a.Scope != b.Scope, "scope")
 	add(a.Status != b.Status, "status")

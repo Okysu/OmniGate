@@ -20,7 +20,6 @@ import { channelsApi } from '@/lib/endpoints'
 import { CHANNEL_BASE_URL_HINTS, CHANNEL_TYPE_LABELS, manifestChannelType, SCOPE_DESCRIPTIONS, SCOPE_LABELS } from '@/lib/labels'
 import { addedGroups, GROUP_SHARE_ADMIN_ONLY } from '@/lib/shares'
 import { isFullChannel } from '@/lib/types'
-import { isCustomProtocol } from '@/lib/pluginProtocol'
 import DiscoverModelsDialog from './DiscoverModelsDialog.vue'
 import { emptyPluginForm, pluginPayload, validatePluginForm } from './pluginForm'
 import PluginSection from './PluginSection.vue'
@@ -72,11 +71,11 @@ function modelsKey(rows: ChannelFormState['models']): string {
 
 /** Create: lock the type to the plugin's protocol and prefill manifest.defaults. */
 function onPluginManifest(m: PluginManifest) {
-  if (isEdit.value)
-    return
   const t = manifestChannelType(m)
   if (t)
     form.type = t
+  if (isEdit.value)
+    return
   const base = m.defaults.baseUrl ?? ''
   if (form.baseUrl.trim() === '' || form.baseUrl === prefilledBaseUrl) {
     form.baseUrl = base
@@ -102,9 +101,7 @@ const hasBalanceCapability = computed<boolean | null>(() => {
   return hasBalanceOutput(m.capabilities)
 })
 
-/** phase9 §2: the selected plugin version implements a custom upstream protocol. */
-const customProtocol = computed(() => isCustomProtocol(pluginState.value.manifest))
-const typeLockedBy = computed(() => (!isEdit.value && pluginState.value.manifest ? pluginState.value.manifest.name : null))
+const typeLockedBy = computed(() => pluginState.value.manifest?.name ?? null)
 
 watch(open, (v) => {
   if (v)
@@ -204,6 +201,10 @@ function revealFirstError() {
 
 async function submit() {
   formError.value = null
+  if (pluginState.value.error || (pluginState.value.pluginId && !pluginState.value.loading && (!pluginState.value.versionId || !pluginState.value.manifest))) {
+    formError.value = pluginState.value.error || '请选择有效的插件与版本'
+    return
+  }
   errors.value = validate()
   if (Object.keys(errors.value).length > 0) {
     formError.value = '请修正标记的字段后再保存'
@@ -357,7 +358,7 @@ function setScope(v: unknown) {
             <Input id="ch-name" v-model="form.name" maxlength="64" placeholder="例如：OpenAI 主账号" :aria-invalid="!!errors.name" />
           </FormField>
           <div class="grid gap-4 sm:grid-cols-2">
-            <FormField label="类型" for="ch-type" required :error="errors.type" :hint="isEdit ? '类型创建后不能修改' : typeLockedBy ? (customProtocol ? `由插件「${typeLockedBy}」决定（自定义协议）` : `由插件「${typeLockedBy}」的继承协议决定`) : undefined">
+            <FormField label="类型" for="ch-type" required :error="errors.type" :hint="typeLockedBy ? `由插件「${typeLockedBy}」决定；可在插件区域切换` : isEdit ? '请通过切换插件修改协议类型' : undefined">
               <Select :model-value="form.type" :disabled="isEdit || !!typeLockedBy" @update:model-value="setType">
                 <SelectTrigger id="ch-type" class="w-full">
                   <SelectValue />

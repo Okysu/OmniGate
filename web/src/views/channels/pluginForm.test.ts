@@ -1,6 +1,6 @@
 import type { PluginManifest } from '@/lib/types'
 import { describe, expect, it } from 'vitest'
-import { emptyPluginForm, pluginPayload, validatePluginForm } from './pluginForm'
+import { emptyPluginForm, pluginIdentityChanged, pluginPayload, validatePluginForm } from './pluginForm'
 
 const manifest = {
   id: 'acme.x',
@@ -33,6 +33,13 @@ describe('pluginPayload', () => {
     // Version switch without touching config: let the server run migrateConfig.
     expect(pluginPayload({ ...base, versionId: 'v2' }, false)).toEqual({ pluginVersionId: 'v2' })
   })
+
+  it('replaces config when changing plugins and can bind a legacy channel', () => {
+    const s = { ...emptyPluginForm(), pluginId: 'new', originalPluginId: 'old', originalVersionId: 'v1', versionId: 'v2', manifest, config: { region: 'us' } }
+    expect(pluginIdentityChanged(s)).toBe(true)
+    expect(pluginPayload(s, false)).toEqual({ pluginVersionId: 'v2', pluginConfig: { region: 'us' } })
+    expect(pluginPayload({ ...s, originalPluginId: null, originalVersionId: null }, false)).toEqual({ pluginVersionId: 'v2', pluginConfig: { region: 'us' } })
+  })
 })
 
 describe('validatePluginForm', () => {
@@ -40,5 +47,12 @@ describe('validatePluginForm', () => {
     const s = { ...emptyPluginForm(), versionId: 'v2', originalVersionId: 'v1', manifest, config: { region: '' }, secrets: { token: { value: '', replace: true } } }
     expect(validatePluginForm(s)).toEqual({})
     expect(validatePluginForm({ ...s, configTouched: true })).toEqual({ 'pluginConfig.region': '必填' })
+  })
+
+  it('validates a new plugin without reusing same-named secrets from the old one', () => {
+    const m = { ...manifest, configSchema: { ...manifest.configSchema!, required: ['region', 'token'] } }
+    const s = { ...emptyPluginForm(), pluginId: 'new', originalPluginId: 'old', versionId: 'v2', originalVersionId: 'v1', manifest: m, config: { region: '' }, secrets: { token: { value: '', replace: true } } }
+    expect(validatePluginForm(s, { token: { set: true } })).toEqual({ 'pluginConfig.region': '必填', 'secrets.token': '必填' })
+    expect(validatePluginForm({ ...s, config: { region: 'cn' }, secrets: { token: { value: 'fresh-token', replace: true } } })).toEqual({})
   })
 })
