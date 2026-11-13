@@ -192,6 +192,8 @@ type PlanPatch struct {
 	// subscriptions without replacing their windows, usage, or expiry.
 	SyncSubscriptionLimits  bool
 	SyncSubscriptionWeights bool
+	// Append missing rule IDs without rewriting existing rules or usage.
+	SyncSubscriptionRules bool
 }
 
 func validatePlan(in *PlanInput) error {
@@ -458,7 +460,7 @@ func (s *Service) UpdatePlan(ctx context.Context, actor Actor, id uuid.UUID, pat
 			return err
 		}
 		md := map[string]any{"before": planAudit(cur), "after": planAudit(p)}
-		if patch.SyncSubscriptionLimits || patch.SyncSubscriptionWeights {
+		if patch.SyncSubscriptionLimits || patch.SyncSubscriptionWeights || patch.SyncSubscriptionRules {
 			count, err := s.syncPlanRuleFields(ctx, tx, p, now, patch)
 			if err != nil {
 				return err
@@ -468,6 +470,9 @@ func (s *Service) UpdatePlan(ctx context.Context, actor Actor, id uuid.UUID, pat
 			}
 			if patch.SyncSubscriptionWeights {
 				md["syncedSubscriptionWeights"] = count
+			}
+			if patch.SyncSubscriptionRules {
+				md["syncedSubscriptionRules"] = count
 			}
 		}
 		if patch.SyncSubscriptionModels {

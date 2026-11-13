@@ -72,7 +72,14 @@ func compatibleRule(a, b Rule, syncWeights bool) bool {
 }
 
 func (s *Service) syncPlanRuleFields(ctx context.Context, q db.Querier, plan *Plan, now time.Time, patch PlanPatch) (int, error) {
-	subs, err := s.targetSubs(ctx, q, Target{ByPlan: true, PlanIDs: []uuid.UUID{plan.ID}}, now, true)
+	// Match model synchronization exactly, including temporarily disabled users
+	// and subscriptions that have not started yet. Otherwise those snapshots
+	// could receive a new model without its accompanying quota restriction.
+	rows, err := q.Query(ctx, "SELECT "+subCols+subFrom+" WHERE s.plan_id = $1 AND s.status = 'active' AND s.ends_at > $2 ORDER BY s.created_at,s.id FOR UPDATE OF s", plan.ID, now)
+	if err != nil {
+		return 0, err
+	}
+	subs, err := collectSubs(rows)
 	if err != nil {
 		return 0, err
 	}
@@ -85,7 +92,7 @@ func (s *Service) syncPlanRuleFields(ctx context.Context, q db.Querier, plan *Pl
 		changed := false
 		for i, old := range sub.Rules {
 			next, ok := byID[old.ID]
-			if !ok {
+			if !ok || (!patch.SyncSubscriptionLimits && !patch.SyncSubscriptionWeights) {
 				continue
 			}
 			if !compatibleRule(old, next, patch.SyncSubscriptionWeights) {
@@ -102,6 +109,21 @@ func (s *Service) syncPlanRuleFields(ctx context.Context, q db.Querier, plan *Pl
 			if patch.SyncSubscriptionLimits && old.Limit != next.Limit {
 				sub.Rules[i].Limit = next.Limit
 				changed = true
+			}
+		}
+		if patch.SyncSubscriptionRules {
+			existing := map[string]bool{}
+			for _, rule := range sub.Rules {
+				existing[rule.ID] = true
+			}
+			for _, rule := range plan.Rules {
+				if !existing[rule.ID] {
+					sub.Rules = append(sub.Rules, rule)
+					changed = true
+				}
+			}
+			if len(sub.Rules) > maxRules {
+				return 0, invalid(map[string]any{"syncSubscriptionRules": fmt.Sprintf("订阅 %s 合并后超过 %d 条规则", sub.ID, maxRules)})
 			}
 		}
 		if changed {

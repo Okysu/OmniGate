@@ -1030,6 +1030,7 @@ export type PlanPatch = Partial<PlanInput> & {
   syncSubscriptionModels?: boolean
   /** Copy compatible limits into existing active subscriptions; preserve usage and windows. */
   syncSubscriptionLimits?: boolean
+  syncSubscriptionRules?: boolean
   syncSubscriptionWeights?: boolean
 }
 

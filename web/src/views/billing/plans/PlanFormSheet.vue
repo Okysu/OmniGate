@@ -43,13 +43,14 @@ const isEdit = computed(() => current.value !== null)
 /** Edit only: also give the plan's active subscriptions the new model list. */
 const syncModels = ref(false)
 const syncLimits = ref(false)
+const syncRules = ref(false)
 const syncWeights = ref(false)
-const modelsChanged = computed(() => !!current.value && [...form.models].sort().join(',') !== [...current.value.models].sort().join(','))
 
 function reset(p: Plan | null) {
   current.value = p
   syncModels.value = false
   syncLimits.value = false
+  syncRules.value = false
   syncWeights.value = false
   Object.assign(form, p ? formFromPlan(p) : emptyPlanForm())
   if (!p && props.activity) { form.hidden = true; form.stackable = true; form.durationN = 7; form.durationUnit = 'd' }
@@ -150,7 +151,7 @@ async function submit() {
   try {
     const body = buildPlanPayload(form)
     const saved = current.value
-      ? await plansApi.update(current.value.id, { ...body, version: current.value.version, syncSubscriptionModels: modelsChanged.value && syncModels.value, syncSubscriptionLimits: syncLimits.value, syncSubscriptionWeights: syncWeights.value })
+      ? await plansApi.update(current.value.id, { ...body, version: current.value.version, syncSubscriptionModels: syncModels.value, syncSubscriptionRules: syncRules.value, syncSubscriptionLimits: syncLimits.value, syncSubscriptionWeights: syncWeights.value })
       : await plansApi.create(body)
     toast.success(current.value ? '套餐已保存' : '套餐已创建')
     emit('saved', saved, !current.value)
@@ -302,7 +303,7 @@ async function reloadLatest() {
           <FormField for="plan-models" :error="errors.models" hint="订阅只覆盖这些逻辑模型的请求；留空表示全部模型。未覆盖的模型照常从钱包扣费。可输入列表外的模型名。">
             <MultiSelect id="plan-models" v-model="form.models" :options="planModelOptions" :loading="modelsLoading" allow-custom empty-label="全部模型" placeholder="搜索或输入模型名" />
           </FormField>
-          <div v-if="isEdit && modelsChanged" class="flex items-start justify-between gap-4 rounded-lg border p-3" data-testid="plan-sync-models">
+          <div v-if="isEdit" class="flex items-start justify-between gap-4 rounded-lg border p-3" data-testid="plan-sync-models">
             <div class="space-y-1">
               <Label for="plan-sync-models">同时更新已开通的有效订阅</Label>
               <p class="text-muted-foreground text-xs">
@@ -326,6 +327,15 @@ async function reloadLatest() {
           <p class="text-muted-foreground text-xs">
             所有适用规则都未超限时，请求才使用套餐额度（不扣钱包）。规则按其计量与窗口独立统计；失败的请求不计入。额度用完后是阻断（429）还是改用钱包按量计费，由用户在「钱包与订阅」中自行设置（默认阻断），API Key 也可单独覆盖。
           </p>
+          <div v-if="isEdit" class="flex items-start justify-between gap-4 rounded-lg border p-3">
+            <div class="space-y-1">
+              <Label for="plan-sync-rules">为已有订阅补充新增额度规则</Label>
+              <p class="text-muted-foreground text-xs">
+                按规则 ID 补入有效订阅缺少的规则，保留原有规则、已用额度、刷新时间与有效期。新增规则从同步后开始计量，不追溯历史；重复同步不会清零。新增模型时请同时开启模型同步。
+              </p>
+            </div>
+            <Switch id="plan-sync-rules" v-model="syncRules" />
+          </div>
           <div v-if="isEdit" class="flex items-start justify-between gap-4 rounded-lg border p-3" data-testid="plan-sync-limits">
             <div class="space-y-1">
               <Label for="plan-sync-limits">同步已有订阅的额度上限</Label>

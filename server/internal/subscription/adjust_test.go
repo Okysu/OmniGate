@@ -1,6 +1,8 @@
 package subscription
 
 import (
+	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -124,4 +126,89 @@ func TestAdjustQuotaPreservesRefreshAndIsAtomic(t *testing.T) {
 
 func sameTime(a, b *time.Time) bool {
 	return (a == nil && b == nil) || (a != nil && b != nil && a.Equal(*b))
+}
+
+func TestSyncMissingRulesPreservesUsageAndExpiry(t *testing.T) {
+	f := newFixture(t)
+	u := f.user(identity.RoleUser)
+	total := Rule{ID: "total", Meter: MeterCharge, Limit: "24", Window: Window{Kind: WindowLifetime}, ModelWeights: map[string]string{"flash": "0.5"}}
+	p := f.plan(PlanInput{Rules: []Rule{total, sessionRule("10")}})
+	v, _ := f.grant(u.ID, p.ID, 1)
+	f.record(v.ID, "flash", protocol.Usage{}, "4", f.now)
+	before := f.rulesOf(u.ID, v.ID)["5h"]
+	hydrogen := Rule{ID: "hydrogen", Meter: MeterCharge, Limit: "12", Window: Window{Kind: WindowLifetime}, Models: []string{"hydrogen"}}
+	rules := []Rule{total, sessionRule("20"), hydrogen}
+	admin := f.user(identity.RoleSystemAdmin)
+	updated, err := f.svc.UpdatePlan(f.ctx, admin, p.ID, PlanPatch{Version: p.Version, Rules: &rules}, RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.rulesOf(u.ID, v.ID)["hydrogen"]; ok {
+		t.Fatal("added without opt-in")
+	}
+	updated, err = f.svc.UpdatePlan(f.ctx, admin, p.ID, PlanPatch{Version: updated.Version, SyncSubscriptionRules: true}, RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := f.rulesOf(u.ID, v.ID)
+	if got["total"].Used != "2" || got["hydrogen"].Used != "0" || got["5h"].Limit != "10" || !sameTime(got["5h"].WindowStart, before.WindowStart) || !sameTime(got["5h"].ResetsAt, before.ResetsAt) {
+		t.Fatalf("initial sync: %+v", got)
+	}
+	f.record(v.ID, "hydrogen", protocol.Usage{}, "3", f.now.Add(time.Minute))
+	f.record(v.ID, "flash", protocol.Usage{}, "2", f.now.Add(2*time.Minute))
+	_, err = f.svc.UpdatePlan(f.ctx, admin, p.ID, PlanPatch{Version: updated.Version, SyncSubscriptionRules: true}, RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = f.rulesOf(u.ID, v.ID)
+	if got["total"].Used != "6" || got["hydrogen"].Used != "3" || got["hydrogen"].Remaining != "9" {
+		t.Fatalf("repeat sync: %+v", got)
+	}
+	sub, err := getSub(f.ctx, f.pool, v.ID, false)
+	if err != nil || len(sub.Rules) != 3 || !sub.StartsAt.Equal(v.StartsAt) || !sub.EndsAt.Equal(v.EndsAt) {
+		t.Fatalf("snapshot: %+v %v", sub, err)
+	}
+}
+
+func TestSyncMissingRulesOverflowRollsBackPlanAndModels(t *testing.T) {
+	f := newFixture(t)
+	u := f.user(identity.RoleUser)
+	rules := make([]Rule, maxRules)
+	for i := range rules {
+		rules[i] = Rule{ID: fmt.Sprintf("old%d", i), Meter: MeterCharge, Limit: "24", Window: Window{Kind: WindowLifetime}}
+	}
+	p := f.plan(PlanInput{Rules: rules})
+	v, _ := f.grant(u.ID, p.ID, 1)
+	next := []Rule{{ID: "new", Meter: MeterCharge, Limit: "12", Window: Window{Kind: WindowLifetime}}}
+	models := []string{"hydrogen"}
+	_, err := f.svc.UpdatePlan(f.ctx, f.user(identity.RoleSystemAdmin), p.ID, PlanPatch{Version: p.Version, Rules: &next, Models: &models, SyncSubscriptionRules: true, SyncSubscriptionModels: true}, RequestMeta{})
+	if err == nil {
+		t.Fatal("accepted oversized merged snapshot")
+	}
+	stored, _ := f.svc.GetPlan(f.ctx, p.ID)
+	sub, _ := getSub(f.ctx, f.pool, v.ID, false)
+	if stored.Version != p.Version || len(stored.Rules) != maxRules || len(sub.Rules) != maxRules || !reflect.DeepEqual(sub.Models, v.Models) {
+		t.Fatal("failed sync partially committed")
+	}
+}
+
+func TestSyncMissingRulesAndModelsIncludesFutureSubscriptions(t *testing.T) {
+	f := newFixture(t)
+	u := f.user(identity.RoleUser)
+	p := f.plan(PlanInput{Rules: []Rule{sessionRule("10")}})
+	v, _ := f.grant(u.ID, p.ID, 1)
+	starts := f.now.Add(time.Hour)
+	if _, err := f.pool.Exec(f.ctx, "UPDATE subscriptions SET starts_at = $2 WHERE id = $1", v.ID, starts); err != nil {
+		t.Fatal(err)
+	}
+	rules := []Rule{sessionRule("10"), {ID: "hydrogen", Meter: MeterCharge, Limit: "12", Window: Window{Kind: WindowLifetime}, Models: []string{"hydrogen"}}}
+	models := []string{"hydrogen"}
+	_, err := f.svc.UpdatePlan(f.ctx, f.user(identity.RoleSystemAdmin), p.ID, PlanPatch{Version: p.Version, Rules: &rules, Models: &models, SyncSubscriptionRules: true, SyncSubscriptionModels: true}, RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := getSub(f.ctx, f.pool, v.ID, false)
+	if err != nil || len(sub.Rules) != 2 || !reflect.DeepEqual(sub.Models, models) || !sub.StartsAt.Equal(starts) || !sub.EndsAt.Equal(v.EndsAt) {
+		t.Fatalf("future snapshot: %+v %v", sub, err)
+	}
 }
