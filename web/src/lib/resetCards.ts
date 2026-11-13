@@ -1,3 +1,4 @@
+import type { AudienceFilter } from './audience'
 // Quota reset cards (phase11-api.md §2): labels, grouping of the user's cards, the
 // before → after preview of the rules a card resets, and the admin issue form.
 // Pure functions: money formatting is injected (`useCurrency().money`).
@@ -189,6 +190,7 @@ export const CARD_TARGET_LABELS: Record<CardTargetType, string> = {
 export type IssueTargetType = 'users' | 'filter'
 
 export interface IssueForm {
+  audience?: AudienceFilter
   kind: ResetCardKind
   quantity: number | string
   targetType: IssueTargetType
@@ -214,11 +216,12 @@ function quantityOk(v: number | string): boolean {
 }
 
 /** The target, or null while it is incomplete. */
-export function buildCardTarget(f: Pick<IssueForm, 'targetType' | 'userIds' | 'groupIds' | 'targetPlanIds'>): ResetCardTarget | null {
+export function buildCardTarget(f: Pick<IssueForm, 'targetType' | 'userIds' | 'groupIds' | 'targetPlanIds' | 'audience'>): ResetCardTarget | null {
   if (f.targetType === 'users') {
     const ids = [...new Set(f.userIds)]
     return ids.length ? { type: 'users', userIds: ids } : null
   }
+  if (f.audience) return { type: 'filter', filter: f.audience }
   return { type: 'filter', groupIds: [...new Set(f.groupIds)], planIds: [...new Set(f.targetPlanIds)] }
 }
 
@@ -278,6 +281,7 @@ export function targetSummary(t: ResetCardTarget): string {
     case 'all':
       return '全部用户'
     case 'filter': {
+      if (t.filter) return '按组合条件筛选的用户'
       const groups = t.groupNames?.length ? t.groupNames : (t.groupIds ?? []).map(id => id.slice(0, 8))
       const plans = t.planNames?.length ? t.planNames : (t.planIds ?? []).map(id => id.slice(0, 8))
       const parts = [

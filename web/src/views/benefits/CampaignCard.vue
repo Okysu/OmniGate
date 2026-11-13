@@ -6,7 +6,7 @@ import { Gift } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { campaignState } from '@/lib/benefits'
+import { campaignRewardTitle, campaignState } from '@/lib/benefits'
 const props = defineProps<{ campaign: PublicCampaign }>()
 const now = ref(Date.now())
 const timer = setInterval(() => { now.value = Date.now() }, 30000)
@@ -31,7 +31,7 @@ const state = computed(() => campaignState(props.campaign, now.value))
         {{ campaign.description }}
       </p>
       <p class="text-xl font-semibold">
-        {{ campaign.rewardType === 'balance' ? `$${campaign.amount} 余额` : campaign.plan?.name }}
+        {{ campaignRewardTitle(campaign) }}
       </p>
       <div class="text-muted-foreground space-y-1 text-xs">
         <p>{{ Number(campaign.price) > 0 ? `$${campaign.price} / 次` : '免费领取' }} · 每人 {{ campaign.perUserLimit }} 次</p>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AudienceFilterFields from '@/components/AudienceFilterFields.vue'
+import { emptyAudience } from '@/lib/audience'
 import type { IssueForm, IssueTargetType } from '@/lib/resetCards'
 import type { BulkSubscriptionResult, Plan, ResetCardBatch, ResetCardIssueInput, UserGroup } from '@/lib/types'
 import { computed, reactive, ref, watch } from 'vue'
@@ -39,7 +41,7 @@ const emit = defineEmits<{ issued: [batch: ResetCardBatch] }>()
 const auth = useAuthStore()
 const canListGroups = computed(() => auth.can('users.read'))
 
-const form = reactive<IssueForm>(emptyIssueForm())
+const form = reactive<IssueForm>({ ...emptyIssueForm(), audience: emptyAudience() })
 const errors = ref<Record<string, string>>({})
 const formError = ref<string | null>(null)
 const saving = ref(false)
@@ -67,7 +69,7 @@ async function loadRefs() {
 watch(open, (v) => {
   if (!v)
     return
-  Object.assign(form, emptyIssueForm())
+  Object.assign(form, emptyIssueForm(), { audience: emptyAudience() })
   errors.value = {}
   formError.value = null
   void loadRefs()
@@ -86,7 +88,6 @@ function planLabel(p: Plan): string {
   return `${p.name}${p.status === 'archived' ? '（已下架）' : ''}`
 }
 const planOptions = computed(() => plans.value.map(p => ({ value: p.id, label: planLabel(p) })))
-const groupOptions = computed(() => groups.value.map(g => ({ value: g.id, label: g.name, hint: `${g.members} 人` })))
 
 const body = computed<ResetCardIssueInput | null>(() => buildIssueInput(form))
 async function dryRun(b: ResetCardIssueInput): Promise<BulkSubscriptionResult> {
@@ -181,19 +182,7 @@ async function submit() {
             已选 {{ form.userIds.length }} 位（最多 1000 位）；停用的用户不会收到。
           </p>
         </div>
-        <div v-else class="space-y-3 rounded-lg border p-3" data-testid="card-filter">
-          <div class="grid gap-4 sm:grid-cols-2">
-            <FormField label="用户组" for="card-groups" :hint="canListGroups ? '可多选；不选表示全部用户组' : '没有查看用户组的权限'">
-              <MultiSelect id="card-groups" v-model="form.groupIds" :options="groupOptions" :loading="refsLoading" :disabled="!canListGroups" empty-label="全部用户组" placeholder="搜索用户组" />
-            </FormField>
-            <FormField label="持有套餐" for="card-target-plans" hint="可多选；持有其中任一套餐有效订阅的用户。不选表示不限">
-              <MultiSelect id="card-target-plans" v-model="form.targetPlanIds" :options="planOptions" :loading="refsLoading" empty-label="不限套餐" placeholder="搜索套餐" />
-            </FormField>
-          </div>
-          <p class="text-muted-foreground text-xs">
-            两个条件同时选择时取交集；都不选则发给发放时的全部正常状态用户（之后注册的用户不会收到）。
-          </p>
-        </div>
+        <AudienceFilterFields v-else-if="form.audience" v-model="form.audience" :plans="plans" />
 
         <FormField label="限定套餐" for="card-plans" :error="errors.planIds" hint="不选表示可用于任何套餐的订阅。">
           <MultiSelect id="card-plans" v-model="form.planIds" :options="planOptions" :loading="refsLoading" empty-label="不限套餐" placeholder="搜索套餐" />

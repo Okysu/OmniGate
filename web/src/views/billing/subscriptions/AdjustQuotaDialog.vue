@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { emptyAudience } from '@/lib/audience'
 import type { AdjustQuotaInput, Plan, Subscription } from '@/lib/types'
 import { computed, ref, watch } from 'vue'
 import { Loader2 } from '@lucide/vue'
@@ -23,6 +24,7 @@ const emit = defineEmits<{ done: [] }>()
 const mode = ref<TargetMode>('selected')
 const planIds = ref<string[]>([])
 const groupIds = ref<string[]>([])
+const audience = ref(emptyAudience())
 const ruleId = ref('')
 const limit = ref('')
 const remaining = ref('')
@@ -39,6 +41,7 @@ watch(open, (v) => {
   mode.value = props.single || props.selected.length ? 'selected' : 'plan'
   planIds.value = props.initialPlanId ? [props.initialPlanId] : []
   groupIds.value = []
+  audience.value = emptyAudience()
   ruleId.value = options.value[0]?.id ?? ''
   limit.value = ''
   remaining.value = ''
@@ -52,7 +55,7 @@ watch(options, (v) => {
 })
 const currentRule = computed(() => props.single?.rules.find(r => r.id === ruleId.value))
 const body = computed<AdjustQuotaInput | null>(() => {
-  const target = buildTarget(effectiveMode.value, sources.value.map(s => s.id), planIds.value, groupIds.value)
+  const target = buildTarget(effectiveMode.value, sources.value.map(s => s.id), planIds.value, groupIds.value, audience.value)
   if (targetIsEmpty(target) || !ruleId.value || (!limit.value.trim() && !remaining.value.trim()))
     return null
   return { target, ruleId: ruleId.value, ...(limit.value.trim() ? { limit: limit.value.trim() } : {}), ...(remaining.value.trim() ? { remaining: remaining.value.trim() } : {}), note: note.value.trim() }
@@ -88,7 +91,7 @@ async function submit() {
         <DialogDescription>修改已开通订阅的额度上限或当前余量，保留原刷新时间与到期时间。只改上限时保留已用量；填写余量时调整当前窗口用量。操作写入审计。</DialogDescription>
       </DialogHeader>
       <form id="adjust-quota-form" class="space-y-4" @submit.prevent="submit">
-        <BulkTargetFields v-model:mode="mode" v-model:plan-ids="planIds" v-model:group-ids="groupIds" :selected-count="selected.length" :plans="plans" :single="single" id-prefix="adjust" />
+        <BulkTargetFields v-model:filter="audience" v-model:mode="mode" v-model:plan-ids="planIds" v-model:group-ids="groupIds" :selected-count="selected.length" :plans="plans" :single="single" id-prefix="adjust" />
         <FormField label="额度规则" for="adjust-rule" :error="errors.ruleId" required>
           <Select v-model="ruleId">
             <SelectTrigger id="adjust-rule" class="w-full">

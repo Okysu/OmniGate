@@ -6,7 +6,7 @@ import type { Plan } from './types'
 
 describe('活动写入请求', () => {
   it('新建时不发送空 UUID，编辑时只通过 URL 指定活动 ID', async () => {
-    const c = { ...emptyCampaign(), title: '测试活动', amount: '1', stock: -1 }
+    const c = { ...emptyCampaign(), title: '测试活动', stock: -1 }
     const post = vi.spyOn(api, 'post').mockResolvedValue(c)
     const put = vi.spyOn(api, 'put').mockResolvedValue(c)
     try {
@@ -14,7 +14,7 @@ describe('活动写入请求', () => {
       const created = post.mock.calls[0]!
       expect(created[0]).toBe('/api/admin/benefits/campaigns')
       expect(created[1]).not.toHaveProperty('id')
-      expect(created[1]).toMatchObject({ title: '测试活动', amount: '1', stock: -1, perUserLimit: 1 })
+      expect(created[1]).toMatchObject({ title: '测试活动', rewards: [{ type: 'balance', amount: '1' }], stock: -1, perUserLimit: 1 })
       await benefitsApi.save({ ...c, id: 'activity-1', version: 3 })
       expect(put.mock.calls[0]![0]).toBe('/api/admin/benefits/campaigns/activity-1')
       expect(put.mock.calls[0]![1]).not.toHaveProperty('id')

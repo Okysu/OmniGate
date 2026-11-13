@@ -89,7 +89,9 @@ type LotteryStatus struct {
 	TodayEarned bool   `json:"todayEarned"`
 }
 
-const chanceQuery = `SELECT (SELECT count(*) FROM lottery_days WHERE user_id=$1 AND earned) -
+const earnedChances = `(SELECT count(*) FROM lottery_days WHERE user_id=$1 AND earned) + (SELECT COALESCE(sum(lottery_chances),0) FROM benefit_claims WHERE user_id=$1)`
+
+const chanceQuery = `SELECT ` + earnedChances + ` -
  (SELECT COALESCE(sum(draw_count),0) FROM lottery_draws WHERE user_id=$1)`
 
 func (s *Service) Lottery(ctx context.Context, user uuid.UUID) (LotteryStatus, error) {
@@ -101,7 +103,7 @@ func (s *Service) Lottery(ctx context.Context, user uuid.UUID) (LotteryStatus, e
 	status.LotteryConfig = c
 	today := lottery.Day(s.now())
 	var spend int64
-	err = s.pool.QueryRow(ctx, chanceQuery+`,(SELECT count(*) FROM lottery_days WHERE user_id=$1 AND earned),
+	err = s.pool.QueryRow(ctx, chanceQuery+`,`+earnedChances+`,
  (SELECT COALESCE(sum(spent_nano),0) FROM lottery_days WHERE user_id=$1 AND day=$2),
  EXISTS(SELECT 1 FROM lottery_days WHERE user_id=$1 AND day=$2 AND earned)`, user, today).Scan(&status.Available, &status.Earned, &spend, &status.TodayEarned)
 	status.TodaySpent = money.Amount(spend).String()

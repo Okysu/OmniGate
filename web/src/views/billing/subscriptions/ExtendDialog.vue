@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { emptyAudience } from '@/lib/audience'
 import type { ExtendUnit, TargetMode } from '@/lib/subscriptionBulk'
 import type { BulkSubscriptionResult, ExtendSubscriptionsInput, Plan, Subscription } from '@/lib/types'
 import { computed, ref, watch } from 'vue'
@@ -51,6 +52,7 @@ const PRESETS: { label: string, n: number, unit: ExtendUnit }[] = [
 const mode = ref<TargetMode>('plan')
 const planIds = ref<string[]>([])
 const groupIds = ref<string[]>([])
+const audience = ref(emptyAudience())
 const amount = ref<string | number>('7')
 const unit = ref<ExtendUnit>('d')
 const note = ref('')
@@ -64,6 +66,7 @@ watch(open, (v) => {
   mode.value = props.single || props.selected.length ? 'selected' : 'plan'
   planIds.value = props.initialPlanId && props.plans.some(p => p.id === props.initialPlanId) ? [props.initialPlanId] : []
   groupIds.value = []
+  audience.value = emptyAudience()
   amount.value = '7'
   unit.value = 'd'
   note.value = ''
@@ -72,7 +75,7 @@ watch(open, (v) => {
 }, { flush: 'sync' })
 
 const effMode = computed<TargetMode>(() => (props.single ? 'selected' : mode.value))
-const target = computed(() => buildTarget(effMode.value, (props.single ? [props.single] : props.selected).map(s => s.id), planIds.value, groupIds.value))
+const target = computed(() => buildTarget(effMode.value, (props.single ? [props.single] : props.selected).map(s => s.id), planIds.value, groupIds.value, audience.value))
 const durationErr = computed(() => extendDurationError(amount.value, unit.value))
 const duration = computed(() => (durationErr.value ? null : buildDuration(amount.value, unit.value)))
 
@@ -137,7 +140,7 @@ async function submit() {
       </DialogHeader>
 
       <form id="extend-form" class="space-y-4" novalidate @submit.prevent="submit">
-        <BulkTargetFields v-model:mode="mode" v-model:plan-ids="planIds" v-model:group-ids="groupIds" :selected-count="selected.length" :plans="plans" :single="single" id-prefix="extend" />
+        <BulkTargetFields v-model:filter="audience" v-model:mode="mode" v-model:plan-ids="planIds" v-model:group-ids="groupIds" :selected-count="selected.length" :plans="plans" :single="single" id-prefix="extend" />
 
         <FormField label="延长时长" for="extend-amount" required :error="errors.duration ?? (amount === '' ? null : durationErr)" hint="1 小时到 366 天。">
           <div class="space-y-2">

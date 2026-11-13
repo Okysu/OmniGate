@@ -130,12 +130,13 @@ type issueCardsBody struct {
 }
 
 type cardTargetBody struct {
-	Type     string   `json:"type"`
-	UserIDs  []string `json:"userIds"`
-	GroupID  *string  `json:"groupId"`
-	PlanID   *string  `json:"planId"`
-	GroupIDs []string `json:"groupIds"`
-	PlanIDs  []string `json:"planIds"`
+	Filter   *AudienceFilter `json:"filter,omitempty"`
+	Type     string          `json:"type"`
+	UserIDs  []string        `json:"userIds"`
+	GroupID  *string         `json:"groupId"`
+	PlanID   *string         `json:"planId"`
+	GroupIDs []string        `json:"groupIds"`
+	PlanIDs  []string        `json:"planIds"`
 }
 
 // parseCardTarget decodes {type: users, userIds} | {type: filter, groupIds?,
@@ -148,7 +149,17 @@ func parseCardTarget(raw json.RawMessage, details map[string]any) CardTarget {
 		details["target"] = "必填：{type: users, userIds} | {type: filter, groupIds?, planIds?} | {type: group, groupId} | {type: plan, planId} | {type: all}"
 		return CardTarget{}
 	}
-	t := CardTarget{Type: b.Type}
+	t := CardTarget{Type: b.Type, Filter: b.Filter}
+	if b.Filter != nil {
+		if b.Type != CardTargetFilter || len(b.GroupIDs)+len(b.PlanIDs)+len(b.UserIDs) > 0 || b.GroupID != nil || b.PlanID != nil {
+			details["target"] = "filter 不能与旧版筛选字段混用"
+			return CardTarget{}
+		}
+		if err := b.Filter.Validate(); err != nil {
+			details["target"] = err.Error()
+			return CardTarget{}
+		}
+	}
 	parse := func(v, what string) *uuid.UUID {
 		id, err := uuid.Parse(v)
 		if err != nil {

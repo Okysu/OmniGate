@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import AudienceFilterFields from '@/components/AudienceFilterFields.vue'
+import { emptyAudience } from '@/lib/audience'
+import { useAuthStore } from '@/stores/auth'
 import type { NotificationSeverity, SendNotificationInput } from '@/lib/types'
 import { computed, ref, watch } from 'vue'
 import { Loader2 } from '@lucide/vue'
@@ -19,6 +22,9 @@ import { useGroupsStore } from '@/stores/groups'
 const props = defineProps<{ initialUserIds?: string[], initialGroupIds?: string[] }>()
 const open = defineModel<boolean>('open', { required: true })
 const groups = useGroupsStore()
+const auth = useAuthStore()
+const targetMode = ref('list')
+const audience = ref(emptyAudience())
 const userIds = ref<string[]>([])
 const groupIds = ref<string[]>([])
 const title = ref('')
@@ -34,6 +40,8 @@ watch(open, (v) => {
     return
   userIds.value = [...(props.initialUserIds ?? [])]
   groupIds.value = [...(props.initialGroupIds ?? [])]
+  targetMode.value = 'list'
+  audience.value = emptyAudience()
   title.value = ''
   content.value = ''
   link.value = ''
@@ -45,9 +53,9 @@ watch(open, (v) => {
 }, { flush: 'sync' })
 const groupOptions = computed(() => groups.sorted.map(g => ({ value: g.id, label: g.name, hint: `${g.members} 人` })))
 const body = computed<SendNotificationInput | null>(() => {
-  if ((!userIds.value.length && !groupIds.value.length) || !title.value.trim() || !content.value.trim() || !idempotencyKey.value)
+  if ((targetMode.value === 'list' && !userIds.value.length && !groupIds.value.length) || !title.value.trim() || !content.value.trim() || !idempotencyKey.value)
     return null
-  return { target: { userIds: userIds.value, groupIds: groupIds.value }, title: title.value.trim(), body: content.value.trim(), link: link.value.trim(), severity: severity.value, idempotencyKey: idempotencyKey.value }
+  return { target: targetMode.value === 'filter' ? { filter: audience.value } : { userIds: userIds.value, groupIds: groupIds.value }, title: title.value.trim(), body: content.value.trim(), link: link.value.trim(), severity: severity.value, idempotencyKey: idempotencyKey.value }
 })
 const dry = useDryRun(body, JSON.stringify, async (b) => {
   const res = await notificationsApi.send(b, { dryRun: true })
@@ -80,13 +88,27 @@ async function submit() {
     <DialogContent class="max-h-[90svh] overflow-y-auto sm:max-w-xl" data-testid="send-notification-dialog">
       <DialogHeader>
         <DialogTitle>发送通知</DialogTitle>
-        <DialogDescription>向指定用户、用户列表或用户组发送站内通知。多个范围取并集并去重，仅发送给启用用户；发送结果写入审计。</DialogDescription>
+        <DialogDescription>向指定用户、用户列表或用户组发送站内通知。指定列表取并集；组合条件取交集。仅发送给正常状态用户，确认前预估人数；发送结果写入审计。</DialogDescription>
       </DialogHeader>
       <form id="send-notification-form" class="space-y-4" @submit.prevent="submit">
-        <FormField label="指定用户" for="notify-users" :error="errors.target">
+        <FormField v-if="auth.can('billing.manage')" label="接收范围">
+          <Select v-model="targetMode">
+            <SelectTrigger class="w-full">
+              <SelectValue />
+            </SelectTrigger><SelectContent>
+              <SelectItem value="list">
+                指定用户 / 用户组（取并集）
+              </SelectItem><SelectItem value="filter">
+                组合条件（全部满足）
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </FormField>
+        <AudienceFilterFields v-if="targetMode === 'filter'" v-model="audience" />
+        <FormField v-if="targetMode === 'list'" label="指定用户" for="notify-users" :error="errors.target">
           <UserPicker id="notify-users" v-model="userIds" :disabled="saving" />
         </FormField>
-        <FormField label="用户组" for="notify-groups" hint="可多选；不选用户或用户组不会发送给任何人">
+        <FormField v-if="targetMode === 'list'" label="用户组" for="notify-groups" hint="可多选；不选用户或用户组不会发送给任何人">
           <MultiSelect id="notify-groups" v-model="groupIds" :options="groupOptions" :disabled="saving" empty-label="不选择用户组" placeholder="搜索用户组" />
         </FormField>
         <FormField label="标题" for="notify-title" required :error="errors.title">

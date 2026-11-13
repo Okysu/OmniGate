@@ -18,13 +18,16 @@ import (
 	"omnigate/internal/authz"
 	"omnigate/internal/platform/db"
 	"omnigate/internal/platform/httpx"
+	"omnigate/internal/subscription"
+	"time"
 )
 
 // MessageTarget is the union of explicit users and members of selected groups.
 // An empty target never means everyone.
 type MessageTarget struct {
-	UserIDs  []uuid.UUID `json:"userIds"`
-	GroupIDs []uuid.UUID `json:"groupIds"`
+	Filter   *subscription.AudienceFilter `json:"filter,omitempty"`
+	UserIDs  []uuid.UUID                  `json:"userIds"`
+	GroupIDs []uuid.UUID                  `json:"groupIds"`
 }
 
 type SendMessageInput struct {
@@ -67,7 +70,15 @@ func validateMessage(in *SendMessageInput) error {
 		}
 	}
 	in.Target.UserIDs, in.Target.GroupIDs = dedupeIDs(in.Target.UserIDs), dedupeIDs(in.Target.GroupIDs)
-	if len(in.Target.UserIDs)+len(in.Target.GroupIDs) == 0 {
+	if in.Target.Filter != nil {
+		if len(in.Target.UserIDs)+len(in.Target.GroupIDs) > 0 {
+			details["target"] = "filter 不能与旧版接收人字段混用"
+		}
+		if err := in.Target.Filter.Validate(); err != nil {
+			details["target"] = err.Error()
+		}
+	}
+	if in.Target.Filter == nil && len(in.Target.UserIDs)+len(in.Target.GroupIDs) == 0 {
 		details["target"] = "请指定用户或用户组"
 	}
 	in.Title, in.Body, in.Link = strings.TrimSpace(in.Title), strings.TrimSpace(in.Body), strings.TrimSpace(in.Link)
@@ -99,6 +110,20 @@ func validateMessage(in *SendMessageInput) error {
 }
 
 func (s *Service) messageRecipients(ctx context.Context, target MessageTarget) ([]uuid.UUID, error) {
+	if target.Filter != nil {
+		users, _, err := subscription.AudienceUsers(ctx, s.pool, *target.Filter, time.Now(), nil)
+		if err != nil {
+			return nil, err
+		}
+		if len(users) > 10000 {
+			return nil, apperr.Validation("单次最多发送给 10000 位用户", nil)
+		}
+		ids := []uuid.UUID{}
+		for _, u := range users {
+			ids = append(ids, u.ID)
+		}
+		return ids, nil
+	}
 	for _, check := range []struct {
 		table, label string
 		ids          []uuid.UUID
@@ -163,6 +188,9 @@ func (s *Service) previousMessage(ctx context.Context, key, fingerprint string) 
 // if the recipient explicitly enabled it. Fan-out and audit commit atomically.
 func (s *Service) SendMessage(ctx context.Context, actor *authz.Principal, in SendMessageInput, dry bool, meta RequestMeta) (*SendMessageResult, error) {
 	if !actor.Can(authz.UsersWrite) {
+		return nil, apperr.Forbidden()
+	}
+	if in.Target.Filter != nil && !actor.Can(authz.BillingManage) {
 		return nil, apperr.Forbidden()
 	}
 	if err := validateMessage(&in); err != nil {

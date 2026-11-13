@@ -1,3 +1,4 @@
+import type { AudienceFilter } from './audience'
 // Types mirroring the backend JSON contract (camelCase).
 
 export type Role = 'system_admin' | 'channel_admin' | 'user' | 'auditor'
@@ -1206,7 +1207,7 @@ export interface GrantInput {
  * subscription of a plan (`planId: null` = every plan).
  */
 /** Explicit subscriptions, or every active one matching the filters (any of planIds AND a member of any of groupIds; [] = no restriction). */
-export type SubscriptionTarget = { ids: string[] } | { status: 'active', planIds: string[], groupIds: string[] }
+export type SubscriptionTarget = { ids: string[] } | { filter: AudienceFilter } | { status: 'active', planIds: string[], groupIds: string[] }
 
 /** `POST /api/admin/billing/subscriptions/reset-quota` body. */
 export interface ResetQuotaInput {
@@ -1227,7 +1228,7 @@ export interface AdjustQuotaInput {
 }
 
 export interface SendNotificationInput {
-  target: { userIds: string[], groupIds: string[] }
+  target: { userIds: string[], groupIds: string[] } | { filter: AudienceFilter }
   title: string
   body: string
   link: string
@@ -1270,7 +1271,7 @@ export type ResetCardTarget =
   | { type: 'plan', planId: string, planName?: string }
   | { type: 'all' }
   /** Any of the groups AND an active subscription of any of the plans ([] = no restriction). */
-  | { type: 'filter', groupIds?: string[], planIds?: string[], groupNames?: string[], planNames?: string[] }
+  | { type: 'filter', filter?: AudienceFilter, groupIds?: string[], planIds?: string[], groupNames?: string[], planNames?: string[] }
 
 export interface ResetCardCounts {
   issued: number

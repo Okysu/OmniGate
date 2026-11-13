@@ -73,6 +73,7 @@ func (h *Handler) AdminRoutes(r chi.Router) {
 	m.Post("/billing/subscriptions/adjust-quota", h.adjustQuota)
 	m.Post("/billing/subscriptions/extend", h.extend)
 	h.cardAdminRoutes(r)
+	m.Post("/billing/audience/preview", h.previewAudience)
 }
 
 // ---- JSON views ----
@@ -480,6 +481,22 @@ func parseTarget(raw json.RawMessage, details map[string]any) Target {
 		details["target"] = "必填：{ids} 或 {status: 'active', planIds?, groupIds?}"
 		return Target{}
 	}
+	if rawFilter, ok := obj["filter"]; ok {
+		var f AudienceFilter
+		if isNullJSON(rawFilter) || decodeAudienceFilter(rawFilter, &f) != nil {
+			details["target"] = "filter 必须是筛选对象"
+			return Target{}
+		}
+		if len(obj) != 1 {
+			details["target"] = "filter 不能与旧版筛选字段混用"
+			return Target{}
+		}
+		if err := f.Validate(); err != nil {
+			details["target"] = err.Error()
+			return Target{}
+		}
+		return Target{ByPlan: true, Filter: &f}
+	}
 	if ids, ok := obj["ids"]; ok {
 		var list []string
 		if json.Unmarshal(ids, &list) != nil {
@@ -616,3 +633,17 @@ func (h *Handler) meters(w http.ResponseWriter, r *http.Request) {
 
 // CatalogView renders one catalog entry (GET /api/plans).
 func CatalogView(p *Plan) CatalogPlanJSON { return catalogViews([]*Plan{p})[0] }
+
+func (h *Handler) previewAudience(w http.ResponseWriter, r *http.Request) {
+	var f AudienceFilter
+	if err := httpx.DecodeJSON(r, &f); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	out, err := PreviewAudience(r.Context(), h.svc.pool, f, h.svc.now())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}

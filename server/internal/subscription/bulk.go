@@ -39,6 +39,7 @@ const (
 // member of any of GroupIDs (empty = every group). Only active, unexpired
 // subscriptions are ever affected.
 type Target struct {
+	Filter   *AudienceFilter `json:"filter,omitempty"`
 	IDs      []uuid.UUID
 	ByPlan   bool // filter mode
 	PlanIDs  []uuid.UUID
@@ -47,6 +48,9 @@ type Target struct {
 
 // auditJSON renders the target as in the request.
 func (t Target) auditJSON() map[string]any {
+	if t.Filter != nil {
+		return map[string]any{"filter": t.Filter}
+	}
 	if !t.ByPlan {
 		return map[string]any{"ids": t.IDs}
 	}
@@ -117,6 +121,12 @@ type BulkNotice struct {
 func (n BulkNotice) IsReset() bool { return n.Kind == bulkKindReset }
 
 func validateTarget(t Target, details map[string]any) {
+	if t.Filter != nil {
+		if err := t.Filter.Validate(); err != nil {
+			details["target"] = err.Error()
+		}
+		return
+	}
 	if !t.ByPlan && (len(t.IDs) == 0 || len(t.IDs) > maxBulkIDs) {
 		details["target"] = fmt.Sprintf("ids 必须有 1 到 %d 个订阅 ID", maxBulkIDs)
 	}
@@ -136,32 +146,18 @@ func validateNote(note string, details map[string]any) string {
 // targetSubs loads the active subscriptions of t at now (locked for update
 // unless dry), oldest first.
 func (s *Service) targetSubs(ctx context.Context, q db.Querier, t Target, now time.Time, lock bool) ([]*Subscription, error) {
-	where, args := ` WHERE s.status = 'active' AND s.ends_at > $1`, []any{now}
-	switch {
-	case !t.ByPlan:
-		args = append(args, t.IDs)
-		where += ` AND s.id = ANY($2)`
-	default:
-		if err := checkExist(ctx, q, "plans", "套餐", t.PlanIDs); err != nil {
-			return nil, err
-		}
-		if err := checkExist(ctx, q, "user_groups", "用户组", t.GroupIDs); err != nil {
-			return nil, err
-		}
-		if len(t.PlanIDs) > 0 {
-			args = append(args, t.PlanIDs)
-			where += fmt.Sprintf(` AND s.plan_id = ANY($%d)`, len(args))
-		}
-		if len(t.GroupIDs) > 0 {
-			args = append(args, t.GroupIDs)
-			where += fmt.Sprintf(` AND s.user_id IN (SELECT id FROM users WHERE group_id = ANY($%d))`, len(args))
-		}
+	if t.Filter != nil {
+		return AudienceSubscriptions(ctx, q, *t.Filter, now, lock, nil)
 	}
-	sql := `SELECT ` + subCols + subFrom + where + ` ORDER BY s.created_at, s.id`
+	if t.ByPlan {
+		return AudienceSubscriptions(ctx, q, AudienceFilter{PlanIDs: t.PlanIDs, GroupIDs: t.GroupIDs}, now, lock, nil)
+	}
+	// Explicit legacy selections retain their ability to manage disabled users.
+	sql := "SELECT " + subCols + subFrom + " WHERE s.status='active' AND s.starts_at <= $1 AND s.ends_at > $1 AND s.id = ANY($2) ORDER BY s.created_at,s.id"
 	if lock {
-		sql += ` FOR UPDATE OF s`
+		sql += " FOR UPDATE OF s"
 	}
-	rows, err := q.Query(ctx, sql, args...)
+	rows, err := q.Query(ctx, sql, now, t.IDs)
 	if err != nil {
 		return nil, err
 	}

@@ -93,7 +93,9 @@ async function draw(count: number) {
       </template>
       <div v-if="result" role="status" class="rounded-md border p-3">
         <strong>本次 {{ result.rewards.length }} 抽，{{ money(result.total) }} 已到账</strong>
-        <RouterLink to="/console/billing" class="ml-2 text-sm underline">查看钱包流水</RouterLink>
+        <RouterLink to="/console/billing" class="ml-2 text-sm underline">
+          查看钱包流水
+        </RouterLink>
         <p v-if="result.rewards.length > 1" class="text-muted-foreground text-sm">
           {{ result.rewards.map(v => money(v)).join('、') }}
         </p>

@@ -2,9 +2,11 @@ package notify
 
 import (
 	"context"
+	"omnigate/internal/subscription"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"omnigate/internal/identity"
@@ -89,5 +91,26 @@ func TestSendMessageValidation(t *testing.T) {
 		if validateMessage(&in) == nil {
 			t.Fatalf("accepted %+v", in)
 		}
+	}
+}
+
+func TestNotificationSharedAudiencePreview(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	admin := e.user("admin", identity.RoleSystemAdmin)
+	u := e.user("recipient", identity.RoleUser)
+	filter := subscription.AudienceFilter{UserIDs: []uuid.UUID{u}, MinSpend: "0"}
+	expected, err := subscription.PreviewAudience(ctx, e.pool, filter, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := SendMessageInput{Target: MessageTarget{Filter: &filter}, Title: "Preview", Body: "Preview only", IdempotencyKey: uuid.New()}
+	result, err := e.svc.SendMessage(ctx, e.principal(admin, identity.RoleSystemAdmin), in, true, RequestMeta{})
+	if err != nil || result.Recipients != expected.Users || result.Recipients != 1 {
+		t.Fatalf("preview=%+v %v", result, err)
+	}
+	in.Target.UserIDs = []uuid.UUID{u}
+	if _, err = e.svc.SendMessage(ctx, e.principal(admin, identity.RoleSystemAdmin), in, true, RequestMeta{}); err == nil {
+		t.Fatal("mixed union and intersection accepted")
 	}
 }

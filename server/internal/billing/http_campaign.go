@@ -1,7 +1,9 @@
 package billing
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -38,7 +40,37 @@ func (h *Handler) campaignPublicView(r *http.Request, c *Campaign) (map[string]a
 	if c.Conditions.RegisteredBefore != nil {
 		requirements = append(requirements, "注册时间早于 "+c.Conditions.RegisteredBefore.Format("2006-01-02 15:04 MST"))
 	}
-	out := map[string]any{"id": c.ID, "title": c.Title, "description": c.Description, "rewardType": c.RewardType, "amount": c.Amount, "price": c.Price, "stock": c.Stock, "perUserLimit": c.PerUserLimit, "startsAt": c.StartsAt, "endsAt": c.EndsAt, "requirements": requirements}
+	if c.Conditions.NeedsSubscription() {
+		requirements = append(requirements, "持有符合条件的有效订阅")
+	}
+	if c.Conditions.QuotaKind != "" {
+		label := map[string]string{"weekly": "周", "5h": "5 小时", "both": "5 小时或周"}[c.Conditions.QuotaKind]
+		requirements = append(requirements, "订阅含"+label+"额度")
+	}
+	if c.Conditions.ExcludeHiddenPlans {
+		requirements = append(requirements, "不含隐藏活动套餐")
+	}
+	// Only public plan names are disclosed; private user and group IDs remain hidden.
+	for _, item := range []struct {
+		ids   []uuid.UUID
+		label string
+	}{{c.Conditions.PlanIDs, "持有套餐："}, {c.Conditions.ExcludePlanIDs, "符合条件的订阅不含："}} {
+		names := []string{}
+		for _, pid := range item.ids {
+			p, err := subscription.PlanTx(r.Context(), h.svc.pool, pid, h.svc.now(), false)
+			if err != nil {
+				return nil, err
+			}
+			names = append(names, p.Name)
+		}
+		if len(names) > 0 {
+			requirements = append(requirements, item.label+strings.Join(names, "、"))
+		}
+	}
+	if len(c.Conditions.Sources) > 0 {
+		requirements = append(requirements, "订阅来源符合活动要求")
+	}
+	out := map[string]any{"id": c.ID, "title": c.Title, "description": c.Description, "rewardType": c.RewardType, "reward": c.Reward, "rewards": c.rewardItems(), "amount": c.Amount, "price": c.Price, "stock": c.Stock, "perUserLimit": c.PerUserLimit, "startsAt": c.StartsAt, "endsAt": c.EndsAt, "requirements": requirements}
 	if c.PlanID != nil {
 		p, err := subscription.PlanTx(r.Context(), h.svc.pool, *c.PlanID, h.svc.now(), false)
 		if err != nil {
@@ -49,6 +81,24 @@ func (h *Handler) campaignPublicView(r *http.Request, c *Campaign) (map[string]a
 			out["stock"] = p.Stock
 		}
 	}
+	rewardViews := []map[string]any{}
+	for _, reward := range c.rewardItems() {
+		raw, _ := json.Marshal(reward)
+		v := map[string]any{}
+		_ = json.Unmarshal(raw, &v)
+		if reward.PlanID != nil {
+			p, err := subscription.PlanTx(r.Context(), h.svc.pool, *reward.PlanID, h.svc.now(), false)
+			if err != nil {
+				return nil, err
+			}
+			v["plan"] = subscription.CatalogView(p)
+			if p.Stock >= 0 && (out["stock"].(int64) < 0 || p.Stock < out["stock"].(int64)) {
+				out["stock"] = p.Stock
+			}
+		}
+		rewardViews = append(rewardViews, v)
+	}
+	out["rewards"] = rewardViews
 	return out, nil
 }
 

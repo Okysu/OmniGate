@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { benefitsApi, campaignState } from '@/lib/benefits'
+import { benefitsApi, campaignRewardTitle, campaignRewards, rewardTitle, campaignState } from '@/lib/benefits'
 import { useCurrency } from '@/composables/useCurrency'
 import { errorMessage } from '@/lib/api'
 import { formatDuration, ruleSummary } from '@/lib/quota'
@@ -17,6 +17,7 @@ const { money } = useCurrency()
 const route = useRoute()
 const auth = useAuthStore()
 const campaign = ref<PublicCampaign | null>(null)
+const rewards = computed(() => campaign.value ? campaignRewards(campaign.value) : [])
 const error = ref('')
 const claiming = ref(false)
 const count = ref(0)
@@ -41,7 +42,7 @@ async function claim() {
   try {
     await benefitsApi.claim(campaign.value.id, key.value, campaign.value.price)
     key.value = crypto.randomUUID()
-    toast.success(campaign.value.rewardType === 'balance' ? '余额已到账' : '套餐已开通')
+    toast.success('福利已到账：' + campaignRewardTitle(campaign.value))
     await load()
   }
   catch (err) { error.value = errorMessage(err) }
@@ -89,29 +90,44 @@ async function share() {
       </header>
       <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <Card class="gap-8">
-          <CardHeader class="gap-4">
-            <div class="text-muted-foreground flex items-center gap-2 text-sm">
-              <component :is="campaign.rewardType === 'balance' ? Wallet : Package" class="size-4" aria-hidden="true" />
-              {{ campaign.rewardType === 'balance' ? '余额奖励' : '限时套餐' }}
-            </div>
-            <CardTitle class="break-words" :class="campaign.rewardType === 'balance' ? 'text-4xl font-semibold tabular-nums tracking-tight sm:text-5xl' : 'text-2xl leading-tight'">
-              {{ campaign.rewardType === 'balance' ? money(campaign.amount) : campaign.plan?.name }}
-            </CardTitle>
-            <CardDescription>
-              {{ campaign.rewardType === 'balance' ? '领取后直接存入你的账户余额。' : `套餐有效期 ${formatDuration(campaign.plan?.duration ?? '')}，从领取时开始计算。` }}
-            </CardDescription>
+          <CardHeader class="gap-3">
+            <CardTitle class="text-2xl">
+              本次可领取
+            </CardTitle><CardDescription>{{ rewards.length > 1 ? '一次领取以下全部奖励，共用活动条件与领取次数。' : '领取后奖励将直接到账。' }}</CardDescription>
           </CardHeader>
           <CardContent class="space-y-6">
-            <div v-if="campaign.plan" class="bg-muted/50 space-y-3 rounded-lg p-4">
-              <ul class="space-y-2 text-sm">
-                <li v-for="rule in campaign.plan.rules" :key="rule.id" class="flex items-start gap-2">
-                  <Check class="text-muted-foreground mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                  {{ ruleSummary(rule, money) }}
-                </li>
-              </ul>
-              <p class="text-muted-foreground break-words text-xs leading-relaxed">
-                支持模型：{{ campaign.plan.models.join('、') || '全部模型' }}
+            <div v-for="(reward, index) in rewards" :key="index" class="bg-muted/40 space-y-3 rounded-xl border p-4">
+              <div class="flex items-center gap-3">
+                <component :is="reward.type === 'balance' ? Wallet : reward.type === 'subscription' ? Package : Gift" class="size-5 shrink-0" /><h2 class="text-xl font-semibold break-words">
+                  {{ rewardTitle(reward) }}
+                </h2>
+              </div>
+              <p class="text-muted-foreground text-sm leading-relaxed">
+                {{ reward.type === 'balance' ? '存入账户余额，可用于模型消费。' : reward.type === 'lottery' ? '计入可用抽奖次数，可累积用于连抽。' : reward.type === 'reset_card' ? '领取后由你自行使用，保持额度原刷新时间。' : '有效期 ' + formatDuration(reward.plan?.duration ?? '') + '，从领取时计算。' }}
               </p>
+              <p v-if="reward.type === 'reset_card'" class="text-muted-foreground text-sm">
+                {{ reward.validDays ? '领取后 ' + reward.validDays + ' 天内有效' : '长期有效' }}
+              </p>
+              <template v-if="reward.plan">
+                <ul class="space-y-2 text-sm">
+                  <li v-for="rule in reward.plan.rules" :key="rule.id" class="flex items-start gap-2">
+                    <Check class="text-muted-foreground mt-0.5 size-4 shrink-0" />{{ ruleSummary(rule, money) }}
+                  </li>
+                </ul><p class="text-muted-foreground break-words text-xs">
+                  支持模型：{{ reward.plan.models.join('、') || '全部模型' }}
+                </p>
+              </template>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <Button v-if="rewards.some(r => r.type === 'lottery')" as-child variant="outline">
+                <RouterLink to="/console/benefits">
+                  前往抽奖
+                </RouterLink>
+              </Button><Button v-if="rewards.some(r => r.type === 'reset_card' || r.type === 'subscription')" as-child variant="outline">
+                <RouterLink to="/console/billing">
+                  查看钱包与订阅
+                </RouterLink>
+              </Button>
             </div>
             <section class="space-y-3 border-t pt-6" aria-labelledby="requirements-title">
               <h2 id="requirements-title" class="font-medium">

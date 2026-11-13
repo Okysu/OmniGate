@@ -137,12 +137,13 @@ func CardPlanError() *apperr.Error {
 // CardTarget selects the recipients of a batch. Name snapshots (GroupName,
 // PlanName) are filled when the batch is issued.
 type CardTarget struct {
-	Type      string      `json:"type"`
-	UserIDs   []uuid.UUID `json:"userIds,omitempty"`
-	GroupID   *uuid.UUID  `json:"groupId,omitempty"`
-	GroupName string      `json:"groupName,omitempty"`
-	PlanID    *uuid.UUID  `json:"planId,omitempty"`
-	PlanName  string      `json:"planName,omitempty"`
+	Filter    *AudienceFilter `json:"filter,omitempty"`
+	Type      string          `json:"type"`
+	UserIDs   []uuid.UUID     `json:"userIds,omitempty"`
+	GroupID   *uuid.UUID      `json:"groupId,omitempty"`
+	GroupName string          `json:"groupName,omitempty"`
+	PlanID    *uuid.UUID      `json:"planId,omitempty"`
+	PlanName  string          `json:"planName,omitempty"`
 	// filter
 	GroupIDs   []uuid.UUID `json:"groupIds,omitempty"`
 	GroupNames []string    `json:"groupNames,omitempty"`
@@ -312,32 +313,24 @@ func rolesWith(perm authz.Permission) []string {
 // may use cards (billing.own), ordered by id. It fills t's name snapshots and
 // fails with 404 for an unknown group or plan.
 func cardRecipients(ctx context.Context, q db.Querier, t *CardTarget, now time.Time) ([]uuid.UUID, error) {
-	sql, args := `SELECT u.id FROM users u WHERE u.status = 'active' AND u.role = ANY($1)`, []any{rolesWith(authz.BillingOwn)}
+	f := AudienceFilter{}
 	switch t.Type {
 	case CardTargetUsers:
-		args = append(args, t.UserIDs)
-		sql += ` AND u.id = ANY($2)`
+		f.UserIDs = t.UserIDs
 	case CardTargetGroup:
-		err := q.QueryRow(ctx, `SELECT name FROM user_groups WHERE id = $1`, *t.GroupID).Scan(&t.GroupName)
-		if db.IsNoRows(err) {
-			return nil, apperr.NotFound("用户组")
-		}
+		names, err := namesOf(ctx, q, "user_groups", "用户组", []uuid.UUID{*t.GroupID})
 		if err != nil {
 			return nil, err
 		}
-		args = append(args, *t.GroupID)
-		sql += ` AND u.group_id = $2`
+		t.GroupName = names[0]
+		f.GroupIDs = []uuid.UUID{*t.GroupID}
 	case CardTargetPlan:
-		err := q.QueryRow(ctx, `SELECT name FROM plans WHERE id = $1`, *t.PlanID).Scan(&t.PlanName)
-		if db.IsNoRows(err) {
-			return nil, apperr.NotFound("套餐")
-		}
+		names, err := namesOf(ctx, q, "plans", "套餐", []uuid.UUID{*t.PlanID})
 		if err != nil {
 			return nil, err
 		}
-		args = append(args, *t.PlanID, now)
-		sql += ` AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND s.plan_id = $2
-			AND s.status = 'active' AND s.ends_at > $3)`
+		t.PlanName = names[0]
+		f.PlanIDs = []uuid.UUID{*t.PlanID}
 	case CardTargetFilter:
 		var err error
 		if t.GroupNames, err = namesOf(ctx, q, "user_groups", "用户组", t.GroupIDs); err != nil {
@@ -346,30 +339,20 @@ func cardRecipients(ctx context.Context, q db.Querier, t *CardTarget, now time.T
 		if t.PlanNames, err = namesOf(ctx, q, "plans", "套餐", t.PlanIDs); err != nil {
 			return nil, err
 		}
-		if len(t.GroupIDs) > 0 {
-			args = append(args, t.GroupIDs)
-			sql += fmt.Sprintf(` AND u.group_id = ANY($%d)`, len(args))
-		}
-		if len(t.PlanIDs) > 0 {
-			args = append(args, t.PlanIDs, now)
-			sql += fmt.Sprintf(` AND EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.id AND s.plan_id = ANY($%d)
-			AND s.status = 'active' AND s.ends_at > $%d)`, len(args)-1, len(args))
+		f.GroupIDs, f.PlanIDs = t.GroupIDs, t.PlanIDs
+		if t.Filter != nil {
+			f = *t.Filter
 		}
 	}
-	rows, err := q.Query(ctx, sql+` ORDER BY u.id`, args...)
+	users, _, err := AudienceUsers(ctx, q, f, now, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []uuid.UUID
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		out = append(out, id)
+	out := []uuid.UUID{}
+	for _, u := range users {
+		out = append(out, u.ID)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // namesOf returns the names of ids in table (in ids order), failing with 404
@@ -426,6 +409,14 @@ func validateIssue(in *IssueCardsInput, now time.Time) error {
 	in.PlanIDs = dedupeUUIDs(in.PlanIDs)
 	in.Note = validateNote(in.Note, details)
 	t := &in.Target
+	if t.Filter != nil {
+		if t.Type != CardTargetFilter {
+			return apperr.Validation("filter 仅用于按条件选择", nil)
+		}
+		if err := t.Filter.Validate(); err != nil {
+			return err
+		}
+	}
 	switch t.Type {
 	case CardTargetUsers:
 		t.UserIDs = dedupeUUIDs(t.UserIDs)
@@ -507,33 +498,8 @@ func (s *Service) IssueCards(ctx context.Context, actor Actor, in IssueCardsInpu
 		if len(users) == 0 {
 			return apperr.Validation("参数校验失败", map[string]any{"target": "没有符合条件的用户（仅发放给状态正常的用户）"})
 		}
-		batchID, err := uuid.NewV7()
+		batchID, err := IssueCardsTx(ctx, tx, now, actor.ID, in, users)
 		if err != nil {
-			return err
-		}
-		var planIDs []byte
-		if len(in.PlanIDs) > 0 {
-			planIDs, _ = json.Marshal(in.PlanIDs)
-		}
-		target, _ := json.Marshal(in.Target)
-		if _, err := tx.Exec(ctx, `INSERT INTO reset_card_batches (id, kind, quantity, recipients, target, plan_ids,
-				expires_at, note, created_by, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-			batchID, in.Kind, in.Quantity, len(users), target, planIDs, in.ExpiresAt, in.Note, actor.ID, now); err != nil {
-			return err
-		}
-		rows := make([][]any, 0, res.Cards)
-		for _, uid := range users {
-			for range in.Quantity {
-				id, err := uuid.NewV7()
-				if err != nil {
-					return err
-				}
-				rows = append(rows, []any{id, batchID, uid, in.Kind, in.ExpiresAt, CardAvailable, now})
-			}
-		}
-		if _, err := tx.CopyFrom(ctx, "reset_cards",
-			[]string{"id", "batch_id", "user_id", "kind", "expires_at", "status", "created_at"}, rows); err != nil {
 			return err
 		}
 		batches, err := s.loadBatches(ctx, tx, now, ` WHERE b.id = $2`, batchID)
@@ -994,4 +960,48 @@ func (s *Service) unusableCard(ctx context.Context, q db.Querier, userID, id uui
 		return cardConflict("card_expired", "该重置卡已过期")
 	}
 	return fmt.Errorf("subscription: card %s not claimable in state %q", id, status)
+}
+
+// IssueCardsTx persists a batch within the caller's transaction so self-claimed
+// rewards and administrator issuance share card validation and persistence.
+func IssueCardsTx(ctx context.Context, tx db.Tx, now time.Time, creator uuid.UUID, in IssueCardsInput, users []uuid.UUID) (uuid.UUID, error) {
+	if err := validateIssue(&in, now); err != nil {
+		return uuid.Nil, err
+	}
+	if len(users) == 0 || len(users)*in.Quantity > maxCardTotal {
+		return uuid.Nil, apperr.Validation("重置卡发放数量无效", nil)
+	}
+	if _, err := namesOf(ctx, tx, "plans", "套餐", in.PlanIDs); err != nil {
+		return uuid.Nil, err
+	}
+	batchID, err := uuid.NewV7()
+	if err != nil {
+		return uuid.Nil, err
+	}
+	var planIDs []byte
+	if len(in.PlanIDs) > 0 {
+		planIDs, _ = json.Marshal(in.PlanIDs)
+	}
+	target, _ := json.Marshal(in.Target)
+	if _, err := tx.Exec(ctx, `INSERT INTO reset_card_batches (id, kind, quantity, recipients, target, plan_ids,
+				expires_at, note, created_by, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+		batchID, in.Kind, in.Quantity, len(users), target, planIDs, in.ExpiresAt, in.Note, creator, now); err != nil {
+		return uuid.Nil, err
+	}
+	rows := make([][]any, 0, len(users)*in.Quantity)
+	for _, uid := range users {
+		for range in.Quantity {
+			id, err := uuid.NewV7()
+			if err != nil {
+				return uuid.Nil, err
+			}
+			rows = append(rows, []any{id, batchID, uid, in.Kind, in.ExpiresAt, CardAvailable, now})
+		}
+	}
+	if _, err := tx.CopyFrom(ctx, "reset_cards",
+		[]string{"id", "batch_id", "user_id", "kind", "expires_at", "status", "created_at"}, rows); err != nil {
+		return uuid.Nil, err
+	}
+	return batchID, nil
 }

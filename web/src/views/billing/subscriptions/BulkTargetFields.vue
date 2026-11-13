@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import type { TargetMode } from '@/lib/subscriptionBulk'
-import type { Plan, Subscription, UserGroup } from '@/lib/types'
-import { computed, onMounted, ref } from 'vue'
+import type { AudienceFilter } from '@/lib/audience'
+import AudienceFilterFields from '@/components/AudienceFilterFields.vue'
+import type { Plan, Subscription } from '@/lib/types'
+import { computed } from 'vue'
 import FormField from '@/components/FormField.vue'
-import MultiSelect from '@/components/MultiSelect.vue'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { errorMessage } from '@/lib/api'
-import { groupsApi } from '@/lib/endpoints'
 import { formatDateTime } from '@/lib/format'
-import { useAuthStore } from '@/stores/auth'
 
 /**
  * "作用范围": the checked rows, or every active subscription matching the filters —
@@ -26,32 +24,16 @@ const mode = defineModel<TargetMode>('mode', { required: true })
 const planIds = defineModel<string[]>('planIds', { required: true })
 const groupIds = defineModel<string[]>('groupIds', { required: true })
 
-const auth = useAuthStore()
-const canListGroups = computed(() => auth.can('users.read'))
-const groups = ref<UserGroup[]>([])
-const groupsLoading = ref(false)
-const groupsError = ref<string | null>(null)
-onMounted(async () => {
-  if (!canListGroups.value)
-    return
-  groupsLoading.value = true
-  try {
-    groups.value = (await groupsApi.list()).items
-  }
-  catch (err) {
-    groupsError.value = errorMessage(err)
-  }
-  finally {
-    groupsLoading.value = false
-  }
+const filter = defineModel<AudienceFilter>('filter', { required: true })
+const audience = computed({
+  get: () => ({ ...filter.value, planIds: planIds.value, groupIds: groupIds.value, requireActiveSubscription: true }),
+  set: (value: AudienceFilter) => { filter.value = value; planIds.value = value.planIds; groupIds.value = value.groupIds },
 })
 
 function setMode(v: unknown) {
   if (v === 'plan' || (v === 'selected' && props.selectedCount > 0))
     mode.value = v
 }
-const planOptions = computed(() => props.plans.map(p => ({ value: p.id, label: `${p.name}${p.status === 'archived' ? '（已下架）' : ''}` })))
-const groupOptions = computed(() => groups.value.map(g => ({ value: g.id, label: g.name, hint: `${g.members} 人` })))
 </script>
 
 <template>
@@ -79,16 +61,6 @@ const groupOptions = computed(() => groups.value.map(g => ({ value: g.id, label:
         </SelectContent>
       </Select>
     </FormField>
-    <div v-if="mode === 'plan'" class="grid gap-4 sm:grid-cols-2">
-      <FormField label="套餐" :for="`${idPrefix}-plans`" hint="可多选；不选表示全部套餐">
-        <MultiSelect :id="`${idPrefix}-plans`" v-model="planIds" :options="planOptions" empty-label="全部套餐" placeholder="搜索套餐" data-testid="bulk-plans" />
-      </FormField>
-      <FormField label="用户组" :for="`${idPrefix}-groups`" :error="groupsError" :hint="canListGroups ? '可多选；不选表示全部用户组' : '没有查看用户组的权限'">
-        <MultiSelect :id="`${idPrefix}-groups`" v-model="groupIds" :options="groupOptions" :loading="groupsLoading" :disabled="!canListGroups" empty-label="全部用户组" placeholder="搜索用户组" data-testid="bulk-groups" />
-      </FormField>
-      <p class="text-muted-foreground text-xs sm:col-span-2">
-        套餐与用户组同时选择时取交集：只影响所选用户组成员持有的所选套餐订阅。
-      </p>
-    </div>
+    <AudienceFilterFields v-if="mode === 'plan'" v-model="audience" :plans="plans" subscription-only />
   </div>
 </template>

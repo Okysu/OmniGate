@@ -1,3 +1,4 @@
+import type { AudienceFilter } from './audience'
 // Bulk subscription actions (phase7-api.md §3): quota reset and extension. Target and
 // body construction, rule options for the reset dialog, duration input and validation.
 import type { ExtendSubscriptionsInput, Plan, QuotaRule, ResetQuotaInput, Subscription, SubscriptionTarget } from './types'
@@ -9,9 +10,10 @@ export const BULK_NOTE_MAX = 200
 export type TargetMode = 'selected' | 'plan'
 
 /** The target; in `plan` mode empty planIds / groupIds mean no restriction (they combine with AND). */
-export function buildTarget(mode: TargetMode, ids: readonly string[], planIds: readonly string[] = [], groupIds: readonly string[] = []): SubscriptionTarget {
+export function buildTarget(mode: TargetMode, ids: readonly string[], planIds: readonly string[] = [], groupIds: readonly string[] = [], filter?: AudienceFilter): SubscriptionTarget {
   if (mode === 'selected')
     return { ids: [...new Set(ids)] }
+  if (filter) return { filter: { ...filter, planIds: [...planIds], groupIds: [...groupIds], requireActiveSubscription: true } }
   return { status: 'active', planIds: [...new Set(planIds)], groupIds: [...new Set(groupIds)] }
 }
 
@@ -139,6 +141,7 @@ export function affectedText(n: number): string {
 export function targetLabel(t: SubscriptionTarget, planName: (id: string) => string, groupName: (id: string) => string = id => id.slice(0, 8)): string {
   if ('ids' in t)
     return t.ids.length === 1 ? '所选订阅' : `所选 ${t.ids.length} 份订阅`
+  if ('filter' in t) return '按组合条件筛选的有效订阅'
   const plans = t.planIds.length ? t.planIds.map(id => `「${planName(id)}」`).join('、') : '全部套餐'
   const groups = t.groupIds.length ? `用户组${t.groupIds.map(id => `「${groupName(id)}」`).join('、')}中` : ''
   return `${groups}${plans}的有效订阅`
