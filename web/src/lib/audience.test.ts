@@ -9,6 +9,11 @@ describe('shared audience and benefit reward adapters', () => {
     expect(buildTarget('plan', [], ['formal'], ['group'], filter)).toEqual({ filter: { ...filter, planIds: ['formal'], groupIds: ['group'], requireActiveSubscription: true } })
     expect(buildCardTarget({ ...emptyIssueForm(), targetType: 'filter', audience: filter })).toEqual({ type: 'filter', filter })
   })
+  it('preserves the verified paid-code supplement', () => {
+    const filter = normalizeAudience({ requirePurchase: true, verifiedPurchaseUserIds: ['paid-code-user'] })
+    expect(filter.verifiedPurchaseUserIds).toEqual(['paid-code-user'])
+    expect(buildCardTarget({ ...emptyIssueForm(), targetType: 'filter', audience: filter })).toEqual({ type: 'filter', filter })
+  })
   it('normalizes old and nullable condition lists without enabling filters', () => {
     expect(normalizeAudience({ groupIds: null as unknown as string[] })).toEqual(emptyAudience())
     expect(emptyAudience().excludePlanIds).toEqual([])

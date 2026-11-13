@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { benefitsApi, campaignState, emptyCampaign, type PublicCampaign } from './benefits'
+import { benefitsApi, benefitDateInput, benefitDateISO, formatBenefitDate, campaignState, emptyCampaign, type PublicCampaign } from './benefits'
 import { api } from './api'
 import { buildPlanPayload, emptyPlanForm, formFromPlan, validatePlanForm } from './planForm'
 import type { Plan } from './types'
@@ -52,5 +52,14 @@ describe('套餐库存表单', () => {
     const f = emptyPlanForm()
     f.stock = stock
     expect(validatePlanForm(f)).toHaveProperty('stock')
+  })
+})
+
+describe('福利时间使用北京时间', () => {
+  it('午夜活动边界固定为 UTC+8，不依赖浏览器时区', () => {
+    expect(benefitDateInput('2026-11-13T16:00:00Z')).toBe('2026-11-14T00:00')
+    expect(benefitDateISO('2026-11-14T00:00')).toBe('2026-11-13T16:00:00.000Z')
+    expect(benefitDateISO('')).toBeNull()
+    expect(formatBenefitDate('2026-11-13T16:00:00Z')).toMatch(/2026.*11.*14.*00:00/)
   })
 })

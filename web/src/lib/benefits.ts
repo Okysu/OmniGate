@@ -68,3 +68,8 @@ export const benefitsApi = {
     return c.id ? api.put<Campaign>(`/api/admin/benefits/campaigns/${c.id}`, body) : api.post<Campaign>('/api/admin/benefits/campaigns', body)
   },
 }
+
+/** Campaign dates are configured and displayed in Beijing time (UTC+8). */
+export function benefitDateInput(iso: string | null): string { return iso ? new Date(Date.parse(iso) + 8 * 3600000).toISOString().slice(0, 16) : '' }
+export function benefitDateISO(value: string | null): string | null { return value ? new Date(value + '+08:00').toISOString() : null }
+export function formatBenefitDate(iso: string): string { return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso)) }

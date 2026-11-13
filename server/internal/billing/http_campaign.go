@@ -29,7 +29,7 @@ func (h *Handler) campaignPublicView(r *http.Request, c *Campaign) (map[string]a
 		requirements = append(requirements, "指定用户")
 	}
 	if c.Conditions.RequirePurchase {
-		requirements = append(requirements, "有付费套餐购买记录")
+		requirements = append(requirements, "有真实购买记录（含已核实的付费兑换）")
 	}
 	if c.Conditions.MinSpend != "" && c.Conditions.MinSpend != "0" {
 		requirements = append(requirements, "累计模型消费达到 $"+c.Conditions.MinSpend+"（含套餐用量）")

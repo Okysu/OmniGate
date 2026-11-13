@@ -35,11 +35,12 @@ const selectors = computed(() => [
   ...(auth.can('users.read') ? [
     { key: 'groupIds' as const, label: '用户组', options: groups.value, hint: '不选表示不限用户组' },
     { key: 'userIds' as const, label: '指定用户', options: users.value, hint: '不选表示不限用户' },
+    ...(normalized.value.requirePurchase ? [{ key: 'verifiedPurchaseUserIds' as const, label: '已核实付费用户', options: users.value, hint: '补充已人工确认的付费套餐码或迁移记录，与系统购买记录取并集；不会新增账本流水。' }] : []),
   ] : []),
   { key: 'sources' as const, label: '订阅来源', options: sources, hint: '不选表示不限；兑换码来源不等于付费购买' },
 ])
-function selected(key: 'planIds' | 'excludePlanIds' | 'groupIds' | 'userIds' | 'sources', options: Option[]) { return options.filter(o => normalized.value[key].includes(o.value)) }
-function set(key: keyof AudienceFilter, value: unknown) { model.value = { ...normalized.value, [key]: value } }
+function selected(key: 'planIds' | 'excludePlanIds' | 'groupIds' | 'userIds' | 'sources' | 'verifiedPurchaseUserIds', options: Option[]) { return options.filter(o => normalized.value[key].includes(o.value)) }
+function set(key: keyof AudienceFilter, value: unknown) { model.value = { ...normalized.value, [key]: value, ...(key === 'requirePurchase' && !value ? { verifiedPurchaseUserIds: [] } : {}) } }
 const local = (value: string | null) => value ? new Date(Date.parse(value) - new Date(value).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''
 function setDate(key: 'registeredAfter' | 'registeredBefore', value: unknown) { set(key, value ? new Date(String(value)).toISOString() : null) }
 let generation = 0
@@ -153,7 +154,7 @@ onMounted(async () => {
       <Checkbox :id="prefix + 'hidden'" :model-value="normalized.excludeHiddenPlans" @update:model-value="value => set('excludeHiddenPlans', value === true)" /><Label :for="prefix + 'hidden'">排除隐藏活动套餐的订阅</Label>
     </div>
     <div class="flex items-center gap-2">
-      <Checkbox :id="prefix + 'purchase'" :model-value="normalized.requirePurchase" @update:model-value="value => set('requirePurchase', value === true)" /><Label :for="prefix + 'purchase'">须有付费套餐购买记录</Label>
+      <Checkbox :id="prefix + 'purchase'" :model-value="normalized.requirePurchase" @update:model-value="value => set('requirePurchase', value === true)" /><Label :for="prefix + 'purchase'">须有真实购买记录</Label>
     </div>
     <div class="bg-muted/40 space-y-2 rounded-lg border p-3 text-sm" aria-live="polite">
       <div class="flex items-center justify-between gap-3">

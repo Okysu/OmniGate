@@ -93,3 +93,27 @@ func TestAudienceHTTPPermissionAndMalformedFilters(t *testing.T) {
 		}
 	}
 }
+
+func TestAudienceVerifiedPaidCodeDoesNotFabricatePurchases(t *testing.T) {
+	f := newFixture(t)
+	u := f.user(identity.RoleUser)
+	other := f.user(identity.RoleUser)
+	filter := AudienceFilter{RequirePurchase: true, VerifiedPurchaseUserIDs: []uuid.UUID{u.ID}}
+	preview, err := PreviewAudience(f.ctx, f.pool, filter, f.now)
+	if err != nil || preview.Users != 1 || preview.Sample[0].ID != u.ID {
+		t.Fatalf("verified paid=%+v %v", preview, err)
+	}
+	recipients, _, err := AudienceUsers(f.ctx, f.pool, filter, f.now, []uuid.UUID{other.ID})
+	if err != nil || len(recipients) != 0 {
+		t.Fatal("unverified user qualified", err)
+	}
+	var n int
+	_ = f.pool.QueryRow(f.ctx, "SELECT count(*) FROM plan_purchases").Scan(&n)
+	if n != 0 {
+		t.Fatal("fabricated purchase history")
+	}
+	filter.RequirePurchase = false
+	if err = filter.Validate(); err == nil {
+		t.Fatal("unused paid override accepted")
+	}
+}

@@ -2,6 +2,7 @@ import { api } from './api'
 
 /** Lists use OR; different fields use AND on the same active subscription. */
 export interface AudienceFilter {
+  verifiedPurchaseUserIds: string[]
   userIds: string[]
   groupIds: string[]
   planIds: string[]
@@ -16,11 +17,11 @@ export interface AudienceFilter {
   requirePurchase: boolean
 }
 export function emptyAudience(): AudienceFilter {
-  return { userIds: [], groupIds: [], planIds: [], excludePlanIds: [], sources: [], requireActiveSubscription: false, excludeHiddenPlans: false, quotaKind: '', registeredAfter: null, registeredBefore: null, minSpend: '0', requirePurchase: false }
+  return { verifiedPurchaseUserIds: [], userIds: [], groupIds: [], planIds: [], excludePlanIds: [], sources: [], requireActiveSubscription: false, excludeHiddenPlans: false, quotaKind: '', registeredAfter: null, registeredBefore: null, minSpend: '0', requirePurchase: false }
 }
 export function normalizeAudience(value?: Partial<AudienceFilter>): AudienceFilter {
   const result = { ...emptyAudience(), ...value }
-  for (const key of ['userIds', 'groupIds', 'planIds', 'excludePlanIds', 'sources'] as const) result[key] = value?.[key] ?? []
+  for (const key of ['userIds', 'groupIds', 'planIds', 'excludePlanIds', 'sources', 'verifiedPurchaseUserIds'] as const) result[key] = value?.[key] ?? []
   return result
 }
 export interface AudiencePreview { users: number, subscriptions: number, sample: { id: string, name: string }[], truncated: boolean, asOf: string }

@@ -21,6 +21,7 @@ import (
 // Subscription predicates always apply to the SAME live subscription, and quota
 // windows are read from its snapshot, not the current plan's mutable rules.
 type AudienceFilter struct {
+	VerifiedPurchaseUserIDs   []uuid.UUID `json:"verifiedPurchaseUserIds"`
 	UserIDs                   []uuid.UUID `json:"userIds"`
 	GroupIDs                  []uuid.UUID `json:"groupIds"`
 	PlanIDs                   []uuid.UUID `json:"planIds"`
@@ -46,7 +47,7 @@ func (f AudienceFilter) NeedsSubscription() bool {
 }
 
 func (f AudienceFilter) Validate() error {
-	for _, ids := range [][]uuid.UUID{f.UserIDs, f.GroupIDs, f.PlanIDs, f.ExcludePlanIDs} {
+	for _, ids := range [][]uuid.UUID{f.UserIDs, f.GroupIDs, f.PlanIDs, f.ExcludePlanIDs, f.VerifiedPurchaseUserIDs} {
 		if len(ids) > 1000 {
 			return apperr.Validation("筛选名单最多 1000 项", nil)
 		}
@@ -55,6 +56,9 @@ func (f AudienceFilter) Validate() error {
 				return apperr.Validation("筛选不能包含空 ID", nil)
 			}
 		}
+	}
+	if len(f.VerifiedPurchaseUserIDs) > 0 && !f.RequirePurchase {
+		return apperr.Validation("已核实付费名单须与购买记录条件一起使用", nil)
 	}
 	for _, source := range f.Sources {
 		if source != SourceAdmin && source != SourceRedeem && source != SourcePurchase {
@@ -105,7 +109,12 @@ func audienceWhere(ctx context.Context, q db.Querier, f AudienceFilter) (*audien
 		b.add("u.created_at < $?", *f.RegisteredBefore)
 	}
 	if f.RequirePurchase {
-		b.parts = append(b.parts, "EXISTS (SELECT 1 FROM plan_purchases pp WHERE pp.user_id=u.id AND pp.price_nano>0)")
+		purchase := "EXISTS (SELECT 1 FROM plan_purchases pp WHERE pp.user_id=u.id AND pp.price_nano>0)"
+		if len(f.VerifiedPurchaseUserIDs) > 0 {
+			b.add("("+purchase+" OR u.id = ANY($?))", f.VerifiedPurchaseUserIDs)
+		} else {
+			b.parts = append(b.parts, purchase)
+		}
 	}
 	if f.MinSpend != "" && f.MinSpend != "0" {
 		v, _ := money.Parse(f.MinSpend)
@@ -259,7 +268,7 @@ func ValidateAudienceReferences(ctx context.Context, q db.Querier, f AudienceFil
 	for _, check := range []struct {
 		table, label string
 		ids          []uuid.UUID
-	}{{"user_groups", "用户组", f.GroupIDs}, {"plans", "套餐", f.PlanIDs}, {"plans", "排除套餐", f.ExcludePlanIDs}} {
+	}{{"users", "已核实付费用户", f.VerifiedPurchaseUserIDs}, {"user_groups", "用户组", f.GroupIDs}, {"plans", "套餐", f.PlanIDs}, {"plans", "排除套餐", f.ExcludePlanIDs}} {
 		if err := checkExist(ctx, q, check.table, check.label, dedupeUUIDs(check.ids)); err != nil {
 			return err
 		}

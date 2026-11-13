@@ -6,7 +6,7 @@ import { Gift } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { campaignRewardTitle, campaignState } from '@/lib/benefits'
+import { campaignRewardTitle, campaignState, formatBenefitDate } from '@/lib/benefits'
 const props = defineProps<{ campaign: PublicCampaign }>()
 const now = ref(Date.now())
 const timer = setInterval(() => { now.value = Date.now() }, 30000)
@@ -39,7 +39,7 @@ const state = computed(() => campaignState(props.campaign, now.value))
           剩余 {{ campaign.stock }} 份
         </p>
         <p v-if="campaign.endsAt">
-          截止 {{ new Date(campaign.endsAt).toLocaleString('zh-CN') }}
+          截止 {{ formatBenefitDate(campaign.endsAt) }}（北京时间）
         </p>
       </div>
       <Button as-child class="mt-auto">

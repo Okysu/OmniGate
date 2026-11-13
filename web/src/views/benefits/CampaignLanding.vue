@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { benefitsApi, campaignRewardTitle, campaignRewards, rewardTitle, campaignState } from '@/lib/benefits'
+import { benefitsApi, campaignRewardTitle, campaignRewards, rewardTitle, campaignState, formatBenefitDate } from '@/lib/benefits'
 import { useCurrency } from '@/composables/useCurrency'
 import { errorMessage } from '@/lib/api'
 import { formatDuration, ruleSummary } from '@/lib/quota'
@@ -154,18 +154,18 @@ async function share() {
               </div>
               <div v-if="campaign.startsAt" class="flex flex-wrap items-center justify-between gap-2">
                 <dt class="flex items-center gap-2">
-                  <Clock3 class="size-4" aria-hidden="true" />开始时间
+                  <Clock3 class="size-4" aria-hidden="true" />开始时间（北京时间）
                 </dt>
                 <dd class="text-foreground">
-                  {{ new Date(campaign.startsAt).toLocaleString('zh-CN') }}
+                  {{ formatBenefitDate(campaign.startsAt) }}
                 </dd>
               </div>
               <div v-if="campaign.endsAt" class="flex flex-wrap items-center justify-between gap-2">
                 <dt class="flex items-center gap-2">
-                  <Clock3 class="size-4" aria-hidden="true" />截止时间
+                  <Clock3 class="size-4" aria-hidden="true" />截止时间（北京时间）
                 </dt>
                 <dd class="text-foreground">
-                  {{ new Date(campaign.endsAt).toLocaleString('zh-CN') }}
+                  {{ formatBenefitDate(campaign.endsAt) }}
                 </dd>
               </div>
             </dl>

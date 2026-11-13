@@ -64,7 +64,7 @@ async function draw(count: number) {
     <CardHeader>
       <CardTitle>每日消费抽奖</CardTitle>
       <CardDescription v-if="status">
-        每个香港自然日，模型消费超过 {{ money(status.threshold) }} 即可获得 1 次机会。钱包和套餐用量一起计算，次数可以累积。
+        按北京时间的自然日计算，模型消费超过 {{ money(status.threshold) }} 即可获得 1 次机会。钱包和套餐用量一起计算，次数可以累积。
       </CardDescription>
     </CardHeader>
     <CardContent class="space-y-3">

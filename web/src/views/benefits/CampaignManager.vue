@@ -17,7 +17,7 @@ import PlanFormSheet from '@/views/billing/plans/PlanFormSheet.vue'
 import CampaignRewardFields from './CampaignRewardFields.vue'
 import { normalizeAudience } from '@/lib/audience'
 import { errorMessage } from '@/lib/api'
-import { benefitsApi, campaignRewards, campaignRewardTitle, emptyCampaign, emptyReward } from '@/lib/benefits'
+import { benefitsApi, benefitDateInput, benefitDateISO, campaignRewards, campaignRewardTitle, emptyCampaign, emptyReward } from '@/lib/benefits'
 import { fetchAllPlans } from '@/lib/endpoints'
 const props = defineProps<{ startWithCreate: boolean }>()
 const open = defineModel<boolean>('open', { required: true })
@@ -29,11 +29,10 @@ const saving = ref(false)
 const error = ref('')
 const showPlan = ref(false)
 const planIndex = ref(0)
-const local = (iso: string | null) => iso ? new Date(Date.parse(iso) - new Date(iso).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''
 function edit(c?: Campaign) {
   const value = structuredClone(toRaw(c ?? emptyCampaign()))
-  value.startsAt = local(value.startsAt)
-  value.endsAt = local(value.endsAt)
+  value.startsAt = benefitDateInput(value.startsAt)
+  value.endsAt = benefitDateInput(value.endsAt)
   value.conditions = normalizeAudience(value.conditions)
   value.rewards = campaignRewards(value)
   form.value = value
@@ -50,8 +49,8 @@ async function save() {
   error.value = ''
   try {
     const body: Campaign = { ...form.value }
-    body.startsAt = body.startsAt ? new Date(body.startsAt).toISOString() : null
-    body.endsAt = body.endsAt ? new Date(body.endsAt).toISOString() : null
+    body.startsAt = benefitDateISO(body.startsAt)
+    body.endsAt = benefitDateISO(body.endsAt)
     if (!body.rewards?.some(r => r.type === 'subscription')) body.price = '0'
     await benefitsApi.save(body)
     form.value = null
@@ -138,7 +137,7 @@ async function share(c: Campaign) {
           <div class="space-y-2">
             <Label for="event-limit">每人最多领取次数</Label><Input id="event-limit" :model-value="form.perUserLimit" type="number" min="1" max="1000" required @update:model-value="value => { if (form) form.perUserLimit = Number(value) }" />
           </div>
-          <div v-for="field in [{ key: 'startsAt' as const, label: '开始时间（可留空）' }, { key: 'endsAt' as const, label: '结束时间（可留空）' }]" :key="field.key" class="space-y-2">
+          <div v-for="field in [{ key: 'startsAt' as const, label: '开始时间（北京时间，可留空）' }, { key: 'endsAt' as const, label: '结束时间（北京时间，可留空）' }]" :key="field.key" class="space-y-2">
             <Label :for="'event-' + field.key">{{ field.label }}</Label><Input :id="'event-' + field.key" :model-value="form[field.key] ?? ''" type="datetime-local" @update:model-value="value => { if (form) form[field.key] = String(value) || null }" />
           </div>
         </div>

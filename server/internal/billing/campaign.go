@@ -203,7 +203,7 @@ func (s *Service) SaveCampaign(ctx context.Context, actor Actor, id uuid.UUID, i
 		if err != nil {
 			return err
 		}
-		return s.audit(ctx, tx, actor, meta, "benefit.save", "campaign", id.String(), map[string]any{"title": in.Title, "status": in.Status, "stock": in.Stock, "version": out.Version})
+		return s.audit(ctx, tx, actor, meta, "benefit.save", "campaign", id.String(), map[string]any{"title": in.Title, "status": in.Status, "stock": in.Stock, "version": out.Version, "conditions": in.Conditions})
 	})
 	return out, err
 }
