@@ -318,3 +318,51 @@ func TestSessionFieldsAcrossResponsesAndChat(t *testing.T) {
 		t.Fatalf("responses → anthropic: %s %v %v", out, warns, err)
 	}
 }
+
+func TestResponsesIncludeAndMaxToAnthropic(t *testing.T) {
+	for _, effort := range []string{"max", "xhigh"} {
+		for _, mode := range []Compat{Strict, Lenient} {
+			body := `{"model":"glm-5.3-flash","input":"hello","include":["reasoning.encrypted_content"],"reasoning":{"effort":"` + effort + `"},"max_output_tokens":1000}`
+			out, warnings, err := ConvertRequest(OpenAIResponses, Anthropic, []byte(body), "glm-5.3-flash", "", mode)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var req AnthropicRequest
+			if err = json.Unmarshal(out, &req); err != nil {
+				t.Fatal(err)
+			}
+			if req.Thinking == nil || req.Thinking.Type != "enabled" || req.Thinking.BudgetTokens != 24576 || req.MaxTokens <= req.Thinking.BudgetTokens {
+				t.Fatalf("invalid thinking: %s", out)
+			}
+			if !strings.Contains(strings.Join(warnings, ","), "reasoning_effort("+effort+"->high)") {
+				t.Fatalf("missing approximation warning: %v", warnings)
+			}
+			if strings.Contains(string(out), `"include"`) {
+				t.Fatalf("leaked selector: %s", out)
+			}
+		}
+	}
+}
+
+func TestResponsesIncludeWhitelist(t *testing.T) {
+	for _, include := range []string{`["reasoning.encrypted_content","web_search_call.action.sources"]`, `["unknown"]`, `"reasoning.encrypted_content"`, `[123]`} {
+		body := []byte(`{"model":"m","input":"hello","include":` + include + `}`)
+		for _, target := range []string{OpenAIChat, Anthropic} {
+			if _, _, err := ConvertRequest(OpenAIResponses, target, body, "m", "", Strict); err == nil {
+				t.Fatalf("accepted %s for %s", include, target)
+			}
+			if _, w, err := ConvertRequest(OpenAIResponses, target, body, "m", "", Lenient); err != nil || !strings.Contains(strings.Join(w, ","), "include") {
+				t.Fatalf("lenient: %v %v", w, err)
+			}
+		}
+	}
+	body := []byte(`{"model":"m","input":"hello","include":["reasoning.encrypted_content"],"reasoning":{"effort":"max"}}`)
+	out, _, err := ConvertRequest(OpenAIResponses, OpenAIChat, body, "m", "", Strict)
+	if err != nil || !strings.Contains(string(out), `"reasoning_effort":"max"`) {
+		t.Fatalf("Chat effort changed: %s %v", out, err)
+	}
+	body = []byte(`{"model":"m","input":"hello","reasoning":{"effort":"made-up"}}`)
+	if _, _, err = ConvertRequest(OpenAIResponses, Anthropic, body, "m", "", Lenient); err == nil {
+		t.Fatal("unknown effort accepted")
+	}
+}

@@ -941,6 +941,14 @@ func effortForBudget(budget int64) string {
 // reasoning_effort. Anthropic requires max_tokens > budget and does not accept
 // a custom temperature/top_p with thinking, so those are adjusted and reported.
 func applyReasoningEffort(out *AnthropicRequest, effort string, is *issues) error {
+	// The generic Messages converter uses fixed thinking budgets rather than
+	// model-specific adaptive effort. Clamp higher levels to its highest known
+	// budget and report the approximation instead of rejecting the request or
+	// sending unsupported output_config values to compatible providers.
+	if effort == "max" || effort == "xhigh" {
+		is.drop("reasoning_effort(" + effort + "->high)")
+		effort = "high"
+	}
 	switch effort {
 	case "", "none", "minimal":
 		return nil

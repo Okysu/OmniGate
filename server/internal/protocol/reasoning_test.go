@@ -109,7 +109,7 @@ func TestReasoningResponsesClientAnthropicUpstream(t *testing.T) {
 	}
 	enc1, enc2 := r.Output[0]["encrypted_content"].(string), r.Output[1]["encrypted_content"].(string)
 
-	body := `{"model":"r","input":[{"role":"user","content":"go"},
+	body := `{"model":"r","include":["reasoning.encrypted_content"],"input":[{"role":"user","content":"go"},
 	  {"type":"reasoning","id":"rs_x","summary":[{"type":"summary_text","text":"plan"}],"encrypted_content":"` + enc1 + `"},
 	  {"type":"reasoning","id":"rs_y","summary":[],"encrypted_content":"` + enc2 + `"},
 	  {"type":"function_call","call_id":"toolu_1","name":"f","arguments":"{}"},

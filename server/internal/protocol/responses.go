@@ -98,9 +98,28 @@ var responsesToChatPolicy = fieldPolicy{
 		"parallel_tool_calls", "stream", "reasoning", "text", "user", "prompt_cache_key", "safety_identifier"),
 	neutral: map[string]func(json.RawMessage) bool{
 		"store": func(json.RawMessage) bool { return true }, "metadata": emptyJSON, "truncation": equalsJSON(`"disabled"`),
-		"background": equalsJSON("false"), "include": emptyJSON,
+		"background": equalsJSON("false"), "include": reasoningIncludeOnly,
 	},
 	hints: set("service_tier", "max_tool_calls"),
+}
+
+// This selector requests opaque reasoning continuity, already represented by
+// our reasoning envelopes. It is not an upstream Chat/Anthropic parameter.
+// Other selectors must still obey strict/lenient compatibility policy.
+func reasoningIncludeOnly(raw json.RawMessage) bool {
+	if emptyJSON(raw) {
+		return true
+	}
+	var selectors []string
+	if json.Unmarshal(raw, &selectors) != nil {
+		return false
+	}
+	for _, selector := range selectors {
+		if selector != "reasoning.encrypted_content" {
+			return false
+		}
+	}
+	return true
 }
 
 var chatToResponsesPolicy = fieldPolicy{
