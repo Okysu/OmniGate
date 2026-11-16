@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"omnigate/internal/notify/notifytest"
 )
 
 func TestAdminPersonalNotificationAndQuotaEndpoints(t *testing.T) {
@@ -38,4 +39,23 @@ func TestAdminPersonalNotificationAndQuotaEndpoints(t *testing.T) {
 	if got := e.ruleUsage(e.carol, sub["id"].(string))["weekly"]; got["limit"] != "30" || got["resetsAt"] != nil {
 		t.Fatalf("sync %v", got)
 	}
+}
+
+func TestAdminForcedEmailEndpoint(t *testing.T) {
+	e := setupGateway(t)
+	uid := e.userID(e.carol)
+	message := map[string]any{"target": map[string]any{"userIds": []string{uid}}, "title": "重要公告", "body": "强制邮件通知", "forceEmail": true, "idempotencyKey": uuid.NewString()}
+	e.mustDo(e.carol, http.MethodPost, "/api/admin/notifications", message, 403)
+	// Fail before writing an in-app notice when forced mail cannot be queued.
+	e.mustDo(e.admin, http.MethodPost, "/api/admin/notifications", message, 422)
+	e.expectNotifs(e.carol, "admin.message", 0)
+	srv := notifytest.Start(t, "none")
+	e.useSMTP(srv)
+	for _, path := range []string{"/api/admin/notifications?dryRun=true", "/api/admin/notifications", "/api/admin/notifications"} {
+		got := e.mustDo(e.admin, http.MethodPost, path, message, 200)
+		if got["emailQueued"] != float64(1) || got["emailSkipped"] != float64(0) {
+			t.Fatalf("result=%v", got)
+		}
+	}
+	e.expectNotifs(e.carol, "admin.message", 1)
 }

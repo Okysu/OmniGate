@@ -1235,11 +1235,14 @@ export interface SendNotificationInput {
   link: string
   severity: NotificationSeverity
   idempotencyKey: string
+  forceEmail?: boolean
 }
 
 export interface SendNotificationResult {
   recipients: number
   alreadySent: boolean
+  emailQueued: number
+  emailSkipped: number
 }
 
 /** `POST /api/admin/billing/subscriptions/extend` body. */

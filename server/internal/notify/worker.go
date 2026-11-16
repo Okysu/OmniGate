@@ -242,23 +242,32 @@ func (s *Service) recipient(ctx context.Context, uid uuid.UUID) (*recipient, err
 		return nil, err
 	}
 	r := &recipient{user: u, prefs: p}
+	r.email = verifiedEmail(u, p)
+	return r, nil
+}
+
+func verifiedEmail(u *userInfo, p *stored) string {
 	switch {
 	case p.EmailAddress != nil:
-		r.email = *p.EmailAddress
+		return *p.EmailAddress
 	case u.Email != nil && u.EmailVerified:
-		r.email = *u.Email
+		return *u.Email
 	}
-	return r, nil
+	return ""
 }
 
 // emailBlocked returns why email cannot go to r for type t ("" = allowed).
 func (s *Service) emailBlocked(ctx context.Context, r *recipient, t string) string {
+	return s.emailBlockedForEvent(ctx, r, t, false)
+}
+
+func (s *Service) emailBlockedForEvent(ctx context.Context, r *recipient, t string, force bool) string {
 	switch {
 	case r.user.Status != "active" && !ReachesDisabled(t):
 		return "用户已停用"
 	case !s.smtpUsable(ctx):
 		return "SMTP 未配置或通知已关闭"
-	case !r.prefs.EmailEnabled || (t != "" && !r.prefs.switches(t).Email):
+	case !force && (!r.prefs.EmailEnabled || (t != "" && !r.prefs.switches(t).Email)):
 		return "用户已关闭该邮件通知"
 	case r.email == "":
 		return "没有已验证的邮箱地址"
@@ -295,29 +304,42 @@ func (s *Service) mail(ctx context.Context, to string, subject string, v mailVie
 // ---- email ----
 
 func (s *Service) processEmail(ctx context.Context, d delivery) {
+	if d.EventID == nil {
+		s.markSkipped(ctx, []delivery{d}, "事件不存在")
+		return
+	}
+	evs, err := s.loadEvents(ctx, []uuid.UUID{*d.EventID})
+	if err != nil {
+		s.markFailure(ctx, []delivery{d}, "读取事件失败")
+		return
+	}
+	e := evs[*d.EventID]
+	if e == nil {
+		s.markSkipped(ctx, []delivery{d}, "事件不存在")
+		return
+	}
+	force := forcedEmail(e.Type, e.Data)
 	r, err := s.recipient(ctx, d.UserID)
 	if err != nil {
 		s.markFailure(ctx, []delivery{d}, "读取用户失败")
 		return
 	}
-	if why := s.emailBlocked(ctx, r, d.Type); why != "" {
+	if why := s.emailBlockedForEvent(ctx, r, d.Type, force); why != "" {
 		s.markSkipped(ctx, []delivery{d}, why)
 		return
 	}
-	if limited, err := s.overLimit(ctx, d); err != nil {
+	if limited, err := s.overLimit(ctx, d, force); err != nil {
 		s.markFailure(ctx, []delivery{d}, "检查发送频率失败")
 		return
 	} else if limited {
 		return
 	}
-	evs, err := s.loadEvents(ctx, []uuid.UUID{*d.EventID})
-	if err != nil || evs[*d.EventID] == nil {
-		s.markSkipped(ctx, []delivery{d}, "事件不存在")
-		return
-	}
-	e := evs[*d.EventID]
 	v := mailView{Heading: e.Title, Items: []mailItem{s.item(e)}, Loc: r.prefs.location()}
-	if err := s.mail(ctx, r.email, e.Title, v, s.unsubscribeURL(d.UserID, d.Type)); err != nil {
+	unsubscribe := ""
+	if !force {
+		unsubscribe = s.unsubscribeURL(d.UserID, d.Type)
+	}
+	if err := s.mail(ctx, r.email, e.Title, v, unsubscribe); err != nil {
 		s.markFailure(ctx, []delivery{d}, err.Error())
 		return
 	}
@@ -327,7 +349,7 @@ func (s *Service) processEmail(ctx context.Context, d delivery) {
 // overLimit enforces notifications.emailRateLimitPerHour: beyond the limit
 // the delivery is held and one summary email is scheduled for when the
 // hourly window frees up. Digest emails do not count (one per day).
-func (s *Service) overLimit(ctx context.Context, d delivery) (bool, error) {
+func (s *Service) overLimit(ctx context.Context, d delivery, force bool) (bool, error) {
 	limit := s.set.EmailRateLimitPerHour(ctx)
 	if limit <= 0 {
 		return false, nil
@@ -346,6 +368,16 @@ func (s *Service) overLimit(ctx context.Context, d delivery) (bool, error) {
 	due := now.Add(time.Hour)
 	if oldest != nil {
 		due = oldest.Add(time.Hour)
+	}
+	// Forced mail must retain its policy: defer it rather than moving it into
+	// the ordinary summary path, which respects opt-outs.
+	if force {
+		_, err := s.pool.Exec(ctx, `UPDATE notification_deliveries SET status = 'pending', next_attempt_at = $2, updated_at = $3,
+			last_error = '超过每小时邮件上限，延后发送' WHERE id = $1`, d.ID, due, now)
+		if err == nil {
+			metricSent.WithLabelValues("email", d.Type, resultLimited).Inc()
+		}
+		return err == nil, err
 	}
 	err := db.InTx(ctx, s.pool, func(tx db.Tx) error {
 		if _, err := tx.Exec(ctx, `UPDATE notification_deliveries SET status = 'held', attempts = attempts + 1, updated_at = $2,

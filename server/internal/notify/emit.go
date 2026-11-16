@@ -34,6 +34,13 @@ type Event struct {
 	Users []uuid.UUID
 }
 
+// Only an administrator message can override email preferences. Persist the
+// flag on the event so retries and other worker instances apply the same policy.
+func forcedEmail(typ string, data map[string]any) bool {
+	force, _ := data["forceEmail"].(bool)
+	return typ == TypeAdminMessage && force
+}
+
 const recentKeys = 20000
 
 // seen reports whether key was emitted recently by this instance.
@@ -111,6 +118,7 @@ func (s *Service) emit(ctx context.Context, ev Event, after func(db.Tx, []uuid.U
 	}
 	outbound := s.set.NotificationsEnabled(ctx)
 	emailOK := outbound && s.set.SMTP(ctx).Configured()
+	forceEmail := forcedEmail(ev.Type, ev.Data)
 	data, _ := json.Marshal(ev.Data)
 	var link *string
 	if ev.Link != "" {
@@ -142,12 +150,12 @@ func (s *Service) emit(ctx context.Context, ev Event, after func(db.Tx, []uuid.U
 				}
 				counts = append(counts, count{"inapp", resultSent})
 			}
-			if sw.Email && p.EmailEnabled {
+			if forceEmail && verifiedEmail(u, p) != "" || !forceEmail && sw.Email && p.EmailEnabled {
 				if !emailOK {
 					counts = append(counts, count{"email", resultSkipped})
 				} else {
 					kind, due := "event", now
-					if p.Digest == "daily" && !meta.Alert {
+					if p.Digest == "daily" && !meta.Alert && !forceEmail {
 						kind, due = "digest", nextDigest(now, p.location())
 					}
 					if err := insertDelivery(ctx, tx, u.ID, &eid, "email", kind, ev.Type, due, now); err != nil {

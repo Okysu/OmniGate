@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
 import { useDryRun } from '@/composables/useDryRun'
 import { errorMessage, fieldErrors } from '@/lib/api'
 import { notificationsApi } from '@/lib/endpoints'
@@ -31,6 +32,8 @@ const title = ref('')
 const content = ref('')
 const link = ref('')
 const severity = ref<NotificationSeverity>('info')
+const forceEmail = ref(false)
+const emailPreview = ref<{ key: string, queued: number, skipped: number } | null>(null)
 const idempotencyKey = ref('')
 const saving = ref(false)
 const error = ref<string | null>(null)
@@ -46,6 +49,8 @@ watch(open, (v) => {
   content.value = ''
   link.value = ''
   severity.value = 'info'
+  forceEmail.value = false
+  emailPreview.value = null
   idempotencyKey.value = crypto.randomUUID()
   error.value = null
   errors.value = {}
@@ -55,10 +60,12 @@ const groupOptions = computed(() => groups.sorted.map(g => ({ value: g.id, label
 const body = computed<SendNotificationInput | null>(() => {
   if ((targetMode.value === 'list' && !userIds.value.length && !groupIds.value.length) || !title.value.trim() || !content.value.trim() || !idempotencyKey.value)
     return null
-  return { target: targetMode.value === 'filter' ? { filter: audience.value } : { userIds: userIds.value, groupIds: groupIds.value }, title: title.value.trim(), body: content.value.trim(), link: link.value.trim(), severity: severity.value, idempotencyKey: idempotencyKey.value }
+  return { target: targetMode.value === 'filter' ? { filter: audience.value } : { userIds: userIds.value, groupIds: groupIds.value }, title: title.value.trim(), body: content.value.trim(), link: link.value.trim(), severity: severity.value, idempotencyKey: idempotencyKey.value, forceEmail: forceEmail.value }
 })
 const dry = useDryRun(body, JSON.stringify, async (b) => {
   const res = await notificationsApi.send(b, { dryRun: true })
+  if (JSON.stringify(body.value) === JSON.stringify(b))
+    emailPreview.value = { key: JSON.stringify(b), queued: res.emailQueued, skipped: res.emailSkipped }
   return { affected: res.alreadySent ? 0 : res.recipients, subscriptions: [] }
 }, open)
 const canSend = computed(() => !!body.value && dry.ready.value && (dry.preview.value?.affected ?? 0) > 0 && !saving.value)
@@ -70,7 +77,7 @@ async function submit() {
   errors.value = {}
   try {
     const res = await notificationsApi.send(body.value)
-    toast.success(res.alreadySent ? '这条通知已发送，请勿重复提交' : `已向 ${res.recipients} 位用户发送通知`)
+    toast.success(res.alreadySent ? '这条通知已发送，请勿重复提交' : `站内通知 ${res.recipients} 人；邮件已入队 ${res.emailQueued} 封，未入队 ${res.emailSkipped} 人`)
     open.value = false
   }
   catch (err) {
@@ -140,6 +147,9 @@ async function submit() {
             <Input id="notify-link" v-model="link" placeholder="/console/billing" :disabled="saving" />
           </FormField>
         </div>
+        <FormField label="强制邮件通知" for="notify-force-email" hint="绕过用户邮件开关和每日摘要，仅向已验证邮箱发送；仍受 SMTP 配置、限速和失败重试约束。" :error="errors.forceEmail">
+          <Switch id="notify-force-email" v-model="forceEmail" :disabled="saving" />
+        </FormField>
         <div v-if="title.trim() || content.trim()" class="bg-muted/40 space-y-2 rounded-lg border p-3" data-testid="notification-preview">
           <p class="font-medium">
             {{ title }}
@@ -150,6 +160,9 @@ async function submit() {
         </div>
         <p class="text-muted-foreground text-sm" aria-live="polite">
           {{ dry.loading.value || dry.stale.value ? '正在计算接收人数…' : dry.ready.value ? `将发送给 ${dry.preview.value?.affected ?? 0} 位用户` : '请选择接收人并填写通知内容' }}
+        </p>
+        <p v-if="dry.ready.value && emailPreview?.key === JSON.stringify(body)" class="text-muted-foreground text-sm">
+          预计邮件入队 {{ emailPreview.queued }} 封，未入队 {{ emailPreview.skipped }} 人。入队后由邮件服务异步发送。
         </p>
         <p v-if="error || dry.error.value" class="text-destructive text-sm" role="alert">
           {{ error || dry.error.value }}

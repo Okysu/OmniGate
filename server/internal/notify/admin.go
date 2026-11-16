@@ -37,11 +37,14 @@ type SendMessageInput struct {
 	Link           string        `json:"link"`
 	Severity       string        `json:"severity"`
 	IdempotencyKey uuid.UUID     `json:"idempotencyKey"`
+	ForceEmail     bool          `json:"forceEmail,omitempty"`
 }
 
 type SendMessageResult struct {
-	Recipients  int  `json:"recipients"`
-	AlreadySent bool `json:"alreadySent"`
+	Recipients   int  `json:"recipients"`
+	AlreadySent  bool `json:"alreadySent"`
+	EmailQueued  int  `json:"emailQueued"`
+	EmailSkipped int  `json:"emailSkipped"`
 }
 
 func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request) {
@@ -173,7 +176,7 @@ func (s *Service) previousMessage(ctx context.Context, key, fingerprint string) 
 	}
 	var data struct {
 		Fingerprint string `json:"fingerprint"`
-		Recipients  int    `json:"recipients"`
+		SendMessageResult
 	}
 	if err := json.Unmarshal(raw, &data); err != nil {
 		return nil, err
@@ -181,11 +184,12 @@ func (s *Service) previousMessage(ctx context.Context, key, fingerprint string) 
 	if data.Fingerprint != fingerprint {
 		return nil, apperr.Validation("同一发送标识不能用于不同的通知；请重新打开发送窗口", nil)
 	}
-	return &SendMessageResult{Recipients: data.Recipients, AlreadySent: true}, nil
+	data.AlreadySent = true
+	return &data.SendMessageResult, nil
 }
 
-// SendMessage sends a personal in-app notification, with outbound delivery only
-// if the recipient explicitly enabled it. Fan-out and audit commit atomically.
+// SendMessage sends an in-app notification, optionally overriding email preferences.
+// Fan-out and audit commit atomically; queued email is not a delivery receipt.
 func (s *Service) SendMessage(ctx context.Context, actor *authz.Principal, in SendMessageInput, dry bool, meta RequestMeta) (*SendMessageResult, error) {
 	if !actor.Can(authz.UsersWrite) {
 		return nil, apperr.Forbidden()
@@ -202,22 +206,44 @@ func (s *Service) SendMessage(ctx context.Context, actor *authz.Principal, in Se
 	if prior, err := s.previousMessage(ctx, key, fingerprint); err != nil || prior != nil {
 		return prior, err
 	}
+	if in.ForceEmail && !s.smtpUsable(ctx) {
+		return nil, apperr.Validation("强制邮件发送需要启用通知并配置 SMTP", map[string]any{"forceEmail": "SMTP 未配置或通知已关闭"})
+	}
 	ids, err := s.messageRecipients(ctx, in.Target)
 	if err != nil {
 		return nil, err
 	}
 	res := &SendMessageResult{Recipients: len(ids)}
 	if dry {
+		users, err := s.users(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		prefs, err := s.loadPrefsMany(ctx, ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, u := range users {
+			p := prefs[u.ID]
+			if s.smtpUsable(ctx) && (in.ForceEmail && verifiedEmail(u, p) != "" || !in.ForceEmail && p.EmailEnabled && p.switches(TypeAdminMessage).Email) {
+				res.EmailQueued++
+			}
+		}
+		res.EmailSkipped = res.Recipients - res.EmailQueued
 		return res, nil
 	}
 	if len(ids) == 0 {
 		return nil, apperr.Validation("没有符合条件的启用用户", map[string]any{"target": "已停用的用户不会收到通知"})
 	}
 	ev := Event{Type: TypeAdminMessage, Key: key, Title: in.Title, Body: in.Body, Link: in.Link, Severity: in.Severity, Users: ids,
-		Data: map[string]any{"fingerprint": fingerprint, "recipients": len(ids)}}
+		Data: map[string]any{"fingerprint": fingerprint, "recipients": len(ids), "forceEmail": in.ForceEmail}}
 	sent, err := s.emit(ctx, ev, func(tx db.Tx, recipients []uuid.UUID) error {
 		res.Recipients = len(recipients)
-		data, _ := json.Marshal(map[string]any{"fingerprint": fingerprint, "recipients": len(recipients)})
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM notification_deliveries WHERE channel = 'email' AND event_id = (SELECT id FROM notification_events WHERE dedupe_key = $1)`, key).Scan(&res.EmailQueued); err != nil {
+			return err
+		}
+		res.EmailSkipped = res.Recipients - res.EmailQueued
+		data, _ := json.Marshal(map[string]any{"fingerprint": fingerprint, "recipients": len(recipients), "forceEmail": in.ForceEmail, "emailQueued": res.EmailQueued, "emailSkipped": res.EmailSkipped})
 		if _, err := tx.Exec(ctx, `UPDATE notification_events SET data = $2 WHERE dedupe_key = $1`, key, data); err != nil {
 			return err
 		}
@@ -226,7 +252,7 @@ func (s *Service) SendMessage(ctx context.Context, actor *authz.Principal, in Se
 			listed = listed[:500]
 		}
 		return s.audit.Record(ctx, tx, audit.Entry{ActorID: &actor.UserID, ActorName: &actor.Name, Action: "notification.send", ResourceType: "notification", IPPrefix: meta.IPPrefix, RequestID: meta.RequestID,
-			Metadata: map[string]any{"target": in.Target, "title": in.Title, "severity": in.Severity, "idempotencyKey": in.IdempotencyKey, "recipients": len(recipients), "userIds": listed}})
+			Metadata: map[string]any{"target": in.Target, "title": in.Title, "severity": in.Severity, "idempotencyKey": in.IdempotencyKey, "recipients": len(recipients), "userIds": listed, "forceEmail": in.ForceEmail, "emailQueued": res.EmailQueued, "emailSkipped": res.EmailSkipped}})
 	})
 	if err != nil {
 		return nil, err
