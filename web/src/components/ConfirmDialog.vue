@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Loader2 } from '@lucide/vue'
+import { watch } from 'vue'
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -11,7 +12,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   title: string
   description?: string
   confirmText?: string
@@ -31,11 +32,32 @@ withDefaults(defineProps<{
 
 const open = defineModel<boolean>('open', { required: true })
 defineEmits<{ confirm: [] }>()
+
+let returnFocus: HTMLElement | null = null
+watch(open, (value) => {
+  if (value) {
+    const active = document.activeElement
+    returnFocus = active instanceof HTMLElement ? active : null
+  }
+}, { flush: 'sync' })
+
+function onOpenChange(value: boolean) {
+  if (!props.loading) open.value = value
+}
+
+function restoreFocus(event: Event) {
+  if (open.value) return
+  const target = returnFocus
+  returnFocus = null
+  if (!target?.isConnected) return
+  event.preventDefault()
+  target.focus({ preventScroll: true })
+}
 </script>
 
 <template>
-  <AlertDialog v-model:open="open">
-    <AlertDialogContent>
+  <AlertDialog :open="open" @update:open="onOpenChange">
+    <AlertDialogContent @close-auto-focus="restoreFocus">
       <AlertDialogHeader>
         <AlertDialogTitle>{{ title }}</AlertDialogTitle>
         <AlertDialogDescription v-if="description || $slots.default" as="div" class="space-y-2">

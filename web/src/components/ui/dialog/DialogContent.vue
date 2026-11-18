@@ -10,6 +10,7 @@ import {
   DialogPortal,
   useForwardPropsEmits,
 } from 'reka-ui'
+import { useDialogPortalKey } from '@/composables/useDialogPortalKey'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import DialogOverlay from './DialogOverlay.vue'
@@ -26,10 +27,11 @@ const emits = defineEmits<DialogContentEmits>()
 const delegatedProps = reactiveOmit(props, 'class')
 
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
+const portalKey = useDialogPortalKey(() => props.forceMount)
 </script>
 
 <template>
-  <DialogPortal>
+  <DialogPortal :key="portalKey">
     <DialogOverlay />
     <DialogContent
       data-slot="dialog-content"

@@ -46,6 +46,7 @@ let snapshotVersion = 0
 const deleteOpen = ref(false)
 const deleteTarget = ref<string | null>(null)
 const deleting = ref(false)
+const deleteError = ref('')
 const detailOpen = computed({ get: () => selected.value !== null, set: (v: boolean) => { if (!v) selected.value = null } })
 const actions: Record<ControlRule['action'], string> = { audit: '仅审计', block: '拦截请求', notify: '通知用户', ban: '自动封禁账号' }
 async function load() {
@@ -81,8 +82,14 @@ function moveRule(index: number, delta: number) {
   rules[index] = rules[other]!
   rules[other] = rule
 }
+function openDelete(id: string | null) {
+  deleteTarget.value = id
+  deleteError.value = ''
+  deleteOpen.value = true
+}
 async function deleteRecords() {
   deleting.value = true
+  deleteError.value = ''
   try {
     if (deleteTarget.value) await controlApi.remove(deleteTarget.value)
     else await controlApi.clear()
@@ -91,7 +98,7 @@ async function deleteRecords() {
     page.value = 1
     await loadEvents()
   }
-  catch (e) { error.value = errorMessage(e) }
+  catch (e) { deleteError.value = errorMessage(e) }
   finally { deleting.value = false }
 }
 async function loadEvents() {
@@ -272,7 +279,7 @@ onMounted(() => { void load(); void loadEvents() })
         <div class="flex flex-wrap gap-2">
           <Input v-model="userId" placeholder="按用户 UUID 筛选" class="max-w-sm" /><Input v-model="requestId" placeholder="按请求 ID 筛选" class="max-w-sm" /><Button :disabled="loadingEvents" variant="outline" @click="page = 1; loadEvents()">
             查询 / 刷新
-          </Button><Button variant="outline" :disabled="!total || loadingEvents" @click="deleteTarget = null; deleteOpen = true">
+          </Button><Button variant="outline" :disabled="!total || loadingEvents" @click="openDelete(null)">
             清空记录
           </Button>
           <Button :disabled="!checkedEvents.length || loadingEvents" @click="openReview(checkedEvents)">
@@ -372,13 +379,17 @@ onMounted(() => { void load(); void loadEvents() })
           <Button :disabled="!selected.snapshotId" @click="openReview([selected])">
             模型复核
           </Button>
-          <Button variant="destructive" @click="deleteTarget = selected.id; deleteOpen = true">
+          <Button variant="destructive" @click="openDelete(selected.id)">
             删除这条记录
           </Button>
         </div>
       </DialogContent>
     </Dialog>
     <ControlReviewDialog v-model:open="reviewOpen" :events="reviewEvents" @applied="applyDecision" />
-    <ConfirmDialog v-model:open="deleteOpen" :title="deleteTarget ? '删除这条管控记录？' : '清空全部管控记录？'" description="删除后无法恢复；已执行的账号处理不会撤销，删除操作会写入审计日志。" destructive :loading="deleting" @confirm="deleteRecords" />
+    <ConfirmDialog v-model:open="deleteOpen" :title="deleteTarget ? '删除这条管控记录？' : '清空全部管控记录？'" description="删除后无法恢复；已执行的账号处理不会撤销，删除操作会写入审计日志。" destructive :loading="deleting" @confirm="deleteRecords">
+      <p v-if="deleteError" class="text-destructive" role="alert">
+        {{ deleteError }}
+      </p>
+    </ConfirmDialog>
   </div>
 </template>

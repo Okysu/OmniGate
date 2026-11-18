@@ -8,6 +8,7 @@ import {
   AlertDialogPortal,
   useForwardPropsEmits,
 } from 'reka-ui'
+import { useDialogPortalKey } from '@/composables/useDialogPortalKey'
 import { cn } from '@/lib/utils'
 
 defineOptions({
@@ -28,10 +29,11 @@ const emits = defineEmits<AlertDialogContentEmits>()
 const delegatedProps = reactiveOmit(props, 'class', 'size')
 
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
+const portalKey = useDialogPortalKey(() => props.forceMount)
 </script>
 
 <template>
-  <AlertDialogPortal>
+  <AlertDialogPortal :key="portalKey">
     <AlertDialogOverlay
       data-slot="alert-dialog-overlay"
       class="data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs fixed inset-0 z-50"
