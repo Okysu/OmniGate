@@ -51,6 +51,7 @@ func (h *Handler) Routes(r chi.Router) {
 // AdminRoutes registers the admin endpoints (mount on /api/admin).
 func (h *Handler) AdminRoutes(r chi.Router) {
 	r.With(auth.Require(authz.UsersWrite)).Post("/notifications", h.sendMessage)
+	r.With(auth.Require(authz.UsersWrite)).Get("/notifications/email-deliveries", h.emailDeliveries)
 	r.With(auth.Require(authz.SettingsWrite)).Post("/settings/smtp-test", h.smtpTest)
 }
 

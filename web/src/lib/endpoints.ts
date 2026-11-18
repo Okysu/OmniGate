@@ -2,6 +2,8 @@ import type {
   AdjustQuotaInput,
   SendNotificationInput,
   SendNotificationResult,
+  EmailDelivery,
+  EmailDeliveryStatus,
   AffinityOutcome,
   AffinityStats,
   ClientInfo,
@@ -537,6 +539,8 @@ export interface ListNotificationsParams {
 export type NotificationPreferencesInput = Omit<NotificationPreferences, 'smtpConfigured'>
 
 export const notificationsApi = {
+  emailDeliveries: (params: { userId?: string, eventId?: string, status?: EmailDeliveryStatus, page?: number, pageSize?: number }, signal?: AbortSignal) =>
+    api.get<Paginated<EmailDelivery>>('/api/admin/notifications/email-deliveries', { query: { ...params }, signal }),
   send: (body: SendNotificationInput, opts: { dryRun?: boolean } = {}) =>
     api.post<SendNotificationResult>('/api/admin/notifications', body, { query: opts.dryRun ? { dryRun: true } : undefined }),
   list: async (params: ListNotificationsParams, signal?: AbortSignal): Promise<Paginated<AppNotification>> => {

@@ -59,3 +59,43 @@ func TestAdminForcedEmailEndpoint(t *testing.T) {
 	}
 	e.expectNotifs(e.carol, "admin.message", 1)
 }
+
+func TestAdminEmailDeliveryQueryEndpoint(t *testing.T) {
+	e := setupGateway(t)
+	uid := e.userID(e.carol)
+	srv := notifytest.Start(t, "none")
+	e.useSMTP(srv)
+	path := "/api/admin/notifications/email-deliveries"
+	e.mustDo(e.carol, http.MethodGet, path, nil, 403)
+	for _, query := range []string{"?userId=bad", "?eventId=bad", "?userId=" + uuid.Nil.String(), "?status=unknown"} {
+		e.mustDo(e.admin, http.MethodGet, path+query, nil, 422)
+	}
+	empty := e.mustDo(e.admin, http.MethodGet, path+"?eventId="+uuid.NewString(), nil, 200)
+	if empty["total"] != float64(0) || len(empty["items"].([]any)) != 0 {
+		t.Fatalf("empty=%v", empty)
+	}
+	message := map[string]any{"target": map[string]any{"userIds": []string{uid}}, "title": "停用处理通知", "body": "private notification body", "forceEmail": true, "idempotencyKey": uuid.NewString()}
+	sent := e.mustDo(e.admin, http.MethodPost, "/api/admin/notifications", message, 200)
+	eventID, ok := sent["eventId"].(string)
+	if !ok || eventID == "" {
+		t.Fatalf("missing eventId: %v", sent)
+	}
+	result := e.mustDo(e.admin, http.MethodGet, path+"?userId="+uid+"&eventId="+eventID+"&pageSize=1", nil, 200)
+	items := result["items"].([]any)
+	if result["total"] != float64(1) || len(items) != 1 || result["pageSize"] != float64(1) {
+		t.Fatalf("result=%v", result)
+	}
+	d := items[0].(map[string]any)
+	if d["userId"] != uid || d["eventId"] != eventID || d["title"] != message["title"] || d["forceEmail"] != true || d["status"] == nil {
+		t.Fatalf("delivery=%v", d)
+	}
+	for _, field := range []string{"body", "data", "email", "secret"} {
+		if _, ok := d[field]; ok {
+			t.Fatalf("unexpected field %s", field)
+		}
+	}
+	again := e.mustDo(e.admin, http.MethodPost, "/api/admin/notifications", message, 200)
+	if again["eventId"] != eventID || again["alreadySent"] != true {
+		t.Fatalf("idempotent=%v", again)
+	}
+}

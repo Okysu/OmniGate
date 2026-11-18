@@ -263,7 +263,7 @@ func (s *Service) emailBlocked(ctx context.Context, r *recipient, t string) stri
 
 func (s *Service) emailBlockedForEvent(ctx context.Context, r *recipient, t string, force bool) string {
 	switch {
-	case r.user.Status != "active" && !ReachesDisabled(t):
+	case !force && r.user.Status != "active" && !ReachesDisabled(t):
 		return "用户已停用"
 	case !s.smtpUsable(ctx):
 		return "SMTP 未配置或通知已关闭"

@@ -41,10 +41,11 @@ type SendMessageInput struct {
 }
 
 type SendMessageResult struct {
-	Recipients   int  `json:"recipients"`
-	AlreadySent  bool `json:"alreadySent"`
-	EmailQueued  int  `json:"emailQueued"`
-	EmailSkipped int  `json:"emailSkipped"`
+	EventID      *uuid.UUID `json:"eventId,omitempty"`
+	Recipients   int        `json:"recipients"`
+	AlreadySent  bool       `json:"alreadySent"`
+	EmailQueued  int        `json:"emailQueued"`
+	EmailSkipped int        `json:"emailSkipped"`
 }
 
 func (h *Handler) sendMessage(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +113,7 @@ func validateMessage(in *SendMessageInput) error {
 	return nil
 }
 
-func (s *Service) messageRecipients(ctx context.Context, target MessageTarget) ([]uuid.UUID, error) {
+func (s *Service) messageRecipients(ctx context.Context, target MessageTarget, force bool) ([]uuid.UUID, error) {
 	if target.Filter != nil {
 		users, _, err := subscription.AudienceUsers(ctx, s.pool, *target.Filter, time.Now(), nil)
 		if err != nil {
@@ -144,7 +145,9 @@ func (s *Service) messageRecipients(ctx context.Context, target MessageTarget) (
 			return nil, apperr.NotFound(check.label)
 		}
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id FROM users WHERE status = 'active' AND (id = ANY($1) OR group_id = ANY($2)) ORDER BY id LIMIT 10001`, target.UserIDs, target.GroupIDs)
+	// Forced messages may explicitly target suspended users. Group and audience
+	// broadcasts still include active users only.
+	rows, err := s.pool.Query(ctx, `SELECT id FROM users WHERE (status = 'active' OR ($3 AND id = ANY($1))) AND (id = ANY($1) OR group_id = ANY($2)) ORDER BY id LIMIT 10001`, target.UserIDs, target.GroupIDs, force)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +171,8 @@ func (s *Service) messageRecipients(ctx context.Context, target MessageTarget) (
 
 func (s *Service) previousMessage(ctx context.Context, key, fingerprint string) (*SendMessageResult, error) {
 	var raw []byte
-	if err := s.pool.QueryRow(ctx, `SELECT data FROM notification_events WHERE dedupe_key = $1`, key).Scan(&raw); err != nil {
+	var eventID uuid.UUID
+	if err := s.pool.QueryRow(ctx, `SELECT id, data FROM notification_events WHERE dedupe_key = $1`, key).Scan(&eventID, &raw); err != nil {
 		if db.IsNoRows(err) {
 			return nil, nil
 		}
@@ -185,6 +189,7 @@ func (s *Service) previousMessage(ctx context.Context, key, fingerprint string) 
 		return nil, apperr.Validation("同一发送标识不能用于不同的通知；请重新打开发送窗口", nil)
 	}
 	data.AlreadySent = true
+	data.EventID = &eventID
 	return &data.SendMessageResult, nil
 }
 
@@ -209,7 +214,7 @@ func (s *Service) SendMessage(ctx context.Context, actor *authz.Principal, in Se
 	if in.ForceEmail && !s.smtpUsable(ctx) {
 		return nil, apperr.Validation("强制邮件发送需要启用通知并配置 SMTP", map[string]any{"forceEmail": "SMTP 未配置或通知已关闭"})
 	}
-	ids, err := s.messageRecipients(ctx, in.Target)
+	ids, err := s.messageRecipients(ctx, in.Target, in.ForceEmail)
 	if err != nil {
 		return nil, err
 	}
@@ -233,15 +238,17 @@ func (s *Service) SendMessage(ctx context.Context, actor *authz.Principal, in Se
 		return res, nil
 	}
 	if len(ids) == 0 {
-		return nil, apperr.Validation("没有符合条件的启用用户", map[string]any{"target": "已停用的用户不会收到通知"})
+		return nil, apperr.Validation("没有符合条件的接收用户", map[string]any{"target": "停用用户需通过强制邮件并显式指定用户 ID"})
 	}
 	ev := Event{Type: TypeAdminMessage, Key: key, Title: in.Title, Body: in.Body, Link: in.Link, Severity: in.Severity, Users: ids,
 		Data: map[string]any{"fingerprint": fingerprint, "recipients": len(ids), "forceEmail": in.ForceEmail}}
 	sent, err := s.emit(ctx, ev, func(tx db.Tx, recipients []uuid.UUID) error {
 		res.Recipients = len(recipients)
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM notification_deliveries WHERE channel = 'email' AND event_id = (SELECT id FROM notification_events WHERE dedupe_key = $1)`, key).Scan(&res.EmailQueued); err != nil {
+		var eventID uuid.UUID
+		if err := tx.QueryRow(ctx, `SELECT e.id, (SELECT count(*) FROM notification_deliveries d WHERE d.channel = 'email' AND d.event_id = e.id) FROM notification_events e WHERE e.dedupe_key = $1`, key).Scan(&eventID, &res.EmailQueued); err != nil {
 			return err
 		}
+		res.EventID = &eventID
 		res.EmailSkipped = res.Recipients - res.EmailQueued
 		data, _ := json.Marshal(map[string]any{"fingerprint": fingerprint, "recipients": len(recipients), "forceEmail": in.ForceEmail, "emailQueued": res.EmailQueued, "emailSkipped": res.EmailSkipped})
 		if _, err := tx.Exec(ctx, `UPDATE notification_events SET data = $2 WHERE dedupe_key = $1`, key, data); err != nil {

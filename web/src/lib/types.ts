@@ -1239,10 +1239,30 @@ export interface SendNotificationInput {
 }
 
 export interface SendNotificationResult {
+  eventId?: string
   recipients: number
   alreadySent: boolean
   emailQueued: number
   emailSkipped: number
+}
+
+export type EmailDeliveryStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'skipped' | 'held' | 'merged'
+export interface EmailDelivery {
+  id: string
+  userId: string
+  userName: string
+  eventId: string | null
+  title: string
+  type: string
+  kind: 'event' | 'digest' | 'summary'
+  forceEmail: boolean
+  status: EmailDeliveryStatus
+  attempts: number
+  nextAttemptAt: string | null
+  sentAt: string | null
+  lastError: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 /** `POST /api/admin/billing/subscriptions/extend` body. */

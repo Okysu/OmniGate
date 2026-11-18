@@ -20,11 +20,21 @@
 - 响应 `{ "recipients": 12, "alreadySent": false }`。预览只验证并统计，不写入通知、投递队列或审计。
 - 同一发送者的 `idempotencyKey` 在重试时保持不变。同标识、同内容的重试不会重复发送或重复审计；换内容需换标识。
 - 事件类型 `admin.message`，站内通知始终开启；邮件和 Webhook 默认关闭，仅在接收人主动启用对应偏好时投递。
-- 可选 `forceEmail: true` 强制向已验证邮箱发送邮件，绕过用户邮件总开关、`admin.message` 邮件开关和每日摘要；不会修改用户偏好。权限仍为 `users.write`。未配置 SMTP 或关闭全局通知时返回 422；不向未验证邮箱或停用用户发送。保留失败重试和每用户小时限速，超限邮件延后单独发送，不合并摘要。
+- 可选 `forceEmail: true` 强制向已验证邮箱发送邮件，绕过用户邮件总开关、`admin.message` 邮件开关和每日摘要；不会修改用户偏好。权限仍为 `users.write`。未配置 SMTP 或关闭全局通知时返回 422；不向未验证邮箱发送。已入队的强制邮件不因封号而跳过，重试时同样生效；也可通过 `target.userIds` 显式指定已停用用户。用户组和组合筛选广播仍只包含启用用户。保留失败重试和每用户小时限速，超限邮件延后单独发送，不合并摘要。
 - 向所有正常用户发送：`target: {"filter": {}}`（组合筛选另需 `billing.manage`）；用户列表、用户组也可使用 `forceEmail`。预览和发送新增 `emailQueued`（邮件入队数）、`emailSkipped`（未入队人数），入队不表示已送达邮箱；幂等重试返回原始入队统计。
 - 发送及审计 `notification.send` 在同一事务提交。每次最多指定 1000 个用户和 1000 个用户组，解析后接收人数最多 10000。
 
 控制台入口：用户列表的「发送通知」（可使用勾选列表和当前分组），或用户详情里的「发送通知」。
+
+### 邮件投递状态
+
+`GET /api/admin/notifications/email-deliveries`，需要 `users.write`。可按 `userId`、`eventId`、`status` 组合筛选，支持标准 `page` / `pageSize` 分页（每页最多 200）。不填写筛选可查看全部邮件投递记录，包含非管理员消息和每日摘要；不会返回 Webhook 投递。发送通知成功及幂等重试的响应新增 `eventId`，预览没有事件 ID。
+
+响应为 `{items,total,page,pageSize}`。每项包含 `id`、`userId`、`userName`、`eventId`、`title`、`type`、`kind`、`forceEmail`、`status`、`attempts`、`nextAttemptAt`、`sentAt`、`lastError`、`createdAt`、`updatedAt`。`nextAttemptAt` 仅在等待或发送中有值；摘要任务可以没有 `eventId`。查询不修改投递状态，不返回正文或完整事件数据。
+
+状态：`pending` 等待发送/重试、`sending` 正在处理（时间为工作租约到期时间）、`sent` SMTP 服务器已接受、`failed` 重试耗尽、`skipped` 跳过（原因见 `lastError`）、`held` 等待合并摘要、`merged` 已合并进成功发送的摘要。`sent` 不代表收件箱已收到，不提供打开/阅读回执。历史已跳过的邮件不会因升级自动重发；此接口仅查询。
+
+例如：`GET /api/admin/notifications/email-deliveries?userId=用户UUID&status=failed&page=1&pageSize=20`。只查看某次发送可用该次发送返回的 `eventId`，该条件下的 `total` 为实际邮件队列行数，不包含从未入队的接收人。
 
 ## 修改已有订阅的容量和余量
 

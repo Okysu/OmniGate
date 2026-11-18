@@ -100,7 +100,7 @@ func (s *Service) emit(ctx context.Context, ev Event, after func(db.Tx, []uuid.U
 	}
 	var targets []*userInfo
 	for _, u := range recipients {
-		if u.Status != identity.StatusActive && !ReachesDisabled(ev.Type) {
+		if u.Status != identity.StatusActive && !ReachesDisabled(ev.Type) && !forcedEmail(ev.Type, ev.Data) {
 			continue
 		}
 		el := Eligibility{Role: u.Role, OwnsChannel: true} // channel recipients are resolved by the producer
