@@ -25,6 +25,7 @@ import (
 	"omnigate/internal/apperr"
 	"omnigate/internal/channel"
 	"omnigate/internal/clientdetect"
+	"omnigate/internal/control"
 	"omnigate/internal/identity"
 	"omnigate/internal/journal"
 	"omnigate/internal/keys"
@@ -66,6 +67,7 @@ type Limits interface {
 }
 
 type Options struct {
+	Control      *control.Service
 	UserAgent    string
 	MaxBodyBytes int64         // request body limit (default 32 MiB)
 	MaxAttempts  int           // upstream attempts per request (default 3; Limits wins when set)
@@ -536,6 +538,8 @@ func (g *Gateway) rank(ctx context.Context, cands []routeCand, model string, rul
 
 // reqState carries everything about one gateway request.
 type reqState struct {
+	controlChecked map[string]bool
+	controlBody    []byte // text-only JSON for multipart prompts; binary uploads stay local
 	// deferHealth is set while an attempt may still be retried on the same
 	// channel: its transient failure is held in pending instead of counting
 	// against the channel, so one request's retries count once.
@@ -801,6 +805,9 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 			if attempts >= routing.HardAttemptCap {
 				break
 			}
+			if c.tier == channel.TierPlatform && platformAttempts >= retry.MaxAttempts {
+				break
+			}
 			if !st.limited {
 				// The group's rpm / rpd apply to every tier: checked once,
 				// after tiering and before the first attempt (and before the
@@ -811,23 +818,6 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 				}
 			}
 			policy := free
-			if c.tier == channel.TierPlatform {
-				if platformAttempts >= retry.MaxAttempts {
-					break
-				}
-				if !admitted {
-					// Lazy billing: quotas and the wallet are only consulted
-					// right before the first platform channel is tried.
-					if gerr := g.admit(r, st, model); gerr != nil {
-						if i == 0 {
-							return gerr
-						}
-						break attemptLoop // the fallback model is not covered (quota / balance)
-					}
-					admitted = true
-				}
-				policy = retry
-			}
 			target := channel.Target{Channel: c.rt.ID, Model: model}
 			if forced {
 				if !g.reg.Breaker.ForceAllow(target) {
@@ -837,6 +827,41 @@ func (g *Gateway) route(w http.ResponseWriter, r *http.Request, st *reqState) *p
 				blocked = append(blocked, c)
 				allBlocked = append(allBlocked, target)
 				continue
+			}
+			if g.opts.Control != nil {
+				if st.controlChecked == nil {
+					st.controlChecked = map[string]bool{}
+				}
+				body := st.body
+				if st.multipart != nil {
+					body = st.controlBody
+				}
+				stop, err := g.opts.Control.Check(r.Context(), control.Input{RequestID: st.entry.RequestID, UserID: a.UserID, KeyID: a.Key.ID, ChannelID: c.rt.ID, Model: model, Dialect: st.dialect, Body: body}, st.controlChecked)
+				if err != nil {
+					g.reg.Breaker.Release(target)
+					g.log.ErrorContext(r.Context(), "request control failed", "err", err)
+					return protocol.NewError(protocol.ErrInternal, "request control could not be recorded")
+				}
+				if stop {
+					g.reg.Breaker.Release(target)
+					st.entry.ChannelID, st.entry.ChannelName = &c.rt.ID, &c.rt.Name
+					return protocol.NewError(protocol.ErrPermission, "请求触发平台管控规则，请联系管理员并提供请求 ID")
+				}
+			}
+			if c.tier == channel.TierPlatform {
+				if !admitted {
+					// Lazy billing: quotas and the wallet are only consulted
+					// right before the first platform channel is tried.
+					if gerr := g.admit(r, st, model); gerr != nil {
+						g.reg.Breaker.Release(target)
+						if i == 0 {
+							return gerr
+						}
+						break attemptLoop // the fallback model is not covered (quota / balance)
+					}
+					admitted = true
+				}
+				policy = retry
 			}
 			// A transient failure (connection error, 5xx) is retried on the
 			// same channel after a short backoff when nothing else is left —

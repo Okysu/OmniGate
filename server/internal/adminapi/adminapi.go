@@ -81,6 +81,31 @@ func New(users *identity.Store, rec *audit.Recorder) *Handler {
 // Users returns the user store.
 func (h *Handler) Users() *identity.Store { return h.users }
 
+// SuspendForControl reuses the standard suspension effects and audit path.
+// Automatic screening cannot suspend system administrators.
+func (h *Handler) SuspendForControl(ctx context.Context, actor *authz.Principal, userID uuid.UUID, reason, requestID string) error {
+	if actor == nil || !actor.Can(authz.UsersWrite) {
+		return apperr.Forbidden()
+	}
+	u, err := h.users.Get(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if u.Role == identity.RoleSystemAdmin {
+		return cannotDisableSelf("自动管控不能停用系统管理员")
+	}
+	if u.Status == identity.StatusDisabled {
+		return nil
+	}
+	status := identity.StatusDisabled
+	before, after, err := h.users.Patch(ctx, userID, identity.UserPatch{Status: &status, Version: u.Version, DisabledReason: reason}, h.now())
+	if err != nil {
+		return err
+	}
+	h.applyStatus(ctx, meta{actor: actor, requestID: requestID}, before, after)
+	return nil
+}
+
 func (h *Handler) Routes(r chi.Router) {
 	r.With(auth.Require(authz.UsersRead)).Get("/users", h.listUsers)
 	r.With(auth.Require(authz.UsersWrite)).Post("/users/batch", h.batch)

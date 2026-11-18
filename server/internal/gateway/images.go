@@ -16,6 +16,7 @@ package gateway
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -260,6 +261,7 @@ func (g *Gateway) readImageRequest(w http.ResponseWriter, r *http.Request, st *r
 			info.Images, _ = strconv.ParseInt(s, 10, 64)
 		case "prompt":
 			info.PromptBytes = len(v)
+			st.controlBody, _ = json.Marshal(map[string]string{"prompt": string(v)})
 		}
 	}, "model", "stream", "n", "prompt")
 	if gerr != nil {

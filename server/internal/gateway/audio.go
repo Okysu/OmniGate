@@ -22,6 +22,7 @@ package gateway
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"mime"
@@ -71,6 +72,7 @@ func (g *Gateway) readAudioRequest(w http.ResponseWriter, r *http.Request, st *r
 				info.Stream, _ = strconv.ParseBool(s)
 			case "prompt":
 				info.PromptBytes = len(v)
+				st.controlBody, _ = json.Marshal(map[string]string{"prompt": string(v)})
 			}
 		}, "model", "stream", "prompt")
 	if gerr != nil {

@@ -187,6 +187,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { title: '用户', to: '/console/admin/users', icon: Users, permission: 'users.read' },
       { title: '用户组', to: '/console/admin/groups', icon: UsersRound, permission: 'users.read' },
       { title: '审计日志', to: '/console/admin/audit', icon: FileClock, permission: 'audit.read' },
+      { title: '管控系统', to: '/console/admin/control', icon: SlidersHorizontal, permission: 'settings.write' },
       {
         title: '系统设置',
         to: '/console/admin/settings',

@@ -39,6 +39,7 @@ const placeholderRoutes: RouteRecordRaw[] = NAV_ITEMS
 
 /** Every authenticated page, relative to {@link CONSOLE_BASE}. */
 const consoleRoutes: RouteRecordRaw[] = [
+  { path: 'admin/control', name: 'control', component: () => import('@/views/admin/ControlView.vue'), meta: { title: '管控系统', permission: 'settings.write' } },
   {
     path: '',
     name: 'overview',

@@ -28,6 +28,7 @@ import (
 	"omnigate/internal/billing"
 	"omnigate/internal/channel"
 	"omnigate/internal/config"
+	"omnigate/internal/control"
 	"omnigate/internal/gateway"
 	"omnigate/internal/identity"
 	"omnigate/internal/journal"
@@ -55,6 +56,7 @@ var (
 )
 
 type App struct {
+	control   *control.Service
 	draining  atomic.Bool // set on shutdown: readiness reports 503
 	opts      Options
 	cfg       *config.Config
@@ -192,8 +194,15 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *db.DB,
 	if err != nil {
 		return nil, err
 	}
+	ctl, err := newControl(pool, keys, rec, admin, r6.notify, cfg)
+	if err != nil {
+		return nil, err
+	}
+	// Build the gateway with control enabled for every data-plane transport.
 	gw := gateway.New(keySvc, reg, prices, gatewayBilling(bill, opts), subs, logs, log, gateway.Options{UserAgent: ua, Limits: r5.settings, Routes: r5.routes,
-		Usage: r7.limits, Journal: jrn, Affinity: r5.affinity, Account: accountSource{bill: bill, subs: subs}})
+		Usage: r7.limits, Journal: jrn, Affinity: r5.affinity, Account: accountSource{bill: bill, subs: subs}, Control: ctl})
+	ctl.ReviewModels = gw.ControlReviewModels
+	ctl.OnReview = gw.ControlReview
 	handleJournal(jrn, gw, logs)
 	r5.routesH = routing.NewHandler(r5.routes, users, gw)
 	var web http.Handler
@@ -213,8 +222,9 @@ func New(ctx context.Context, cfg *config.Config, log *slog.Logger, pool *db.DB,
 	plazaH := plaza.NewHandler(plaza.NewInfoService(pool, rec), reg, prices, subs, r5.settings, cur)
 	plazaH.Groups = r7.groups
 	return &App{
-		opts: opts,
-		cfg:  cfg, log: log, pool: pool, providers: providers, currency: cur,
+		control: ctl,
+		opts:    opts,
+		cfg:     cfg, log: log, pool: pool, providers: providers, currency: cur,
 		authH:    authH,
 		adminH:   admin,
 		registry: reg,
@@ -355,6 +365,7 @@ func (a *App) Handler() http.Handler {
 			a.r6.h.Routes(r)
 			a.r7.limitsH.Routes(r)
 			r.Route("/admin", func(r chi.Router) {
+				a.control.AdminRoutes(r)
 				a.r6.h.AdminRoutes(r)
 				a.adminH.Routes(r)
 				a.r7.groupsH.AdminRoutes(r)
