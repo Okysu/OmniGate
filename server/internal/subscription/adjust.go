@@ -71,21 +71,6 @@ func compatibleRule(a, b Rule, syncWeights bool) bool {
 		reflect.DeepEqual(a.PluginVersionID, b.PluginVersionID)
 }
 
-func validateRetiredRuleIDs(planRules []Rule, retired []string) error {
-	if len(retired) > maxRules {
-		return invalid(map[string]any{"removeSubscriptionRuleIds": fmt.Sprintf("最多移除 %d 条规则", maxRules)})
-	}
-	for _, id := range retired {
-		if !ruleIDPattern.MatchString(id) {
-			return invalid(map[string]any{"removeSubscriptionRuleIds": "规则 ID 无效"})
-		}
-		if slices.ContainsFunc(planRules, func(rule Rule) bool { return rule.ID == id }) {
-			return invalid(map[string]any{"removeSubscriptionRuleIds": fmt.Sprintf("规则 %s 仍在套餐中，请先从套餐移除", id)})
-		}
-	}
-	return nil
-}
-
 func (s *Service) syncPlanRuleFields(ctx context.Context, q db.Querier, plan *Plan, now time.Time, patch PlanPatch) (int, error) {
 	// Match model synchronization exactly, including temporarily disabled users
 	// and subscriptions that have not started yet. Otherwise those snapshots
@@ -104,14 +89,7 @@ func (s *Service) syncPlanRuleFields(ctx context.Context, q db.Querier, plan *Pl
 	}
 	count := 0
 	for _, sub := range subs {
-		originalCount := len(sub.Rules)
-		if len(patch.RemoveSubscriptionRuleIDs) > 0 {
-			sub.Rules = slices.DeleteFunc(sub.Rules, func(rule Rule) bool {
-				return slices.Contains(patch.RemoveSubscriptionRuleIDs, rule.ID)
-			})
-		}
-		removed := len(sub.Rules) < originalCount
-		changed := removed
+		changed := false
 		for i, old := range sub.Rules {
 			next, ok := byID[old.ID]
 			if !ok || (!patch.SyncSubscriptionLimits && !patch.SyncSubscriptionWeights) {
@@ -147,9 +125,6 @@ func (s *Service) syncPlanRuleFields(ctx context.Context, q db.Querier, plan *Pl
 			if len(sub.Rules) > maxRules {
 				return 0, invalid(map[string]any{"syncSubscriptionRules": fmt.Sprintf("订阅 %s 合并后超过 %d 条规则", sub.ID, maxRules)})
 			}
-		}
-		if removed && len(sub.Rules) == 0 {
-			return 0, invalid(map[string]any{"removeSubscriptionRuleIds": fmt.Sprintf("订阅 %s 至少需保留一条规则", sub.ID)})
 		}
 		if changed {
 			if err := saveQuotaRules(ctx, q, sub, now); err != nil {
