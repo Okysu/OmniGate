@@ -77,3 +77,7 @@
 `PATCH /api/admin/billing/plans/{id}` 可传 `syncSubscriptionRules: true`，默认关闭。
 按规则 ID 将套餐中缺失的规则追加到有效订阅；同 ID 规则不覆盖，不删除老规则，不清零用量，不修改起止时间或刷新时间。新规则只统计同步后结算的请求，不追溯历史；重复同步保留新增规则已累计的用量。合并超过规则数量上限时整个保存回滚。
 可同时开启 `syncSubscriptionModels`，原子同步模型与新增限制；额度上限、模型倍率仍由各自开关控制。审计记录 `syncedSubscriptionRules`。编辑套餐即使模型列表没有再次变化，也可同步当前模型列表。
+
+### 从老订阅移除已退役的规则
+
+`PATCH /api/admin/billing/plans/{id}` 可传 `removeSubscriptionRuleIds`，例如 `["hydrogen-total"]`。这些 ID 必须已从编辑后的套餐规则中移除。接口只从尚未到期的有效订阅快照移除指定规则，保留其他规则、使用记录和起止时间。可以同时传新规则列表与 `syncSubscriptionModels`。如果任一订阅将因此失去全部规则，整次更新回滚。

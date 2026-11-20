@@ -194,6 +194,8 @@ type PlanPatch struct {
 	SyncSubscriptionWeights bool
 	// Append missing rule IDs without rewriting existing rules or usage.
 	SyncSubscriptionRules bool
+	// Remove only explicitly named, retired rule IDs from active snapshots.
+	RemoveSubscriptionRuleIDs []string
 }
 
 func validatePlan(in *PlanInput) error {
@@ -383,8 +385,8 @@ func (s *Service) CreatePlan(ctx context.Context, actor Actor, in PlanInput, met
 	return p, nil
 }
 
-// UpdatePlan applies patch with optimistic locking. Existing subscriptions keep
-// their snapshots.
+// UpdatePlan applies patch with optimistic locking. Subscription snapshots are
+// updated only for the explicitly requested synchronization operations.
 func (s *Service) UpdatePlan(ctx context.Context, actor Actor, id uuid.UUID, patch PlanPatch, meta RequestMeta) (*Plan, error) {
 	now := s.now()
 	var p *Plan
@@ -437,6 +439,9 @@ func (s *Service) UpdatePlan(ctx context.Context, actor Actor, id uuid.UUID, pat
 		if err := validatePlan(&in); err != nil {
 			return err
 		}
+		if err := validateRetiredRuleIDs(in.Rules, patch.RemoveSubscriptionRuleIDs); err != nil {
+			return err
+		}
 		if patch.Rules != nil {
 			// Saved rules re-resolve their custom meters to the newest
 			// approved plugin version; otherwise the stored pins are kept.
@@ -460,7 +465,7 @@ func (s *Service) UpdatePlan(ctx context.Context, actor Actor, id uuid.UUID, pat
 			return err
 		}
 		md := map[string]any{"before": planAudit(cur), "after": planAudit(p)}
-		if patch.SyncSubscriptionLimits || patch.SyncSubscriptionWeights || patch.SyncSubscriptionRules {
+		if patch.SyncSubscriptionLimits || patch.SyncSubscriptionWeights || patch.SyncSubscriptionRules || len(patch.RemoveSubscriptionRuleIDs) > 0 {
 			count, err := s.syncPlanRuleFields(ctx, tx, p, now, patch)
 			if err != nil {
 				return err
@@ -473,6 +478,10 @@ func (s *Service) UpdatePlan(ctx context.Context, actor Actor, id uuid.UUID, pat
 			}
 			if patch.SyncSubscriptionRules {
 				md["syncedSubscriptionRules"] = count
+			}
+			if len(patch.RemoveSubscriptionRuleIDs) > 0 {
+				md["removedSubscriptionRuleIds"] = patch.RemoveSubscriptionRuleIDs
+				md["syncedSubscriptionRuleSnapshots"] = count
 			}
 		}
 		if patch.SyncSubscriptionModels {

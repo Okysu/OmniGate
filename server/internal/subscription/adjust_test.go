@@ -212,3 +212,78 @@ func TestSyncMissingRulesAndModelsIncludesFutureSubscriptions(t *testing.T) {
 		t.Fatalf("future snapshot: %+v %v", sub, err)
 	}
 }
+
+func TestRemoveRetiredSubscriptionRulePreservesSharedQuota(t *testing.T) {
+	f := newFixture(t)
+	u := f.user(identity.RoleUser)
+	admin := f.user(identity.RoleSystemAdmin)
+	total := Rule{ID: "total", Meter: MeterCharge, Limit: "24", Window: Window{Kind: WindowLifetime}, ModelWeights: map[string]string{"flash": "0.5"}}
+	cap := Rule{ID: "hydrogen-total", Meter: MeterCharge, Limit: "12", Window: Window{Kind: WindowLifetime}, Models: []string{"hydrogen"}}
+	plan := f.plan(PlanInput{Models: []string{"hydrogen", "flash"}, Rules: []Rule{total, cap}})
+	old, _ := f.grant(u.ID, plan.ID, 1)
+	f.record(old.ID, "hydrogen", protocol.Usage{}, "12", f.now)
+	f.record(old.ID, "flash", protocol.Usage{}, "4", f.now)
+	before := f.rulesOf(u.ID, old.ID)["total"]
+	if d := f.decide(u.ID, "hydrogen", f.now); d.SubscriptionID != nil {
+		t.Fatal("Hydrogen was covered after reaching its dedicated cap")
+	}
+
+	patch := PlanPatch{Version: plan.Version, RemoveSubscriptionRuleIDs: []string{cap.ID}}
+	if _, err := f.svc.UpdatePlan(f.ctx, admin, plan.ID, patch, RequestMeta{}); err == nil {
+		t.Fatal("removed a rule still present on the plan")
+	}
+	rules := []Rule{total}
+	models := []string{"hydrogen", "flash", "neon", "carbon"}
+	patch.Rules = &rules
+	patch.Models = &models
+	patch.SyncSubscriptionModels = true
+	updated, err := f.svc.UpdatePlan(f.ctx, admin, plan.ID, patch, RequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Rules) != 1 || !reflect.DeepEqual(updated.Models, models) {
+		t.Fatalf("updated plan: %+v", updated)
+	}
+	got := f.rulesOf(u.ID, old.ID)
+	if len(got) != 1 || !reflect.DeepEqual(got["total"], before) || got["total"].Used != "14" {
+		t.Fatalf("changed shared quota: before=%+v after=%+v", before, got)
+	}
+	current, err := getSub(f.ctx, f.pool, old.ID, false)
+	if err != nil || !current.StartsAt.Equal(old.StartsAt) || !current.EndsAt.Equal(old.EndsAt) || !reflect.DeepEqual(current.Models, models) {
+		t.Fatalf("updated snapshot: %+v %v", current, err)
+	}
+	for _, model := range []string{"hydrogen", "neon", "carbon"} {
+		if d := f.decide(u.ID, model, f.now); d.SubscriptionID == nil || *d.SubscriptionID != old.ID {
+			t.Fatalf("%s did not use the shared quota: %+v", model, d)
+		}
+	}
+	newSub, _ := f.grant(f.user(identity.RoleUser).ID, plan.ID, 1)
+	if len(newSub.Rules) != 1 || !reflect.DeepEqual(newSub.Models, models) {
+		t.Fatalf("new subscription: %+v", newSub)
+	}
+}
+
+func TestRemoveRetiredSubscriptionRuleCannotLeaveAnEmptySnapshot(t *testing.T) {
+	f := newFixture(t)
+	u := f.user(identity.RoleUser)
+	admin := f.user(identity.RoleSystemAdmin)
+	plan := f.plan(PlanInput{Rules: []Rule{sessionRule("10")}})
+	old, _ := f.grant(u.ID, plan.ID, 1)
+	rules := []Rule{{ID: "total", Meter: MeterCharge, Limit: "24", Window: Window{Kind: WindowLifetime}}}
+	patch := PlanPatch{Version: plan.Version, Rules: &rules, RemoveSubscriptionRuleIDs: []string{plan.Rules[0].ID}}
+	if _, err := f.svc.UpdatePlan(f.ctx, admin, plan.ID, patch, RequestMeta{}); err == nil {
+		t.Fatal("removed the only rule without a replacement")
+	}
+	snapshot := f.rulesOf(u.ID, old.ID)
+	if len(snapshot) != 1 || snapshot[plan.Rules[0].ID].Limit != "10" {
+		t.Fatalf("failed sync changed rules: %+v", snapshot)
+	}
+	patch.SyncSubscriptionRules = true
+	if _, err := f.svc.UpdatePlan(f.ctx, admin, plan.ID, patch, RequestMeta{}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot = f.rulesOf(u.ID, old.ID)
+	if len(snapshot) != 1 || snapshot["total"].Limit != "24" {
+		t.Fatalf("replacement did not sync atomically: %+v", snapshot)
+	}
+}
